@@ -225,7 +225,23 @@ def bootstrap(
 @app.command()
 def learn() -> None:
     """Monthly learning loop: batch refits, champion/challenger, post-mortems."""
-    _not_implemented("learn", "Phase 7")
+    import os
+
+    from lab.learn.loop import run_learn
+    from lab.store import db
+
+    config = load_config()
+    conn = db.connect(config["storage"]["db_path"])
+    llm = None
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        from lab.news.extract import LlmClient
+
+        llm = LlmClient(conn, config)
+    try:
+        summary = run_learn(conn, config, llm)
+    finally:
+        conn.close()
+    typer.echo(f"learn: {summary}")
 
 
 if __name__ == "__main__":

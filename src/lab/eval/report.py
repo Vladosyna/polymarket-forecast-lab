@@ -82,6 +82,13 @@ Positive = the model tends to be early. Needs no resolutions.</p>
 </table>
 {% else %}<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no forecasts with t+24h snapshots yet.</p>{% endif %}
 
+<h2>Lessons digest (trailing quarter)</h2>
+{% if lessons.n %}
+<p class="note">{{ lessons.n }} post-mortems in the last {{ lessons.window_days }} days.
+Miss error sources: {{ lessons.miss_error_sources }}</p>
+<ul>{% for note in lessons.sample_notes %}<li class="note">{{ note }}</li>{% endfor %}</ul>
+{% else %}<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no post-mortems yet.</p>{% endif %}
+
 <h2>LLM spend</h2>
 <p>Cumulative: ${{ "%.2f"|format(llm_total) }} — today: ${{ "%.2f"|format(llm_today) }}
 (daily cap ${{ "%.2f"|format(llm_cap) }})</p>
@@ -172,8 +179,11 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
     from lab.util import now_utc
     llm_today = llm_spend_today(conn, utc_date_str(now_utc()))
 
+    from lab.learn.postmortem import lessons_digest
+
     html = Environment().from_string(TEMPLATE).render(
         generated_at=now_utc_iso(),
+        lessons=lessons_digest(conn),
         health=health,
         skill_rows=skill_rows,
         calibration_plot=calibration_plot,
