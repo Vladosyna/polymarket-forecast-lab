@@ -50,10 +50,12 @@ collect:
   # Order-book levels stored per side in snapshots (historical depth is
   # unrecoverable later; models don't consume it yet).
   book_depth_levels: 10
-  # Global async token bucket shared by all Polymarket hosts.
+  # Global async token bucket shared by all Polymarket hosts. Brief section 3
+  # notes read limits are generous (thousands per 10s); this stays well below
+  # that while cutting the ~4.4k-market tail-tier round from ~15min to ~7.5min.
   rate_limit:
-    requests_per_second: 5
-    burst: 10
+    requests_per_second: 10
+    burst: 20
   # Kill file: when present, all polling halts within one cycle.
   pause_file: data/PAUSE
 
