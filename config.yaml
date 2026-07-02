@@ -1,0 +1,121 @@
+# Polymarket Forecast Lab configuration.
+# All defaults are documented; change values here, not in code.
+
+# --- Universe -----------------------------------------------------------
+universe:
+  # One universe sync per hour (brief section 3).
+  sync_interval_minutes: 60
+  # Binary markets only in v1.
+  binary_only: true
+  # Skip sub-24h crypto "pulse" markets entirely (brief Phase 1).
+  skip_sub_24h_crypto: true
+  # Tiering thresholds applied to Gamma liquidity/volume fields (USD).
+  tiers:
+    liquid:
+      min_liquidity: 10000
+      min_volume: 50000
+    tail:
+      min_liquidity: 1000
+      min_volume: 5000
+    # Anything below tail thresholds -> 'ignored'.
+  # Priority categories for forecasting (brief section 3 universe policy).
+  priority_categories:
+    - economics        # P1: econ data releases & central-bank decisions
+    - weather          # P2: model-drivable where present
+    - politics         # P3: long-horizon (>=30d) politics/geopolitics
+    - geopolitics      # P3
+    - entertainment    # P4: awards, base-rate drivable
+  # Structurally unforecastable: never forecast targets, kept out of universe
+  # except where noted (calibration stats keep extreme-priced markets).
+  excluded_categories:
+    - crypto
+    - equities
+  # Markets priced beyond these bounds stay in calibration stats but are
+  # never forecast targets (oracle/dispute tail risk dominates).
+  forecast_price_bounds: [0.05, 0.95]
+  # Null control: random sample of sports markets, cheap models only.
+  null_control:
+    category: sports
+    sample_size: 30
+    random_seed: 42
+
+# --- Collection ---------------------------------------------------------
+collect:
+  snapshot_interval_minutes:
+    liquid: 5
+    tail: 60
+  resolution_poll_minutes: 30
+  # Global async token bucket shared by all Polymarket hosts.
+  rate_limit:
+    requests_per_second: 5
+    burst: 10
+  # Kill file: when present, all polling halts within one cycle.
+  pause_file: data/PAUSE
+
+# --- Forecasting --------------------------------------------------------
+forecast:
+  # Once per market per day per model...
+  cadence_hours: 24
+  # ...plus an extra forecast when |24h price move| exceeds this.
+  price_move_trigger: 0.10
+  # Probabilities clamped to this range before writing to the ledger.
+  p_clamp: [0.01, 0.99]
+  # Price freshness guard (brief guardrail 13): skip forecast if the latest
+  # snapshot is older than this, per tier.
+  max_snapshot_age_minutes:
+    liquid: 15
+    tail: 90
+  # M3 runs only on the liquid tier: top-K by liquidity within priority
+  # categories -- a deterministic rule, never editorial judgment.
+  m3_top_k: 20
+
+# --- LLM ----------------------------------------------------------------
+llm:
+  model: claude-sonnet-4-5
+  # Hard daily USD cap enforced in code before each call.
+  daily_cost_cap_usd: 5.00
+
+# --- M3 aggregation defaults (refit monthly via `lab learn`) -------------
+m3:
+  k: 0.15                 # per-item log-odds contribution scale
+  tau_days: 5             # recency decay time constant
+  max_shift_logodds: 0.8  # cap on total shift per run
+
+# --- Evaluation ---------------------------------------------------------
+eval:
+  calibration_bins: 10
+  bootstrap_iterations: 2000
+  # Honesty thresholds (brief section 7).
+  n_insufficient: 200
+  n_preliminary: 500
+  # Reporting windows: all-time and trailing-90-days only. No cherry-picking.
+  windows: [all_time, trailing_90d]
+  clv_horizons_hours: [24, 72]
+
+# --- Shadow portfolio (SIMULATION only) ----------------------------------
+shadow:
+  bankroll_sim_usd: 10000
+  min_edge: 0.05
+  max_spread: 0.03
+  min_depth_usd: 500
+  entry_price_bounds: [0.05, 0.95]
+  kelly_fraction: 0.2
+  per_market_cap: 0.05
+  per_category_cap: 0.20
+  # Slippage haircut proportional to (stake / visible depth), capped.
+  slippage_coefficient: 0.5
+  slippage_cap: 0.02
+
+# --- Learning loop (monthly `lab learn`) ---------------------------------
+learn:
+  m3_min_resolved: 150     # gate for M3 aggregator walk-forward fit
+  m4_min_resolved_per_category: 100  # equal weights below this
+  postmortem_decile: 0.10  # top decile of misses and wins each month
+
+# --- Storage -------------------------------------------------------------
+storage:
+  db_path: data/lab.db
+  snapshots_dir: data/snapshots
+  models_dir: data/models
+  logs_dir: data/logs
+  reports_dir: reports

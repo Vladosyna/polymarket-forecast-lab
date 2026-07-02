@@ -1,0 +1,15 @@
+# Data and generated artifacts (crown jewels live outside git; back them up separately)
+data/
+reports/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+dist/
+build/
+*.egg-info/
