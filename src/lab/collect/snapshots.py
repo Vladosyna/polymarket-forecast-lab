@@ -2,10 +2,14 @@
 
 Rows are keyed by (ts floored to the tier cadence, condition_id); the store
 drops duplicates, so restarts and overlapping runs cannot double-write.
+Full book depth (top-N levels) is stored alongside top-of-book because the
+historical depth cannot be re-collected later; current models don't consume
+it, future microstructure work might.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -37,6 +41,7 @@ async def snapshot_tier(
         return 0
     bucket_minutes = config["collect"]["snapshot_interval_minutes"][tier]
     ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
+    depth_levels = config["collect"].get("book_depth_levels", 10)
 
     rows: list[dict] = []
     for m in markets:
@@ -60,6 +65,8 @@ async def snapshot_tier(
             "bid_depth_usd": book.depth_usd("bid"),
             "ask_depth_usd": book.depth_usd("ask"),
             "last_trade_price": None,  # populated later if a model needs it
+            "bids_json": json.dumps(book.top_levels("bid", depth_levels)),
+            "asks_json": json.dumps(book.top_levels("ask", depth_levels)),
         })
     written = store.append(rows)
     log.info("snapshot round done",

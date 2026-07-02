@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from lab.store.snapshots import SnapshotStore, floor_ts_bucket
+from lab.store.snapshots import SNAPSHOT_SCHEMA, SnapshotStore, floor_ts_bucket
 
 
 def _row(ts: str, cid: str, mid: float = 0.5) -> dict:
@@ -65,3 +65,38 @@ def test_latest_per_market(tmp_path):
     ])
     latest = store.latest_per_market(["2026-07-02"])
     assert latest["mid"].item() == 0.6
+
+
+def test_depth_columns_roundtrip(tmp_path):
+    import json
+
+    store = SnapshotStore(tmp_path)
+    row = _row("2026-07-02T13:45:00+00:00", "a")
+    row["bids_json"] = json.dumps([[0.49, 100.0], [0.48, 250.0]])
+    row["asks_json"] = json.dumps([[0.51, 80.0], [0.53, 300.0]])
+    store.append([row])
+    df = store.read_range(["2026-07-02"])
+    bids = json.loads(df["bids_json"].item())
+    assert bids == [[0.49, 100.0], [0.48, 250.0]]  # best-first, lossless
+
+
+def test_old_partitions_without_depth_still_merge(tmp_path):
+    """Partitions written before the depth columns existed read as nulls."""
+    import polars as pl
+
+    store = SnapshotStore(tmp_path)
+    # Simulate a pre-depth partition: same layout minus the new columns.
+    old = _row("2026-07-02T13:40:00+00:00", "a")
+    old.pop("bids_json", None), old.pop("asks_json", None)
+    legacy_schema = {k: v for k, v in SNAPSHOT_SCHEMA.items()
+                     if k not in ("bids_json", "asks_json")}
+    path = tmp_path / "date=2026-07-02" / "snapshots.parquet"
+    path.parent.mkdir(parents=True)
+    pl.DataFrame([old], schema=legacy_schema).write_parquet(path)
+
+    # New-schema rows append into the same partition without breaking.
+    assert store.append([_row("2026-07-02T13:45:00+00:00", "a")]) == 1
+    df = store.read_range(["2026-07-02"]).sort("ts")
+    assert len(df) == 2
+    assert df["bids_json"][0] is None      # legacy row -> null depth
+    assert df["mid"][0] == 0.5             # legacy data intact

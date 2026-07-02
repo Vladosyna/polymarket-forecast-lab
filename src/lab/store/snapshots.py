@@ -28,6 +28,11 @@ SNAPSHOT_SCHEMA = {
     "bid_depth_usd": pl.Float64,
     "ask_depth_usd": pl.Float64,
     "last_trade_price": pl.Float64,
+    # Full book depth (added 2026-07-02, additive/non-breaking): JSON arrays
+    # of best-first [price, size] pairs, up to collect.book_depth_levels.
+    # Null in partitions written before the change.
+    "bids_json": pl.String,
+    "asks_json": pl.String,
 }
 
 
@@ -54,6 +59,7 @@ class SnapshotStore:
         """Append rows, deduplicating on (ts, condition_id). Returns rows written."""
         if not rows:
             return 0
+        rows = [{col: r.get(col) for col in SNAPSHOT_SCHEMA} for r in rows]
         df = pl.DataFrame(rows, schema=SNAPSHOT_SCHEMA)
         written = 0
         # A batch can straddle midnight; group rows into their date partitions.
@@ -68,7 +74,8 @@ class SnapshotStore:
                 part = part.join(keys, on=["ts", "condition_id"], how="anti")
                 if part.is_empty():
                     continue
-                merged = pl.concat([existing, part], how="vertical")
+                # diagonal: partitions written before a column was added get nulls.
+                merged = pl.concat([existing, part], how="diagonal")
             else:
                 merged = part
             merged.write_parquet(path)
@@ -82,7 +89,7 @@ class SnapshotStore:
         ]
         if not frames:
             return pl.DataFrame(schema=SNAPSHOT_SCHEMA)
-        return pl.concat(frames, how="vertical")
+        return pl.concat(frames, how="diagonal")
 
     def latest_per_market(self, dates: list[str]) -> pl.DataFrame:
         df = self.read_range(dates)

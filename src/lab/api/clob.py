@@ -55,6 +55,14 @@ class OrderBook(BaseModel):
         best = self.best_bid if side == "bid" else self.best_ask
         return sum(l.price * l.size for l in levels if l.price == best)
 
+    def top_levels(self, side: str, n: int) -> list[list[float]]:
+        """Best-first [price, size] pairs, up to n levels."""
+        if side == "bid":
+            levels = sorted(self.bids, key=lambda l: l.price, reverse=True)
+        else:
+            levels = sorted(self.asks, key=lambda l: l.price)
+        return [[l.price, l.size] for l in levels[:n]]
+
 
 class ClobClient(BaseClient):
     def __init__(self, bucket: TokenBucket, base_url: str = CLOB_BASE_URL) -> None:
