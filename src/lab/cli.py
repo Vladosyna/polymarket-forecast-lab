@@ -74,44 +74,29 @@ def collect() -> None:
 
 
 @app.command()
+def run() -> None:
+    """One-button orchestrator: collector + scheduled forecast/eval/report/shadow/learn."""
+    from lab.collect.runner import run_orchestrator
+
+    typer.echo("Forecast Lab orchestrator starting (Ctrl+C to stop)...")
+    asyncio.run(run_orchestrator(load_config()))
+
+
+@app.command()
 def forecast() -> None:
     """Generate forecasts for the eligible universe and freeze them in the ledger."""
-    from lab.forecast import build_default_models, run_forecasts
-    from lab.store import db
-    from lab.store.snapshots import SnapshotStore
+    from lab.jobs import run_forecast_job
 
-    from lab.models.m6_consistency import scan_universe, write_m6_forecasts
-
-    config = load_config()
-    conn = db.connect(config["storage"]["db_path"])
-    store = SnapshotStore(config["storage"]["snapshots_dir"])
-    from lab.learn.refit import load_active_artifact
-    from lab.models.m4_ensemble import M4Ensemble
-
-    try:
-        counts = run_forecasts(conn, store, build_default_models(conn, config), config)
-        findings = asyncio.run(scan_universe(conn, store, config))
-        counts["m6_written"] = write_m6_forecasts(conn, store, findings, config)
-        # M4 pools the rows written above, so it runs last.
-        m4 = M4Ensemble(conn, load_active_artifact(config, "m4_weights"))
-        counts["m4_written"] = run_forecasts(conn, store, [m4], config)["written"]
-    finally:
-        conn.close()
+    counts = run_forecast_job(load_config())
     typer.echo(f"forecast run: {counts}")
 
 
 @app.command()
 def eval() -> None:
     """Score resolved forecasts: paired Brier/log-loss, skill with bootstrap CIs."""
-    from lab.eval.run import run_eval
-    from lab.store import db
+    from lab.jobs import run_eval_job
 
-    config = load_config()
-    conn = db.connect(config["storage"]["db_path"])
-    try:
-        summaries = run_eval(conn, config)
-    finally:
-        conn.close()
+    summaries = run_eval_job(load_config())
     if not summaries:
         typer.echo("eval: no resolved paired forecasts yet (INSUFFICIENT DATA)")
     for s in summaries:
@@ -125,38 +110,20 @@ def eval() -> None:
 @app.command()
 def report() -> None:
     """Render the static HTML report from evaluation results."""
-    from lab.eval.report import render_report
-    from lab.store import db
-    from lab.store.snapshots import SnapshotStore
+    from lab.jobs import run_report_job
 
-    config = load_config()
-    conn = db.connect(config["storage"]["db_path"])
-    store = SnapshotStore(config["storage"]["snapshots_dir"])
-    try:
-        path = render_report(conn, store, config)
-    finally:
-        conn.close()
+    path = run_report_job(load_config())
     typer.echo(f"report: {path}")
 
 
 @app.command()
 def shadow() -> None:
     """Run the simulated shadow portfolio (SIMULATION only, no real money)."""
-    from lab.shadow.portfolio import portfolio_summary, run_shadow_entries, settle_resolved
-    from lab.store import db
-    from lab.store.snapshots import SnapshotStore
+    from lab.jobs import run_shadow_job
 
-    config = load_config()
-    conn = db.connect(config["storage"]["db_path"])
-    store = SnapshotStore(config["storage"]["snapshots_dir"])
-    try:
-        settled = settle_resolved(conn)
-        opened = run_shadow_entries(conn, store, config)
-        summary = portfolio_summary(conn, store, config)
-    finally:
-        conn.close()
-    typer.echo(f"shadow (SIMULATION): opened={opened} settled={settled}")
-    typer.echo(f"  {summary}")
+    result = run_shadow_job(load_config())
+    typer.echo(f"shadow (SIMULATION): opened={result['opened']} settled={result['settled']}")
+    typer.echo(f"  {result['summary']}")
 
 
 @app.command()
@@ -225,23 +192,42 @@ def bootstrap(
 @app.command()
 def learn() -> None:
     """Monthly learning loop: batch refits, champion/challenger, post-mortems."""
-    import os
+    from lab.jobs import run_learn_job
 
-    from lab.learn.loop import run_learn
-    from lab.store import db
+    summary = run_learn_job(load_config())
+    typer.echo(f"learn: {summary}")
+
+
+@app.command()
+def ps() -> None:
+    """List our own running instances; flag outdated code versions and duplicates."""
+    import time
+
+    from lab import process_guard
 
     config = load_config()
-    conn = db.connect(config["storage"]["db_path"])
-    llm = None
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        from lab.news.extract import LlmClient
-
-        llm = LlmClient(conn, config)
-    try:
-        summary = run_learn(conn, config, llm)
-    finally:
-        conn.close()
-    typer.echo(f"learn: {summary}")
+    snap = process_guard.report(config)
+    typer.echo(f"current code version: {snap['current_version']}")
+    typer.echo("managed instances:")
+    if not snap["managed"]:
+        typer.echo("  (none registered)")
+    for e in snap["managed"]:
+        age_min = (time.time() - (e.get("start_ts") or time.time())) / 60
+        flags = []
+        if e.get("pid") in snap["flagged_pids"]:
+            flags.append("REDUNDANT/OUTDATED")
+        if e.get("code_version") != snap["current_version"]:
+            flags.append("stale-version")
+        tag = f"  [{' '.join(flags)}]" if flags else ""
+        typer.echo(
+            f"  {e.get('role'):12} pid={e.get('pid'):<7} ver={e.get('code_version')} "
+            f"age={age_min:.0f}min{tag}"
+        )
+    if snap["unmanaged"]:
+        typer.echo("unmanaged lab-looking processes (not registered; consider stopping):")
+        for e in snap["unmanaged"]:
+            age_min = (time.time() - (e.get("start_ts") or time.time())) / 60
+            typer.echo(f"  {e.get('role'):12} pid={e.get('pid'):<7} age={age_min:.0f}min")
 
 
 if __name__ == "__main__":

@@ -56,3 +56,20 @@ def test_dedup_by_url():
     b = Article(title="t2", url="http://x/1", source="s", published_ts=None)
     c = Article(title="t3", url="http://x/2", source="s", published_ts=None)
     assert len(dedup_articles([a, b, c])) == 2
+
+
+def test_parse_accepts_wrapped_object():
+    wrapped = '{"items": ' + VALID + '}'
+    assert parse_evidence_json(wrapped) is not None
+
+
+def test_m3_model_id_deepseek(monkeypatch):
+    from lab.news.extract import m3_model_id, resolve_llm_provider
+
+    cfg = {"llm": {"provider": "deepseek", "api_key_env": "DEEPSEEK_API_KEY"}}
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    assert resolve_llm_provider(cfg) is None
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    assert resolve_llm_provider(cfg) == "deepseek"
+    assert m3_model_id(cfg) == "m3_evidence@deepseek"
+

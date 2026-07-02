@@ -76,9 +76,16 @@ forecast:
 
 # --- LLM ----------------------------------------------------------------
 llm:
-  model: claude-sonnet-4-5
+  # anthropic | deepseek (OpenAI-compatible)
+  provider: deepseek
+  model: deepseek-chat
+  base_url: https://api.deepseek.com/v1
+  api_key_env: DEEPSEEK_API_KEY
   # Hard daily USD cap enforced in code before each call.
   daily_cost_cap_usd: 5.00
+  pricing:
+    input_per_mtok: 0.14
+    output_per_mtok: 0.28
 
 # --- News retrieval (M3) --------------------------------------------------
 news:
@@ -121,6 +128,27 @@ learn:
   m3_min_resolved: 150     # gate for M3 aggregator walk-forward fit
   m4_min_resolved_per_category: 100  # equal weights below this
   postmortem_decile: 0.10  # top decile of misses and wins each month
+
+# --- Orchestrator schedule (`lab run`) ----------------------------------
+# The one-button process keeps the collector running and fires these analytics
+# jobs on cron triggers. All times are UTC (crontab syntax: m h dom mon dow).
+schedule:
+  forecast_cron: "0 2 * * *"    # nightly 02:00 UTC -> forecast, eval, report
+  shadow_cron: "0 3 * * 0"      # weekly Sunday 03:00 UTC -> shadow portfolio
+  learn_cron: "0 4 1 * *"       # monthly, 1st at 04:00 UTC -> learning loop
+  # Run one forecast/eval/report pass immediately on startup so the button
+  # produces visible results without waiting for the first cron fire.
+  run_on_start: true
+  # Missed-run catch-up. If a service's last successful run is older than its
+  # control time (max allowed age), the orchestrator runs it immediately -- on
+  # startup and again whenever the hourly health check notices a window was missed.
+  control:
+    forecast_max_age_hours: 24     # nightly bundle should run at least daily
+    shadow_max_age_hours: 168      # weekly -> 7 days
+    learn_max_age_hours: 720       # monthly -> 30 days
+  # Hourly health/liveness check: re-runs overdue analytics services and forces
+  # a collection cycle if the collector has stalled (liquid snapshots too old).
+  health_check_interval_minutes: 60
 
 # --- Storage -------------------------------------------------------------
 storage:

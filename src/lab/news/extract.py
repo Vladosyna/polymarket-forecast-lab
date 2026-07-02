@@ -1,5 +1,6 @@
-"""LLM evidence extraction (strict JSON) + budget-guarded Anthropic calls.
+"""LLM evidence extraction (strict JSON) + budget-guarded provider calls.
 
+Supports Anthropic (native SDK) and OpenAI-compatible APIs (DeepSeek, etc.).
 The prompt includes the verbatim resolution criteria and instructs the model
 to judge relevance to those criteria, not to the topic. Invalid JSON is
 rejected and retried once; a second failure skips the article batch.
@@ -9,7 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
+
+import httpx
 
 from lab.news.providers import Article
 from lab.store import db as dbmod
@@ -18,10 +22,22 @@ from lab.util import now_utc
 
 log = logging.getLogger(__name__)
 
-# Anthropic API pricing (USD per million tokens), Sonnet-class default.
-# Config override not offered: update alongside the model id if it changes.
-PRICE_IN_PER_MTOK = 3.0
-PRICE_OUT_PER_MTOK = 15.0
+# Default pricing (USD per million tokens) when config omits llm.pricing.
+_PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
+    "anthropic": {
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "model": "claude-sonnet-4-5",
+        "price_in_per_mtok": 3.0,
+        "price_out_per_mtok": 15.0,
+    },
+    "deepseek": {
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "price_in_per_mtok": 0.14,
+        "price_out_per_mtok": 0.28,
+    },
+}
 
 EXTRACTION_SYSTEM = """You extract structured evidence from news articles for probability forecasting.
 Respond ONLY with a JSON array, no prose. Each element:
@@ -55,30 +71,97 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+def _llm_section(config: dict[str, Any]) -> dict[str, Any]:
+    return config.get("llm", {})
+
+
+def resolve_llm_provider(config: dict[str, Any]) -> str | None:
+    """Return the configured provider name when its API key is present."""
+    llm = _llm_section(config)
+    provider = llm.get("provider", "anthropic")
+    defaults = _PROVIDER_DEFAULTS.get(provider, {})
+    key_env = llm.get("api_key_env") or defaults.get("api_key_env", "")
+    if key_env and os.environ.get(key_env):
+        return provider
+    return None
+
+
+def m3_model_id(config: dict[str, Any]) -> str:
+    """Ledger model id; non-Anthropic providers register as challengers."""
+    provider = resolve_llm_provider(config) or _llm_section(config).get("provider", "anthropic")
+    if provider == "anthropic":
+        return "m3_evidence"
+    return f"m3_evidence@{provider}"
+
+
+def create_llm_client(conn, config: dict[str, Any]) -> LlmClient | None:
+    """Build an LLM client when the configured provider's API key is set."""
+    if resolve_llm_provider(config) is None:
+        return None
+    return LlmClient(conn, config)
+
+
 class LlmClient:
-    """Anthropic wrapper with a hard daily USD cap checked BEFORE each call."""
+    """Provider wrapper with a hard daily USD cap checked BEFORE each call."""
 
     def __init__(self, conn, config: dict[str, Any]) -> None:
-        import anthropic
+        llm = _llm_section(config)
+        provider = llm.get("provider", "anthropic")
+        defaults = _PROVIDER_DEFAULTS.get(provider, {})
+        key_env = llm.get("api_key_env") or defaults.get("api_key_env", "")
+        api_key = os.environ.get(key_env, "")
+        if not api_key:
+            raise ValueError(f"LLM provider {provider!r} requires {key_env}")
 
-        self._client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
         self._conn = conn
-        self._model = config["llm"]["model"]
-        self._cap = float(config["llm"]["daily_cost_cap_usd"])
+        self._provider = provider
+        self._model = llm.get("model") or defaults.get("model", "")
+        self._cap = float(llm.get("daily_cost_cap_usd", 5.0))
+        pricing = llm.get("pricing", {})
+        self._price_in = float(pricing.get("input_per_mtok", defaults.get("price_in_per_mtok", 0)))
+        self._price_out = float(pricing.get("output_per_mtok", defaults.get("price_out_per_mtok", 0)))
+
+        if provider == "anthropic":
+            import anthropic
+
+            self._anthropic = anthropic.Anthropic(api_key=api_key)
+            self._base_url = None
+            self._api_key = None
+        else:
+            self._anthropic = None
+            self._base_url = (llm.get("base_url") or defaults.get("base_url", "")).rstrip("/")
+            self._api_key = api_key
+            if not self._base_url:
+                raise ValueError(f"LLM provider {provider!r} requires base_url in config")
 
     @property
     def model(self) -> str:
         return self._model
 
+    @property
+    def provider(self) -> str:
+        return self._provider
+
     def spend_today(self) -> float:
         return dbmod.llm_spend_today(self._conn, utc_date_str(now_utc()))
+
+    def _record_spend(self, purpose: str, cost: float) -> None:
+        dbmod.record_llm_spend(self._conn, utc_date_str(now_utc()), purpose, cost)
+        self._conn.commit()
 
     def complete(self, system: str, prompt: str, purpose: str,
                  max_tokens: int = 2000) -> tuple[str, dict[str, Any]]:
         spent = self.spend_today()
         if spent >= self._cap:
             raise BudgetExceeded(f"daily LLM cap reached: ${spent:.2f} >= ${self._cap:.2f}")
-        resp = self._client.messages.create(
+
+        if self._provider == "anthropic":
+            return self._complete_anthropic(system, prompt, purpose, max_tokens)
+        return self._complete_openai_compatible(system, prompt, purpose, max_tokens)
+
+    def _complete_anthropic(self, system: str, prompt: str, purpose: str,
+                            max_tokens: int) -> tuple[str, dict[str, Any]]:
+        resp = self._anthropic.messages.create(
             model=self._model,
             max_tokens=max_tokens,
             system=system,
@@ -86,10 +169,35 @@ class LlmClient:
         )
         tokens_in = resp.usage.input_tokens
         tokens_out = resp.usage.output_tokens
-        cost = (tokens_in * PRICE_IN_PER_MTOK + tokens_out * PRICE_OUT_PER_MTOK) / 1e6
-        dbmod.record_llm_spend(self._conn, utc_date_str(now_utc()), purpose, cost)
-        self._conn.commit()
+        cost = (tokens_in * self._price_in + tokens_out * self._price_out) / 1e6
+        self._record_spend(purpose, cost)
         text = "".join(block.text for block in resp.content if block.type == "text")
+        return text, {"tokens_in": tokens_in, "tokens_out": tokens_out, "cost_usd": cost}
+
+    def _complete_openai_compatible(self, system: str, prompt: str, purpose: str,
+                                    max_tokens: int) -> tuple[str, dict[str, Any]]:
+        payload = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        with httpx.Client(timeout=120.0) as client:
+            resp = client.post(
+                f"{self._base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        usage = data.get("usage", {})
+        tokens_in = int(usage.get("prompt_tokens", 0))
+        tokens_out = int(usage.get("completion_tokens", 0))
+        cost = (tokens_in * self._price_in + tokens_out * self._price_out) / 1e6
+        self._record_spend(purpose, cost)
+        text = data["choices"][0]["message"]["content"]
         return text, {"tokens_in": tokens_in, "tokens_out": tokens_out, "cost_usd": cost}
 
 
@@ -104,6 +212,13 @@ def parse_evidence_json(text: str) -> list[dict[str, Any]] | None:
         data = json.loads(text)
     except json.JSONDecodeError:
         return None
+    if isinstance(data, dict):
+        for key in ("items", "evidence", "results"):
+            if isinstance(data.get(key), list):
+                data = data[key]
+                break
+        else:
+            return None
     if not isinstance(data, list):
         return None
     items: list[dict[str, Any]] = []
@@ -144,7 +259,6 @@ def extract_evidence(llm: LlmClient, question: str, description: str | None,
             usage_total[key] += usage[key]
         items = parse_evidence_json(text)
         if items is not None:
-            # Attach publish timestamps from the source articles.
             for item in items:
                 idx = item.pop("article_index", -1)
                 if 0 <= idx < len(articles):

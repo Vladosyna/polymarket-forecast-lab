@@ -125,6 +125,9 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # Let the collector and orchestrator analytics connections wait on each
+    # other instead of failing with "database is locked" under WAL.
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.executescript(SCHEMA)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
@@ -200,6 +203,17 @@ def append_forecast(conn: sqlite3.Connection, row: dict) -> int:
         },
     )
     return cur.lastrowid
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Upsert a key/value pair into the meta table (allowed by the authorizer)."""
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, value))
+    conn.commit()
+
+
+def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return None if row is None else row["value"]
 
 
 def llm_spend_today(conn: sqlite3.Connection, date_utc: str) -> float:

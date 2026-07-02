@@ -111,7 +111,7 @@ Requirements: Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone <this-repo> forecast-lab && cd forecast-lab
 uv sync
-cp .env.example .env        # add ANTHROPIC_API_KEY (needed for M3 only)
+cp .env.example .env        # add DEEPSEEK_API_KEY (or ANTHROPIC_API_KEY) for M3
 uv run lab --help
 uv run pytest               # includes the scope-guard tripwire test
 ```
@@ -133,8 +133,27 @@ cost caps) — every default is documented inline.
 | `lab export` | Latest forecast per (market, model) as JSONL — the integration point |
 | `lab status` | Data health: snapshot freshness, gaps, watcher lag, spend |
 | `lab learn` | Monthly learning loop: batch refits, champion/challenger, post-mortems |
+| `lab run` | **One-button orchestrator**: collector + scheduled forecast/eval/report/shadow/learn in a single process |
 
-Typical operation (always-on Linux box):
+### One button (recommended)
+
+`lab run` keeps the collector alive and fires the analytics jobs itself on the
+schedule in `config.yaml` (`schedule:` section, all UTC): forecast+eval+report
+nightly, shadow weekly, learn monthly. It also runs one forecast/eval/report
+pass on startup (`schedule.run_on_start`). No cron or systemd needed.
+
+On **Windows**, just double-click **`start.bat`** — it launches the
+orchestrator plus the dashboard (http://localhost:8501) in separate windows.
+Press `Ctrl+C` in the orchestrator window to stop. To halt polling without
+killing the process, create the kill file `data/PAUSE` (delete it to resume).
+
+```bash
+uv run lab run            # cross-platform equivalent of start.bat (no dashboard)
+```
+
+### Manual operation (advanced)
+
+If you prefer external scheduling (cron / systemd) instead of `lab run`:
 
 ```bash
 uv run lab collect                      # under tmux / systemd
