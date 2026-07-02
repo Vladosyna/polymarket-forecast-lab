@@ -73,19 +73,57 @@ def collect() -> None:
 @app.command()
 def forecast() -> None:
     """Generate forecasts for the eligible universe and freeze them in the ledger."""
-    _not_implemented("forecast", "Phase 3")
+    from lab.forecast import build_default_models, run_forecasts
+    from lab.store import db
+    from lab.store.snapshots import SnapshotStore
+
+    config = load_config()
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    try:
+        counts = run_forecasts(conn, store, build_default_models(config), config)
+    finally:
+        conn.close()
+    typer.echo(f"forecast run: {counts}")
 
 
 @app.command()
 def eval() -> None:
     """Score resolved forecasts: paired Brier/log-loss, skill with bootstrap CIs."""
-    _not_implemented("eval", "Phase 3")
+    from lab.eval.run import run_eval
+    from lab.store import db
+
+    config = load_config()
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        summaries = run_eval(conn, config)
+    finally:
+        conn.close()
+    if not summaries:
+        typer.echo("eval: no resolved paired forecasts yet (INSUFFICIENT DATA)")
+    for s in summaries:
+        r = s["result"]
+        typer.echo(
+            f"  {s['model_id']} [{s['window']}] n={r.n} skill={r.skill:+.4f} "
+            f"CI=[{r.skill_ci_lo:+.4f},{r.skill_ci_hi:+.4f}] mde={r.mde:.4f}"
+        )
 
 
 @app.command()
 def report() -> None:
     """Render the static HTML report from evaluation results."""
-    _not_implemented("report", "Phase 3")
+    from lab.eval.report import render_report
+    from lab.store import db
+    from lab.store.snapshots import SnapshotStore
+
+    config = load_config()
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    try:
+        path = render_report(conn, store, config)
+    finally:
+        conn.close()
+    typer.echo(f"report: {path}")
 
 
 @app.command()
@@ -95,9 +133,27 @@ def shadow() -> None:
 
 
 @app.command()
-def export() -> None:
+def export(
+    out: str = typer.Option(None, help="Output file; stdout when omitted."),
+) -> None:
     """Emit latest forecast per (market, model) as JSONL -- the downstream integration point."""
-    _not_implemented("export", "Phase 3")
+    from lab.export import export_jsonl
+    from lab.store import db
+
+    config = load_config()
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        lines = list(export_jsonl(conn))
+    finally:
+        conn.close()
+    if out:
+        from pathlib import Path
+
+        Path(out).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        typer.echo(f"export: {len(lines)} rows -> {out}")
+    else:
+        for line in lines:
+            typer.echo(line)
 
 
 @app.command()
@@ -106,6 +162,37 @@ def status() -> None:
     from lab.collect.status import format_status, gather_status
 
     typer.echo(format_status(gather_status(load_config())))
+
+
+@app.command()
+def bootstrap(
+    sample_size: int = typer.Option(2000, help="Top-volume resolved markets to fetch price paths for."),
+    min_volume: float = typer.Option(10000.0, help="Minimum lifetime volume (USD) for the sample."),
+    skip_fetch: bool = typer.Option(False, help="Reuse existing observations.parquet; refit only."),
+) -> None:
+    """Phase 2: historical bootstrap -- download resolved markets, fit M1/M2 artifacts."""
+    from lab.learn import bootstrap as bs
+    from lab.learn.plots import plot_m1_curves
+    from lab.learn.refit import fit_m1_curves, fit_m2_baserates, save_artifact
+
+    config = load_config()
+    if not skip_fetch:
+        asyncio.run(bs.run_bootstrap(config, sample_size=sample_size, min_volume=min_volume))
+    obs = bs.load_observations(config)
+    typer.echo(f"observations: {len(obs)} rows / {obs['condition_id'].n_unique()} markets")
+
+    m1 = fit_m1_curves(obs.to_dicts())
+    save_artifact(config, "m1_curves", m1)
+    for name, fit in m1["buckets"].items():
+        typer.echo(f"  m1 {name}: alpha={fit['alpha']:.3f} beta={fit['beta']:.3f} n={fit['n']}")
+
+    per_market = obs.group_by("condition_id").first().select("category", "outcome")
+    m2 = fit_m2_baserates(per_market.to_dicts())
+    save_artifact(config, "m2_baserates", m2)
+    typer.echo(f"  m2 base rates: {len(m2['categories'])} categories")
+
+    for path in plot_m1_curves(m1, config):
+        typer.echo(f"  plot: {path}")
 
 
 @app.command()

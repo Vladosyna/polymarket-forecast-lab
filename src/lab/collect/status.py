@@ -115,9 +115,10 @@ def format_status(status: dict[str, Any]) -> str:
     ]
     for tier, s in status["tiers"].items():
         age = s["last_snapshot_age_min"]
+        age_str = f"{age}min" if age is not None else "never"
         lines.append(
             f"  [{tier}] tracked={s['tracked_markets']} "
-            f"last_snapshot_age={age if age is not None else 'never'}min "
+            f"last_snapshot_age={age_str} "
             f"gaps_24h={s['gaps_24h']} gaps_7d={s['gaps_7d']}"
         )
     lines.append(f"  resolution watcher: {status['resolution_watcher']['closed_unresolved']} closed markets unresolved")
