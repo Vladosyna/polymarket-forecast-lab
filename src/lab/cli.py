@@ -32,6 +32,9 @@ def _not_implemented(command: str, phase: str) -> None:
 @app.callback()
 def main() -> None:
     """Initialize config and logging for every command."""
+    from dotenv import load_dotenv
+
+    load_dotenv()
     setup_logging(load_config())
 
 
@@ -81,7 +84,7 @@ def forecast() -> None:
     conn = db.connect(config["storage"]["db_path"])
     store = SnapshotStore(config["storage"]["snapshots_dir"])
     try:
-        counts = run_forecasts(conn, store, build_default_models(config), config)
+        counts = run_forecasts(conn, store, build_default_models(conn, config), config)
     finally:
         conn.close()
     typer.echo(f"forecast run: {counts}")

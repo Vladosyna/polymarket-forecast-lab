@@ -158,18 +158,28 @@ def price_moves_24h(store: SnapshotStore, config: dict[str, Any]) -> dict[str, f
 
 def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
                   config: dict[str, Any]) -> dict[str, int]:
+    from lab.news.extract import BudgetExceeded
+
     states = eligible_market_states(conn, store, config)
     moves = price_moves_24h(store, config)
     counts = {"eligible_markets": len(states), "written": 0, "abstained": 0, "not_due": 0}
     ts = now_utc().isoformat(timespec="seconds")
+    exhausted: set[str] = set()  # models past their daily budget
     for state in states:
         for model in models:
+            if model.model_id in exhausted:
+                continue
             if not _due(conn, state.condition_id, model.model_id, config,
                         moves.get(state.condition_id)):
                 counts["not_due"] += 1
                 continue
             try:
                 result = model.forecast(state, {})
+            except BudgetExceeded:
+                log.warning("forecast: cost cap hit, disabling model for this run",
+                            extra={"ctx": {"model": model.model_id}})
+                exhausted.add(model.model_id)
+                continue
             except Exception:
                 log.exception("forecast: model failed",
                               extra={"ctx": {"model": model.model_id,
@@ -195,8 +205,10 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
     return counts
 
 
-def build_default_models(config: dict[str, Any]) -> list[Forecaster]:
-    """M0 always; M1/M2 when their active artifacts exist."""
+def build_default_models(conn, config: dict[str, Any]) -> list[Forecaster]:
+    """M0 always; M1/M2 when their active artifacts exist; M3 when a key is set."""
+    import os
+
     from lab.learn.refit import load_active_artifact
     from lab.models.m0_market import M0Market
     from lab.models.m1_debiased import M1Debiased
@@ -213,4 +225,18 @@ def build_default_models(config: dict[str, Any]) -> list[Forecaster]:
         models.append(M2BaseRate(m2_art))
     else:
         log.warning("forecast: no m2_baserates artifact; M2 disabled")
+
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        from lab.models.m3_evidence import M3Evidence, m3_target_ids
+        from lab.news.extract import LlmClient
+        from lab.news.providers import FeedListProvider, GoogleNewsRss
+
+        providers = [GoogleNewsRss()]
+        feeds = config.get("news", {}).get("rss_feeds", [])
+        if feeds:
+            providers.append(FeedListProvider(feeds))
+        models.append(M3Evidence(conn, LlmClient(conn, config), providers, config,
+                                 m3_target_ids(conn, config)))
+    else:
+        log.warning("forecast: no ANTHROPIC_API_KEY; M3 disabled")
     return models

@@ -77,6 +77,11 @@ llm:
   # Hard daily USD cap enforced in code before each call.
   daily_cost_cap_usd: 5.00
 
+# --- News retrieval (M3) --------------------------------------------------
+news:
+  # Google News RSS is always used; extra RSS feeds are optional.
+  rss_feeds: []
+
 # --- M3 aggregation defaults (refit monthly via `lab learn`) -------------
 m3:
   k: 0.15                 # per-item log-odds contribution scale
