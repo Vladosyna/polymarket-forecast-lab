@@ -169,6 +169,33 @@ def _alive_registry_entries(config: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _ancestor_pids(pid: int, max_depth: int = 4) -> set[int]:
+    """PIDs of `pid`'s parent chain, up to `max_depth` hops.
+
+    On Windows, `.venv\\Scripts\\python.exe` can itself be a launcher that
+    spawns the real interpreter as a child (observed on this host: the PID
+    Start-Process/psutil sees for the "python.exe -m lab run" invocation is
+    not the PID `os.getpid()` reports from inside it). That launcher process
+    still matches our cmdline pattern via `find_unmanaged`, so without this
+    guard a freshly started instance immediately "discovers" its own
+    launcher as a foreign duplicate orchestrator and terminates it --
+    killing itself in the process, every time, within seconds of startup.
+    """
+    pids: set[int] = set()
+    try:
+        import psutil
+
+        proc = psutil.Process(pid)
+        for _ in range(max_depth):
+            proc = proc.parent()
+            if proc is None:
+                break
+            pids.add(proc.pid)
+    except Exception:
+        pass
+    return pids
+
+
 def find_unmanaged(config: dict[str, Any]) -> list[dict[str, Any]]:
     """Live lab-looking processes that never registered (e.g. legacy instances)."""
     known = {e.get("pid") for e in _load_registry(config)}
@@ -332,7 +359,11 @@ def enforce(config: dict[str, Any], role: str, act: bool = True) -> dict[str, An
     current = code_version()
     register_self(config, role)
     _dbg(config, "enforce: registered self")
-    entries = _gather_all_live_instances(config)
+    self_pid = os.getpid()
+    protected = _ancestor_pids(self_pid)
+    entries = [e for e in _gather_all_live_instances(config) if e.get("pid") not in protected]
+    if protected:
+        _dbg(config, f"enforce: protected ancestor pids={sorted(protected)}")
     for e in entries:
         if not e.get("managed"):
             _dbg(config, f"enforce: UNMANAGED pid={e.get('pid')} role={e.get('role')} cmd={e.get('cmdline')!r}")
