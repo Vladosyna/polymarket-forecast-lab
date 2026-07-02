@@ -85,10 +85,16 @@ def forecast() -> None:
     config = load_config()
     conn = db.connect(config["storage"]["db_path"])
     store = SnapshotStore(config["storage"]["snapshots_dir"])
+    from lab.learn.refit import load_active_artifact
+    from lab.models.m4_ensemble import M4Ensemble
+
     try:
         counts = run_forecasts(conn, store, build_default_models(conn, config), config)
         findings = asyncio.run(scan_universe(conn, store, config))
         counts["m6_written"] = write_m6_forecasts(conn, store, findings, config)
+        # M4 pools the rows written above, so it runs last.
+        m4 = M4Ensemble(conn, load_active_artifact(config, "m4_weights"))
+        counts["m4_written"] = run_forecasts(conn, store, [m4], config)["written"]
     finally:
         conn.close()
     typer.echo(f"forecast run: {counts}")
@@ -136,7 +142,21 @@ def report() -> None:
 @app.command()
 def shadow() -> None:
     """Run the simulated shadow portfolio (SIMULATION only, no real money)."""
-    _not_implemented("shadow", "Phase 6")
+    from lab.shadow.portfolio import portfolio_summary, run_shadow_entries, settle_resolved
+    from lab.store import db
+    from lab.store.snapshots import SnapshotStore
+
+    config = load_config()
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    try:
+        settled = settle_resolved(conn)
+        opened = run_shadow_entries(conn, store, config)
+        summary = portfolio_summary(conn, store, config)
+    finally:
+        conn.close()
+    typer.echo(f"shadow (SIMULATION): opened={opened} settled={settled}")
+    typer.echo(f"  {summary}")
 
 
 @app.command()
