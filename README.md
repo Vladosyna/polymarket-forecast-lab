@@ -34,6 +34,7 @@ cost caps) — every default is documented inline.
 | Command | Purpose |
 |---|---|
 | `lab sync` | Discover markets from Gamma, tier the universe (liquid / tail / ignored) |
+| `lab bootstrap` | One-time historical bootstrap: download resolved markets, fit M1/M2 artifacts |
 | `lab collect` | Long-running collector: order-book snapshots + resolution watcher |
 | `lab forecast` | Generate forecasts for the eligible universe, freeze in the ledger |
 | `lab eval` | Score resolved forecasts: paired Brier / log loss, skill with bootstrap CIs |
