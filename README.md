@@ -14,6 +14,96 @@ market baseline (Brier score, log loss, calibration curves). A simulated
 code** — order placement, wallets, keys, and CLOB authentication are out of
 scope by design (see "Downstream use & license" below).
 
+## Why this exists
+
+Prediction-market prices are often treated as ground-truth probabilities.
+They're a good prior, but they are not automatically well-calibrated —
+academic work on Polymarket/PredictIt-style markets documents systematic
+long-horizon underconfidence, thin-book noise, and category-specific biases.
+The only honest way to know whether *any* model — statistical, LLM-based, or
+market-derived — beats the market is to freeze a probability before the
+outcome is known and score it after resolution, on a large enough sample to
+say so with a confidence interval instead of a hunch. That's the entire
+project: no trading, no execution, just a measurement instrument run
+continuously against public data.
+
+## How it works
+
+```
+ Gamma API  ──┐
+ CLOB API   ──┼──▶ lab sync / collect ──▶ SQLite (markets, resolutions)
+ Data API   ──┘                       └─▶ Parquet (order-book snapshots)
+                                              │
+                                              ▼
+                          lab forecast  (M0…M6 → M4 ensemble)
+                          ├─ M0 market mid (null baseline)
+                          ├─ M1 horizon-recalibration (logistic, per-bucket)
+                          ├─ M2 category base rates
+                          ├─ M3 LLM evidence pipeline (news → strict-JSON → deterministic aggregator)
+                          ├─ M5 structural nowcasts (weather / macro)
+                          ├─ M6 negRisk coherence scanner
+                          └─ M4 ensemble (log-odds weighted pool, fit per category)
+                                              │
+                                              ▼
+                     forecasts ledger (SQLite, append-only, never UPDATE/DELETE)
+                                              │
+                     ┌────────────────────────┼─────────────────────────┐
+                     ▼                        ▼                         ▼
+              lab eval (paired          lab shadow (simulated       lab learn (monthly:
+              Brier / log-loss vs       portfolio, P&L, no          refits, champion/
+              market, cluster           real money — labeled        challenger promotion,
+              bootstrap CIs)            SIMULATION everywhere)       post-mortems)
+                     │                        │                         │
+                     └────────────────────────┴─────────────────────────┘
+                                              ▼
+                                lab report → static HTML (reports/)
+                                lab export → JSONL (the integration point)
+```
+
+Every forecast row is frozen at write time against the market price captured
+in the *same* snapshot (`p_market_at_ts`) — that pairing is what makes the
+skill measurement honest; nothing is ever retroactively edited. See
+[`CLAUDE.md`](CLAUDE.md) for the full engineering brief (schema, guardrails,
+phase-by-phase acceptance criteria) this repo was built against.
+
+## The model roster
+
+| Model | Type | Edge thesis |
+|---|---|---|
+| `m0_market` | null baseline | market mid — the number every other model must beat |
+| `m1_debiased` | statistical | logistic recalibration of the market price, fit per time-to-resolution bucket; the direction of the bias is *fit*, never hardcoded |
+| `m2_baserate` | statistical | historical base rate by recurring question template, blended in log-odds space |
+| `m3_evidence` | LLM (structured) | news retrieval → strict-JSON evidence extraction → **deterministic** log-odds aggregator (the LLM never writes the final number) |
+| `m5_nowcast` | structural | maps an external quantitative model (open-meteo/NWS ensembles, Cleveland Fed / GDPNow) straight onto the market's resolution criteria |
+| `m6_consistency` | deterministic | negRisk / linked-market coherence scanner — flags legs that don't sum to ~1 |
+| `m4_ensemble` | ensemble | log-odds weighted pool of the above, weights fit per category on resolved history |
+
+A `sports` null-control sample runs the cheap models only: if the lab "finds
+skill" on a near-efficient market like sports, the harness is broken, not the
+market — the weekly report prints null-control skill next to everything else.
+
+## Project status
+
+All eight phases in the brief are implemented and tested (77 tests, incl. the
+`test_scope.py` tripwire that fails the build if execution-code strings ever
+land in `src/`):
+
+- [x] Phase 0 — scaffold, config, CLI skeleton
+- [x] Phase 1 — collection (Gamma/CLOB clients, tiering, snapshot loop, resolution watcher)
+- [x] Phase 2 — historical bootstrap & M1/M2 fitting
+- [x] Phase 3 — append-only ledger, M0–M2, scoring, static report, `lab export`
+- [x] Phase 4 — M3 evidence pipeline (news → LLM extraction → deterministic aggregation)
+- [x] Phase 5 — M5 structural nowcasts, M6 coherence scanner
+- [x] Phase 6 — M4 ensemble, shadow portfolio (simulation), weekly report
+- [x] Phase 7 — learning loop (`lab learn`: scheduled refits, champion/challenger, post-mortems)
+- [ ] Phase 8 — optional Streamlit dashboard
+
+The collector runs continuously against live Polymarket data. Calibration
+statistics need resolved markets to accumulate before any skill claim clears
+the honesty thresholds in the brief (n ≥ 200 = "preliminary", n ≥ 500 =
+"standard claim") — weather and the sports null-control resolve in days,
+long-horizon politics in months.
+
 ## Quickstart
 
 Requirements: Python 3.12+ and [uv](https://docs.astral.sh/uv/).
