@@ -1,0 +1,7 @@
+# Curated pairwise logical constraints for M6 (starts empty).
+# Format:
+#   links:
+#     - kind: implies          # if narrow resolves YES, broad must too
+#       narrow: "0x<condition_id of the narrower market>"
+#       broad: "0x<condition_id of the broader market>"
+links: []

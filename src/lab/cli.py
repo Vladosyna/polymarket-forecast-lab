@@ -80,11 +80,15 @@ def forecast() -> None:
     from lab.store import db
     from lab.store.snapshots import SnapshotStore
 
+    from lab.models.m6_consistency import scan_universe, write_m6_forecasts
+
     config = load_config()
     conn = db.connect(config["storage"]["db_path"])
     store = SnapshotStore(config["storage"]["snapshots_dir"])
     try:
         counts = run_forecasts(conn, store, build_default_models(conn, config), config)
+        findings = asyncio.run(scan_universe(conn, store, config))
+        counts["m6_written"] = write_m6_forecasts(conn, store, findings, config)
     finally:
         conn.close()
     typer.echo(f"forecast run: {counts}")

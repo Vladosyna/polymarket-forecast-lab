@@ -226,6 +226,10 @@ def build_default_models(conn, config: dict[str, Any]) -> list[Forecaster]:
     else:
         log.warning("forecast: no m2_baserates artifact; M2 disabled")
 
+    from lab.models.m5_nowcast import M5Nowcast
+
+    models.append(M5Nowcast())  # abstains on markets its adapters don't cover
+
     if os.environ.get("ANTHROPIC_API_KEY"):
         from lab.models.m3_evidence import M3Evidence, m3_target_ids
         from lab.news.extract import LlmClient
