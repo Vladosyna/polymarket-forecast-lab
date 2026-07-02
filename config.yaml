@@ -10,10 +10,12 @@ universe:
   # Skip sub-24h crypto "pulse" markets entirely (brief Phase 1).
   skip_sub_24h_crypto: true
   # Tiering thresholds applied to Gamma liquidity/volume fields (USD).
+  # Liquid thresholds are set so the liquid tier stays ~400 markets: a 5-min
+  # snapshot round must finish well inside the cadence at 5 req/s.
   tiers:
     liquid:
-      min_liquidity: 10000
-      min_volume: 50000
+      min_liquidity: 100000
+      min_volume: 1000000
     tail:
       min_liquidity: 1000
       min_volume: 5000

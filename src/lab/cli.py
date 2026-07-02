@@ -7,6 +7,8 @@ loudly rather than silently succeeding.
 
 from __future__ import annotations
 
+import asyncio
+
 import typer
 
 from lab.util import load_config, setup_logging
@@ -36,13 +38,36 @@ def main() -> None:
 @app.command()
 def sync() -> None:
     """Discover markets from Gamma and update the universe with tiering."""
-    _not_implemented("sync", "Phase 1")
+    from lab.api.gamma import GammaClient
+    from lab.api.http import TokenBucket
+    from lab.collect.universe import sync_universe
+    from lab.store import db
+
+    config = load_config()
+
+    async def _run() -> dict:
+        bucket = TokenBucket(
+            rate=config["collect"]["rate_limit"]["requests_per_second"],
+            burst=config["collect"]["rate_limit"]["burst"],
+        )
+        gamma = GammaClient(bucket)
+        conn = db.connect(config["storage"]["db_path"])
+        try:
+            return await sync_universe(gamma, conn, config)
+        finally:
+            await gamma.aclose()
+            conn.close()
+
+    counts = asyncio.run(_run())
+    typer.echo(f"universe sync: {counts}")
 
 
 @app.command()
 def collect() -> None:
     """Run the long-lived collection process (snapshots + resolution watcher)."""
-    _not_implemented("collect", "Phase 1")
+    from lab.collect.runner import run_collect
+
+    asyncio.run(run_collect(load_config()))
 
 
 @app.command()
@@ -78,7 +103,9 @@ def export() -> None:
 @app.command()
 def status() -> None:
     """Data health: snapshot freshness, gaps, watcher lag, ledger counts, LLM spend."""
-    _not_implemented("status", "Phase 1")
+    from lab.collect.status import format_status, gather_status
+
+    typer.echo(format_status(gather_status(load_config())))
 
 
 @app.command()
