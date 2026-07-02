@@ -3,11 +3,23 @@
 
 $ErrorActionPreference = "Stop"
 $TaskName = "PolymarketForecastLabWatchdog"
+$HourlyTaskName = "PolymarketForecastLabWatchdogHourly"
 
-$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($existing) {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Write-Host "Removed scheduled task '$TaskName'."
-} else {
-    Write-Host "Scheduled task '$TaskName' not found (nothing to remove)."
+foreach ($name in @($TaskName, $HourlyTaskName)) {
+    $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+    if ($existing) {
+        Unregister-ScheduledTask -TaskName $name -Confirm:$false
+        Write-Host "Removed scheduled task '$name'."
+    }
+}
+$removed = $false
+foreach ($name in @($TaskName, $HourlyTaskName)) {
+    & schtasks.exe /Delete /TN $name /F 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Removed scheduled task '$name' (schtasks)."
+        $removed = $true
+    }
+}
+if (-not $removed) {
+    Write-Host "No scheduled tasks found (nothing to remove)."
 }

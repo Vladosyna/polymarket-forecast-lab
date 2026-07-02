@@ -193,24 +193,66 @@ def find_unmanaged(config: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
+def _gather_all_live_instances(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Registered and unregistered live instances, deduped by pid."""
+    by_pid: dict[int, dict[str, Any]] = {}
+    for e in _alive_registry_entries(config):
+        pid = e.get("pid")
+        if isinstance(pid, int):
+            by_pid[pid] = {**e, "managed": True}
+    for e in find_unmanaged(config):
+        pid = e.get("pid")
+        if isinstance(pid, int) and pid not in by_pid:
+            by_pid[pid] = {
+                "pid": pid,
+                "role": e.get("role"),
+                "code_version": e.get("code_version"),
+                "start_ts": e.get("start_ts"),
+                "cmdline": e.get("cmdline"),
+                "managed": False,
+            }
+    return list(by_pid.values())
+
+
 # --- decision (pure) -----------------------------------------------------
 
 def stale_or_redundant(entries: list[dict[str, Any]], self_pid: int,
-                       current_version: str) -> list[int]:
+                       current_version: str, *,
+                       retire_sole_outdated: bool = False) -> list[int]:
     """PIDs that should stand down, given the live registered instances.
 
     Rules: outdated code version, per-role duplicates (keep the newest by
     start_ts, preferring a current-version instance or self), and collectors
     made redundant by a live orchestrator. `self_pid` is never returned.
+
+    When ``retire_sole_outdated`` is false (watchdog cleanup), a lone outdated
+    instance is left running so a replacement can start before it is stopped.
     """
     to_stop: set[int] = set()
+    outdated: set[int] = set()
 
     for e in entries:
         pid = e.get("pid")
         if pid == self_pid:
             continue
-        if e.get("code_version") != current_version:
-            to_stop.add(pid)
+        ver = e.get("code_version")
+        if ver is not None and ver != current_version:
+            outdated.add(pid)
+
+    if retire_sole_outdated:
+        to_stop |= outdated
+    else:
+        by_role_all: dict[str, list[dict[str, Any]]] = {}
+        for e in entries:
+            by_role_all.setdefault(e.get("role"), []).append(e)
+        for group in by_role_all.values():
+            stale_in_role = [e for e in group if e.get("pid") in outdated]
+            has_current = any(e.get("code_version") == current_version for e in group)
+            if has_current or len(stale_in_role) > 1:
+                for e in stale_in_role:
+                    pid = e.get("pid")
+                    if pid != self_pid and isinstance(pid, int):
+                        to_stop.add(pid)
 
     orchestrator_alive = any(e.get("role") == "orchestrator" for e in entries)
 
@@ -259,20 +301,46 @@ def _terminate(pid: int, timeout: float = 5.0) -> bool:
         return False
 
 
+def _stop_candidates(config: dict[str, Any], candidates: list[int],
+                     act: bool) -> list[int]:
+    stopped: list[int] = []
+    if not act:
+        return stopped
+    for pid in candidates:
+        if _terminate(pid):
+            stopped.append(pid)
+    if stopped:
+        survivors = [e for e in _load_registry(config) if e.get("pid") not in stopped]
+        _write_registry(config, survivors)
+    return stopped
+
+
+def _dbg(config: dict[str, Any], msg: str) -> None:
+    try:
+        d = Path(config["storage"]["db_path"])
+        d = (d if d.is_absolute() else PROJECT_ROOT / d).parent
+        with open(d / "guard_debug.txt", "a", encoding="utf-8") as f:
+            f.write(f"{now_utc_iso()} pid={os.getpid()} {msg}\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError:
+        pass
+
+
 def enforce(config: dict[str, Any], role: str, act: bool = True) -> dict[str, Any]:
     """Register self and stand down any outdated/redundant sibling instances."""
     current = code_version()
     register_self(config, role)
-    entries = _alive_registry_entries(config)
-    candidates = stale_or_redundant(entries, os.getpid(), current)
-    stopped: list[int] = []
-    if act:
-        for pid in candidates:
-            if _terminate(pid):
-                stopped.append(pid)
-        if stopped:
-            survivors = [e for e in _load_registry(config) if e.get("pid") not in stopped]
-            _write_registry(config, survivors)
+    _dbg(config, "enforce: registered self")
+    entries = _gather_all_live_instances(config)
+    for e in entries:
+        if not e.get("managed"):
+            _dbg(config, f"enforce: UNMANAGED pid={e.get('pid')} role={e.get('role')} cmd={e.get('cmdline')!r}")
+    candidates = stale_or_redundant(entries, os.getpid(), current,
+                                    retire_sole_outdated=True)
+    _dbg(config, f"enforce: candidates={candidates}")
+    stopped = _stop_candidates(config, candidates, act)
+    _dbg(config, f"enforce: stopped={stopped}")
     result = {"current_version": current, "role": role,
               "candidates": candidates, "stopped": stopped}
     if stopped:
@@ -282,11 +350,32 @@ def enforce(config: dict[str, Any], role: str, act: bool = True) -> dict[str, An
     return result
 
 
+def cleanup(config: dict[str, Any], act: bool = True, *,
+            retire_sole_outdated: bool = False) -> dict[str, Any]:
+    """Stand down redundant/unmanaged instances without registering the caller.
+
+    Safe for the external watchdog to run before spawning new processes.
+    """
+    current = code_version()
+    entries = _gather_all_live_instances(config)
+    candidates = stale_or_redundant(entries, self_pid=-1, current_version=current,
+                                    retire_sole_outdated=retire_sole_outdated)
+    stopped = _stop_candidates(config, candidates, act)
+    result = {"current_version": current, "candidates": candidates, "stopped": stopped}
+    if stopped:
+        log.warning("instance guard cleanup stopped extras", extra={"ctx": result})
+    else:
+        log.info("instance guard cleanup: nothing to stop", extra={"ctx": result})
+    return result
+
+
 def report(config: dict[str, Any]) -> dict[str, Any]:
     """Read-only snapshot for `lab ps`: managed + unmanaged instances and flags."""
     current = code_version()
-    managed = _alive_registry_entries(config)
-    flagged = set(stale_or_redundant(managed, self_pid=-1, current_version=current))
-    unmanaged = find_unmanaged(config)
+    all_live = _gather_all_live_instances(config)
+    managed = [e for e in all_live if e.get("managed")]
+    flagged = set(stale_or_redundant(all_live, self_pid=-1, current_version=current,
+                                     retire_sole_outdated=True))
+    unmanaged = [e for e in all_live if not e.get("managed")]
     return {"current_version": current, "managed": managed,
             "flagged_pids": flagged, "unmanaged": unmanaged}

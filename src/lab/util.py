@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.handlers
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,25 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+
+
+def use_stable_event_loop() -> None:
+    """Select a Windows-stable asyncio event loop before any ``asyncio.run``.
+
+    The default Windows Proactor loop crashes with a native access violation
+    (exit code 0xC0000005) under sustained async HTTP traffic -- a long-known
+    CPython issue in the Proactor's ``_loop_writing``/``send`` path. Our request
+    pattern is sequential and rate-limited (well under the Selector loop's fd
+    ceiling), so the Selector loop is both stable and sufficient. No-op off
+    Windows.
+    """
+    if not sys.platform.startswith("win"):
+        return
+    import asyncio
+
+    policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if policy is not None and not isinstance(asyncio.get_event_loop_policy(), policy):
+        asyncio.set_event_loop_policy(policy())
 
 
 def now_utc() -> datetime:

@@ -28,7 +28,7 @@ from lab.collect.snapshots import snapshot_tier
 from lab.collect.universe import sync_universe
 from lab.store import db
 from lab.store.snapshots import SnapshotStore
-from lab.util import PROJECT_ROOT
+from lab.util import PROJECT_ROOT, now_utc_iso
 
 log = logging.getLogger(__name__)
 
@@ -351,9 +351,23 @@ def _register_health_check(
     log.info("health-check scheduled", extra={"ctx": {"interval_minutes": minutes}})
 
 
+def _checkpoint(config: dict[str, Any], marker: str) -> None:
+    """Unbuffered startup progress marker (survives a hard crash for diagnosis)."""
+    try:
+        p = pid_path(config).with_name("orchestrator.startup")
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(f"{now_utc_iso()} {marker}\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError:
+        pass
+
+
 async def run_orchestrator(config: dict[str, Any]) -> None:
     """One-button entry point: collector + scheduled analytics in one process."""
+    _checkpoint(config, "A: entered run_orchestrator")
     guard = _enforce_instance_guard(config, "orchestrator")
+    _checkpoint(config, f"B: enforce done, stopped={guard.get('stopped')}")
     if guard.get("stopped"):
         log.info("orchestrator took over from prior instances",
                  extra={"ctx": {"stopped": guard["stopped"]}})
@@ -363,11 +377,14 @@ async def run_orchestrator(config: dict[str, Any]) -> None:
     actx = _register_analytics_jobs(scheduler, config)
     _register_health_check(scheduler, config, ctx, actx)
     scheduler.start()
+    _checkpoint(config, "C: scheduler started")
 
     pid_path(config).write_text(str(os.getpid()), encoding="utf-8")
     _write_heartbeat(config)
     log.info("orchestrator started", extra={"ctx": {"pid": os.getpid()}})
+    _checkpoint(config, "D: pid+heartbeat written, entering startup cycle")
     await _startup_collection_cycle(ctx)
+    _checkpoint(config, "E: startup collection cycle done")
 
     skip: set[str] = set()
     if config.get("schedule", {}).get("run_on_start", True):

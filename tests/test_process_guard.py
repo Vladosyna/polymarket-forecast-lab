@@ -45,7 +45,10 @@ def test_no_action_when_single_current():
 
 def test_outdated_version_selected():
     entries = [_entry(200, "collector", "old", 1000.0)]
-    assert stale_or_redundant(entries, self_pid=999, current_version="v1") == [200]
+    assert stale_or_redundant(entries, self_pid=999, current_version="v1") == []
+    assert stale_or_redundant(
+        entries, self_pid=999, current_version="v1", retire_sole_outdated=True,
+    ) == [200]
 
 
 def test_self_never_selected_even_if_stale():
@@ -85,3 +88,55 @@ def test_duplicate_self_older_never_stops_self():
         _entry(21, "orchestrator", "v1", 1000.0),
     ]
     assert stale_or_redundant(entries, self_pid=21, current_version="v1") == []
+
+
+def test_none_version_not_treated_as_outdated():
+    entries = [_entry(40, "orchestrator", None, 1000.0)]
+    assert stale_or_redundant(entries, self_pid=999, current_version="v1") == []
+
+
+def test_unmanaged_duplicate_dashboard_stops_older():
+    entries = [
+        _entry(50, "dashboard", None, 1000.0),
+        _entry(51, "dashboard", None, 2000.0),
+    ]
+    assert stale_or_redundant(entries, self_pid=-1, current_version="v1") == [50]
+
+
+def test_gather_merges_managed_and_unmanaged(tmp_path, monkeypatch):
+    config = {"storage": {"db_path": str(tmp_path / "lab.db")}}
+    process_guard.register_self(config, "orchestrator")
+
+    def fake_unmanaged(_config):
+        return [{"role": "dashboard", "pid": 9999, "start_ts": 1.0, "code_version": None}]
+
+    monkeypatch.setattr(process_guard, "find_unmanaged", fake_unmanaged)
+    gathered = process_guard._gather_all_live_instances(config)
+    roles = {e["pid"]: e["role"] for e in gathered}
+    assert roles[os.getpid()] == "orchestrator"
+    assert roles[9999] == "dashboard"
+    assert gathered[0].get("managed") is True
+    assert any(e.get("pid") == 9999 and not e.get("managed") for e in gathered)
+
+
+def test_cleanup_stops_duplicate_without_register(tmp_path, monkeypatch):
+    config = {"storage": {"db_path": str(tmp_path / "lab.db")}}
+    stopped: list[int] = []
+
+    def fake_gather(_config):
+        return [
+            _entry(60, "orchestrator", "v1", 1000.0),
+            _entry(61, "orchestrator", "v1", 2000.0),
+        ]
+
+    def fake_terminate(pid, timeout=5.0):
+        stopped.append(pid)
+        return True
+
+    monkeypatch.setattr(process_guard, "_gather_all_live_instances", fake_gather)
+    monkeypatch.setattr(process_guard, "_terminate", fake_terminate)
+    monkeypatch.setattr(process_guard, "code_version", lambda: "v1")
+
+    result = process_guard.cleanup(config)
+    assert result["stopped"] == [60]
+    assert stopped == [60]

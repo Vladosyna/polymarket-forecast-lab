@@ -11,7 +11,9 @@ import asyncio
 
 import typer
 
-from lab.util import load_config, setup_logging
+from lab.util import load_config, setup_logging, use_stable_event_loop
+
+use_stable_event_loop()
 
 app = typer.Typer(
     name="lab",
@@ -199,6 +201,25 @@ def learn() -> None:
 
 
 @app.command()
+def guard(
+    retire_outdated: bool = typer.Option(
+        False,
+        "--retire-outdated",
+        help="Also stop a lone outdated instance (use before restarting after a code update).",
+    ),
+) -> None:
+    """Stop redundant or unmanaged lab instances (orchestrator, collector, dashboard)."""
+    from lab import process_guard
+
+    result = process_guard.cleanup(load_config(), retire_sole_outdated=retire_outdated)
+    stopped = result.get("stopped") or []
+    if stopped:
+        typer.echo(f"guard: stopped pids {stopped}")
+    else:
+        typer.echo("guard: nothing to stop")
+
+
+@app.command()
 def ps() -> None:
     """List our own running instances; flag outdated code versions and duplicates."""
     import time
@@ -227,7 +248,11 @@ def ps() -> None:
         typer.echo("unmanaged lab-looking processes (not registered; consider stopping):")
         for e in snap["unmanaged"]:
             age_min = (time.time() - (e.get("start_ts") or time.time())) / 60
-            typer.echo(f"  {e.get('role'):12} pid={e.get('pid'):<7} age={age_min:.0f}min")
+            flags = []
+            if e.get("pid") in snap["flagged_pids"]:
+                flags.append("REDUNDANT/OUTDATED")
+            tag = f"  [{' '.join(flags)}]" if flags else ""
+            typer.echo(f"  {e.get('role'):12} pid={e.get('pid'):<7} age={age_min:.0f}min{tag}")
 
 
 if __name__ == "__main__":
