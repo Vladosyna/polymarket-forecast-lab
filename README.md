@@ -147,6 +147,16 @@ uv run lab forecast && uv run lab eval && uv run lab report
 Back up `data/lab.db` and `data/snapshots/` daily from day one — historical
 order-book snapshots cannot be re-downloaded later.
 
+## Dashboard (optional)
+
+A read-only Streamlit dashboard over the same SQLite/Parquet: live universe,
+latest forecasts vs market, calibration, shadow book.
+
+```bash
+uv sync --group dashboard
+uv run streamlit run src/lab/dashboard.py
+```
+
 ## Scope invariants
 
 1. **No execution code.** Measurement instrument only; "buy"/"sell" appear

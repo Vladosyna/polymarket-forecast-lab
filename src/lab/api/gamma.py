@@ -78,6 +78,21 @@ class GammaMarket(BaseModel):
         return self.clob_token_ids[1] if self.is_binary else None
 
 
+class GammaEvent(BaseModel):
+    """Subset of a Gamma /events item: tags carry the category signal."""
+
+    slug: str | None = None
+    neg_risk: bool = Field(default=False, alias="negRisk")
+    tags: list[dict] = Field(default_factory=list)
+    markets: list[GammaMarket] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+
+    @property
+    def tag_slugs(self) -> list[str]:
+        return [t.get("slug", "") for t in self.tags if isinstance(t, dict)]
+
+
 class GammaClient(BaseClient):
     def __init__(self, bucket: TokenBucket, base_url: str = GAMMA_BASE_URL) -> None:
         super().__init__(base_url, bucket)
@@ -116,6 +131,32 @@ class GammaClient(BaseClient):
                 raise
             out.extend(batch)
             if len(batch) < PAGE_SIZE:
+                break
+        return out
+
+    async def iter_events(self, max_pages: int = 200, **filters: Any) -> list[GammaEvent]:
+        """Paginate /events (embeds markets + tags), volume-ordered like iter_markets."""
+        filters.setdefault("order", "volume")
+        filters.setdefault("ascending", "false")
+        out: list[GammaEvent] = []
+        for page in range(max_pages):
+            params: dict[str, Any] = {"limit": PAGE_SIZE, "offset": page * PAGE_SIZE, **filters}
+            try:
+                raw = await self.get_json("/events", params=params)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 422:
+                    log.warning("gamma: events offset cap reached, stopping pagination",
+                                extra={"ctx": {"page": page}})
+                    break
+                raise
+            items = raw if isinstance(raw, list) else raw.get("data", [])
+            for item in items:
+                try:
+                    out.append(GammaEvent.model_validate(item))
+                except Exception:
+                    log.warning("gamma: skipping unparseable event",
+                                extra={"ctx": {"slug": item.get("slug")}})
+            if len(items) < PAGE_SIZE:
                 break
         return out
 
