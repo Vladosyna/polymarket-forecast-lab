@@ -161,11 +161,20 @@ class GammaClient(BaseClient):
         return out
 
     async def market_by_condition(self, condition_id: str) -> GammaMarket | None:
-        raw = await self.get_json("/markets", params={"condition_ids": condition_id})
-        items = raw if isinstance(raw, list) else raw.get("data", [])
-        for item in items:
-            try:
-                return GammaMarket.model_validate(item)
-            except Exception:
-                continue
+        # Gamma's /markets defaults to closed=false when the param is omitted,
+        # so a plain condition_ids lookup silently finds nothing once a market
+        # closes -- exactly the markets the resolution watcher and historical
+        # bootstrap need. Try the unfiltered (open-market) case first, then
+        # fall back to closed=true.
+        for params in (
+            {"condition_ids": condition_id},
+            {"condition_ids": condition_id, "closed": "true"},
+        ):
+            raw = await self.get_json("/markets", params=params)
+            items = raw if isinstance(raw, list) else raw.get("data", [])
+            for item in items:
+                try:
+                    return GammaMarket.model_validate(item)
+                except Exception:
+                    continue
         return None
