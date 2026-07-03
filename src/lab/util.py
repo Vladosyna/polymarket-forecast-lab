@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.handlers
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +72,32 @@ class JsonLinesFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False)
 
 
+# Query-string secrets that must never reach a log line. FRED's api_key param
+# is the concrete case (M5 macro adapter/refit); kept generic since any future
+# adapter using a URL-embedded key would hit the same httpx auto-logging.
+_SECRET_QUERY_PARAM_RE = re.compile(r"(?<=[?&])(api_key|apikey|access_token)=[^&\s\"']+", re.I)
+
+
+class RedactSecretsFilter(logging.Filter):
+    """Strips URL-embedded API keys from every log record before it's emitted.
+
+    httpx logs each request's full URL at INFO level. For endpoints that pass
+    a key as a query param (FRED) that would otherwise put a live secret in
+    data/logs/lab.jsonl on every single call.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        redacted = _SECRET_QUERY_PARAM_RE.sub(r"\1=***REDACTED***", msg)
+        if redacted != msg:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
 def setup_logging(config: dict[str, Any] | None = None, level: int = logging.INFO) -> None:
     """Console handler (human-readable) + rotating JSONL file handler."""
     config = config or load_config()
@@ -81,13 +108,16 @@ def setup_logging(config: dict[str, Any] | None = None, level: int = logging.INF
     if root.handlers:  # idempotent: safe to call more than once
         return
     root.setLevel(level)
+    redact = RedactSecretsFilter()
 
     console = logging.StreamHandler()
     console.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    console.addFilter(redact)
     root.addHandler(console)
 
     file_handler = logging.handlers.RotatingFileHandler(
         logs_dir / "lab.jsonl", maxBytes=20_000_000, backupCount=5, encoding="utf-8"
     )
     file_handler.setFormatter(JsonLinesFormatter())
+    file_handler.addFilter(redact)
     root.addHandler(file_handler)

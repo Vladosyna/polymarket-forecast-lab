@@ -201,11 +201,14 @@ def fit_m2_baserates(rows: list[dict], min_n: int = 50) -> dict[str, Any]:
 
 FRED_OBS_URL = "https://api.stlouisfed.org/fred/series/observations"
 
-# Actual BEA release paired against each Atlanta Fed nowcast series. GDPNow/
-# PCENow methodology: a quarter's estimate is revised only until that
-# quarter's own BEA advance estimate is released, then it is fixed forever --
-# so the plain observation history is already point-in-time data. No ALFRED
-# realtime_start/realtime_end vintage query is needed for these two series.
+# Actual BEA release paired against each Atlanta Fed nowcast series. Both are
+# published on FRED as ONE ROW PER QUARTER (date = quarter start), not daily --
+# confirmed live: GDPNOW/PCENOW each return exactly one observation per
+# calendar quarter. GDPNow/PCENow methodology revises a quarter's row only
+# until that quarter's own BEA advance estimate lands, then it's fixed
+# forever, so the plain (no realtime_start/end) observation history already
+# gives the frozen final-pre-release nowcast for every completed quarter --
+# no ALFRED vintage query needed, just a same-quarter join.
 M5_MACRO_ACTUAL_SERIES = {
     "GDPNOW": "A191RL1Q225SBEA",   # Real GDP, % change SAAR
     "PCENOW": "DPCERL1Q225SBEA",   # Real PCE, % change SAAR
@@ -234,28 +237,22 @@ def fetch_fred_series(series_id: str, api_key: str) -> list[dict[str, Any]]:
 def pair_nowcast_surprises(
     nowcast_rows: list[dict[str, Any]], actual_rows: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Pair each realized quarterly release with its last pre-release nowcast.
+    """Pair each realized quarterly release with that quarter's frozen nowcast.
 
-    A nowcast series keeps updating a quarter's estimate only until that
-    quarter's own advance estimate lands -- which is also what starts the next
-    quarter's nowcast window. So "the last nowcast dated before the next
-    quarter's release period begins" is the final pre-release estimate for the
-    current one.
+    Both series are one row per calendar quarter (date = quarter start), so
+    this is a plain join on `date` -- quarters with no actual release yet
+    (the current, still-updating quarter) simply have nothing to join to and
+    are dropped, not guessed.
     """
-    actual_sorted = sorted(actual_rows, key=lambda r: r["date"])
-    nowcast_sorted = sorted(nowcast_rows, key=lambda r: r["date"])
+    actual_by_date = {a["date"]: a["value"] for a in actual_rows}
     pairs: list[dict[str, Any]] = []
-    for i, a in enumerate(actual_sorted):
-        period_start = a["date"]
-        next_start = actual_sorted[i + 1]["date"] if i + 1 < len(actual_sorted) else None
-        window = [n for n in nowcast_sorted
-                  if n["date"] >= period_start and (next_start is None or n["date"] < next_start)]
-        if not window:
+    for n in sorted(nowcast_rows, key=lambda r: r["date"]):
+        if n["date"] not in actual_by_date:
             continue
-        last_nowcast = window[-1]["value"]
+        actual = actual_by_date[n["date"]]
         pairs.append({
-            "period": period_start, "nowcast": last_nowcast, "actual": a["value"],
-            "surprise": a["value"] - last_nowcast,
+            "period": n["date"], "nowcast": n["value"], "actual": actual,
+            "surprise": actual - n["value"],
         })
     return pairs
 
