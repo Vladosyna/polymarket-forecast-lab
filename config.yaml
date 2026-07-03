@@ -130,6 +130,11 @@ learn:
   m3_min_resolved: 150     # gate for M3 aggregator walk-forward fit
   m4_min_resolved_per_category: 100  # equal weights below this
   postmortem_decile: 0.10  # top decile of misses and wins each month
+  # Safeguards (brief section 6 / Phase 7.1). Learning is dry-run by default;
+  # `lab learn --apply` commits, and every change is versioned + reversible.
+  max_step_pct: 0.20       # no live parameter moves more than 20% (relative) per cycle
+  rollback_window: 50      # trailing resolved forecasts the rollback breaker scores over
+  promotion_min_n: 200     # min resolved markets before a CI-gated promotion can fire
 
 # --- Orchestrator schedule (`lab run`) ----------------------------------
 # The one-button process keeps the collector running and fires these analytics

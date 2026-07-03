@@ -19,6 +19,20 @@ log = logging.getLogger(__name__)
 WINDOWS = {"all_time": None, "trailing_90d": 90}
 
 
+def challenger_registered_ts(conn, model_id: str) -> str | None:
+    """Earliest registration timestamp for a versioned/challenger model_id.
+
+    Forward-only rule (brief section 6/guardrail 15): a registered challenger
+    earns skill only from forecasts made after its own registration -- it is
+    never scored on history predating its existence. Legacy model_ids with no
+    model_versions row are unaffected (returns None).
+    """
+    row = conn.execute(
+        "SELECT MIN(registered_ts) AS ts FROM model_versions WHERE model_id = ?", (model_id,)
+    ).fetchone()
+    return row["ts"] if row is not None else None
+
+
 def resolved_forecast_rows(conn, model_id: str, window_days: int | None,
                            null_control_ids: set[str] | None = None,
                            invert_null_control: bool = False) -> list[dict]:
@@ -33,6 +47,10 @@ def resolved_forecast_rows(conn, model_id: str, window_days: int | None,
     if window_days is not None:
         query += " AND f.ts >= ?"
         params.append((now_utc() - timedelta(days=window_days)).isoformat(timespec="seconds"))
+    registered_ts = challenger_registered_ts(conn, model_id)
+    if registered_ts is not None:
+        query += " AND f.ts >= ?"
+        params.append(registered_ts)
     rows = [dict(r) for r in conn.execute(query, params)]
     if null_control_ids is not None:
         if invert_null_control:

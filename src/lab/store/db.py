@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -98,10 +98,33 @@ CREATE TABLE IF NOT EXISTS llm_spend (
   ts TEXT NOT NULL
 );
 
+-- append-only. Rollback = repoint is_active, never rewrite a row (brief section 5/6).
+-- Coexists with data/models/*.json artifact files (Phase 2): this table owns
+-- VERSIONING/active/rollback state; artifact_path points at the file rather than
+-- duplicating it. data/models/ACTIVE.json is a generated pointer written by
+-- registry.py whenever is_active changes -- a cache of this table, never hand-edited.
+CREATE TABLE IF NOT EXISTS model_versions (
+  id INTEGER PRIMARY KEY,
+  model_id TEXT NOT NULL,           -- artifact key ('m1_curves', ...) or ledger id ('m3_evidence@deepseek')
+  version_tag TEXT NOT NULL,        -- e.g. 'v3'; human-readable, not semver-enforced
+  artifact_path TEXT NOT NULL,      -- e.g. 'data/models/m1_curves_v3.json'; content immutable once written
+  params_hash TEXT NOT NULL,        -- sha256 of the artifact file, for integrity verification
+  fit_window_start TEXT, fit_window_end TEXT,   -- walk-forward train window; NULL for hand-set v1 defaults
+  registered_ts TEXT NOT NULL,      -- challengers earn track record only from forecasts after this
+  promoted_ts TEXT,                 -- NULL while still a challenger
+  retired_ts TEXT,                  -- NULL while active
+  retired_reason TEXT CHECK(retired_reason IN ('replaced','rollback') OR retired_reason IS NULL),
+  is_active INTEGER DEFAULT 0       -- exactly one active row per model_id; enforced in registry.py + index
+);
+
 CREATE INDEX IF NOT EXISTS idx_forecasts_condition ON forecasts(condition_id);
 CREATE INDEX IF NOT EXISTS idx_forecasts_model_ts ON forecasts(model_id, ts);
 CREATE INDEX IF NOT EXISTS idx_markets_tier ON markets(tier);
 CREATE INDEX IF NOT EXISTS idx_llm_spend_date ON llm_spend(date);
+CREATE INDEX IF NOT EXISTS idx_model_versions_model ON model_versions(model_id);
+-- DB-level backstop for the single-active invariant (registry.py also enforces it).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_model_versions_active
+  ON model_versions(model_id) WHERE is_active = 1;
 """
 
 
@@ -135,6 +158,14 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('created_at', ?)", (now_utc_iso(),)
     )
+    # Forward migration: new tables above are created idempotently; bump the
+    # recorded schema_version on pre-existing databases (INSERT OR IGNORE above
+    # never updates it). No destructive change -- data is untouched.
+    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+    if row is not None and row[0] != SCHEMA_VERSION:
+        conn.execute(
+            "UPDATE meta SET value = ? WHERE key = 'schema_version'", (SCHEMA_VERSION,)
+        )
     conn.commit()
     conn.set_authorizer(_authorizer)
     return conn

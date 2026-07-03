@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from lab.models.base import MarketState
-from lab.models.m5_nowcast import M5Nowcast, parse_weather_question
+from lab.models.m5_nowcast import M5Nowcast, MacroAdapter, parse_weather_question
 from lab.models.m6_consistency import check_link, scan_negrisk_event
 
 
@@ -49,6 +49,37 @@ def test_m5_uses_adapter_and_stores_trace():
 def test_m5_abstains_without_coverage():
     m5 = M5Nowcast(adapters=[StubWeatherAdapter()])
     assert m5.forecast(_state("Will X win the election?", category="politics"), {}) is None
+
+
+def test_macro_adapter_uses_fred_series(monkeypatch):
+    adapter = MacroAdapter(api_key="test-key")
+    monkeypatch.setattr(adapter, "_latest_nowcast", lambda sid: 2.5)
+    out = adapter.probability(
+        _state("Will Q3 GDP growth be above 2.0%?", category="economics"))
+    assert out is not None
+    p, trace = out
+    assert trace["series"] == "GDPNOW"
+    assert trace["nowcast"] == 2.5
+    assert p > 0.5   # nowcast 2.5 sits above the 2.0 threshold
+
+
+def test_macro_adapter_pce_and_direction(monkeypatch):
+    adapter = MacroAdapter(api_key="test-key")
+    monkeypatch.setattr(adapter, "_latest_nowcast", lambda sid: 1.0)
+    out = adapter.probability(
+        _state("Will PCE growth be below 2.0% this quarter?", category="economics"))
+    assert out is not None
+    p, trace = out
+    assert trace["series"] == "PCENOW"
+    assert trace["direction"] == "below"
+    assert p > 0.5   # nowcast 1.0 is below the 2.0 threshold
+
+
+def test_macro_adapter_abstains_without_key():
+    adapter = MacroAdapter(api_key="")   # explicit empty key disables FRED
+    assert adapter.covers(_state("Will GDP growth be above 2.0%?", category="economics"))
+    assert adapter.probability(
+        _state("Will GDP growth be above 2.0%?", category="economics")) is None
 
 
 def test_m6_flags_incoherent_negrisk():

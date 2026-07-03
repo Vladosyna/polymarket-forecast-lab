@@ -1,15 +1,22 @@
 """M5 -- structural nowcast models: thin per-category adapters.
 
-Two adapters is the v1 scope (brief section 6): weather (open-meteo ensemble
--> threshold probability) and macro (Cleveland Fed inflation nowcast /
-GDPNow -> bucket probability via a surprise distribution). Each adapter
-recognizes the markets it covers by parsing the question; everything else
-is abstained on. Every forecast stores its input trace in meta.
+Two adapters is the v1 scope (brief section 6): weather (Open-Meteo Ensemble
+API -> threshold probability from ensemble spread) and macro (FRED nowcast
+series -> bucket probability via a surprise distribution). Each adapter
+recognizes the markets it covers by parsing the question; everything else is
+abstained on. Every forecast stores its input trace in meta.
+
+Macro sourcing (brief v1.6/v1.7 section 3): FRED is primary. FRED mirrors the
+Atlanta Fed nowcasts as clean documented series -- GDPNOW (real GDP growth)
+and PCENOW (real PCE growth). Cleveland Fed's inflation nowcast has no
+confirmed stable machine endpoint, so it is not wired as a guessed URL; it can
+be added later as an optional sub-adapter once a real endpoint is verified.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -98,75 +105,88 @@ class WeatherAdapter:
                    "members": members, "target_date": target_date}
 
 
-MACRO_PATTERNS = {
-    # question regex -> (series, default sd of release surprise)
-    "inflation": (re.compile(r"\b(cpi|inflation)\b.*?(?P<threshold>\d+\.?\d*)\s*%", re.I), 0.12),
-    "gdp": (re.compile(r"\bgdp\b.*?(?P<threshold>-?\d+\.?\d*)\s*%", re.I), 0.55),
+# FRED nowcast series -> (series_id, default sd of release surprise, question regex).
+# sd defaults come from historical release surprises and are refit by `lab learn`
+# once enough resolved macro markets accumulate.
+FRED_SERIES = {
+    "gdp": {
+        "series_id": "GDPNOW", "sd": 0.55,
+        "pattern": re.compile(r"\bgdp\b.*?(?P<threshold>-?\d+\.?\d*)\s*%", re.I),
+    },
+    "pce": {
+        "series_id": "PCENOW", "sd": 0.50,
+        "pattern": re.compile(
+            r"\b(pce|personal consumption)\b.*?(?P<threshold>-?\d+\.?\d*)\s*%", re.I),
+    },
 }
 
 
 class MacroAdapter:
-    """Cleveland Fed inflation nowcast / Atlanta Fed GDPNow -> bucket probability.
+    """FRED nowcast series -> bucket probability (brief section 3, FRED primary).
 
     P(print > threshold) from a normal surprise distribution centered on the
-    nowcast; sd defaults come from historical release surprises and are meant
-    to be refit by `lab learn` once enough resolved macro markets accumulate.
+    latest FRED nowcast (GDPNOW / PCENOW). Requires FRED_API_KEY; without it the
+    adapter abstains (returns None) so M5 falls through cleanly rather than
+    guessing. sd defaults are refit by `lab learn`.
     """
 
-    CLEVELAND_URL = (
-        "https://www.clevelandfed.org/-/media/files/webcharts/inflationnowcasting/"
-        "nowcast_quarter.csv"
-    )
-    GDPNOW_URL = "https://www.atlantafed.org/-/media/documents/cqer/researchcq/gdpnow/GDPTrackingModelDataAndForecasts.xlsx"
+    FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: str | None = None) -> None:
+        # Explicit "" disables; None falls back to the environment.
+        self._api_key = api_key if api_key is not None else os.environ.get("FRED_API_KEY")
         self._nowcasts: dict[str, float | None] = {}
 
     def covers(self, market: MarketState) -> bool:
         q = market.question or ""
-        return any(pat.search(q) for pat, _ in MACRO_PATTERNS.values())
+        return any(spec["pattern"].search(q) for spec in FRED_SERIES.values())
 
-    def _cleveland_cpi_nowcast(self) -> float | None:
-        if "cpi" in self._nowcasts:
-            return self._nowcasts["cpi"]
+    def _latest_nowcast(self, series_id: str) -> float | None:
+        if series_id in self._nowcasts:
+            return self._nowcasts[series_id]
         value: float | None = None
+        if not self._api_key:
+            log.warning("m5 macro: FRED_API_KEY not set -- abstaining",
+                        extra={"ctx": {"series": series_id}})
+            self._nowcasts[series_id] = None
+            return None
         try:
-            resp = httpx.get(self.CLEVELAND_URL, timeout=20, follow_redirects=True)
+            resp = httpx.get(self.FRED_URL, params={
+                "series_id": series_id, "api_key": self._api_key, "file_type": "json",
+                "sort_order": "desc", "limit": 5,
+            }, timeout=20)
             resp.raise_for_status()
-            lines = [l for l in resp.text.splitlines() if l.strip()]
-            # CSV: latest row, find a 'CPI' column by header match.
-            header = [h.strip().lower() for h in lines[0].split(",")]
-            cpi_idx = next((i for i, h in enumerate(header) if "cpi" in h and "core" not in h), None)
-            if cpi_idx is not None:
-                for line in reversed(lines[1:]):
-                    cells = line.split(",")
-                    try:
-                        value = float(cells[cpi_idx])
-                        break
-                    except (ValueError, IndexError):
-                        continue
+            for obs in resp.json().get("observations", []):
+                v = obs.get("value")
+                if v in (None, ".", ""):
+                    continue
+                try:
+                    value = float(v)
+                    break
+                except (TypeError, ValueError):
+                    continue
         except httpx.HTTPError:
-            log.warning("m5 macro: cleveland fed fetch failed")
-        self._nowcasts["cpi"] = value
+            log.warning("m5 macro: FRED fetch failed", extra={"ctx": {"series": series_id}})
+        self._nowcasts[series_id] = value
         return value
 
     def probability(self, market: MarketState) -> tuple[float, dict[str, Any]] | None:
         q = market.question or ""
-        m = MACRO_PATTERNS["inflation"][0].search(q)
-        if m:
-            nowcast = self._cleveland_cpi_nowcast()
+        for spec in FRED_SERIES.values():
+            m = spec["pattern"].search(q)
+            if not m:
+                continue
+            nowcast = self._latest_nowcast(spec["series_id"])
             if nowcast is None:
                 return None
             threshold = float(m.group("threshold"))
-            sd = MACRO_PATTERNS["inflation"][1]
+            sd = spec["sd"]
             above = not re.search(r"\b(below|under|less than)\b", q, re.I)
             p_above = 1 - norm.cdf(threshold, loc=nowcast, scale=sd)
             p = float(p_above if above else 1 - p_above)
-            return p, {"adapter": "macro", "series": "cleveland_cpi_nowcast",
+            return p, {"adapter": "macro", "series": spec["series_id"],
                        "nowcast": nowcast, "threshold": threshold, "sd": sd,
                        "direction": "above" if above else "below"}
-        # GDPNow requires parsing an xlsx workbook; deferred until a live GDP
-        # bucket market exists in the universe (assumption stated per guardrail 1).
         return None
 
 

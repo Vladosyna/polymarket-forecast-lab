@@ -45,6 +45,50 @@ def bucket_for_days(days: float) -> str | None:
     return None
 
 
+# --- learning safeguards (Phase 7.1) --------------------------------------
+
+class WalkForwardError(ValueError):
+    """Raised when a refit is asked to fit without a validation window."""
+
+
+def assert_walk_forward(train: Any, validation: Any) -> None:
+    """Structural guard (brief section 6): a refit with no train/validation split
+    is a bug. A refit call missing either window raises rather than silently
+    fitting on full history.
+    """
+    if not train:
+        raise WalkForwardError("refit requires a non-empty training window")
+    if not validation:
+        raise WalkForwardError("refit requires a non-empty validation window")
+
+
+def _bound_scalar(old: float, new: float, max_step_pct: float) -> float:
+    """Clamp `new` to within +/-max_step_pct (relative) of `old`."""
+    if not isinstance(old, (int, float)) or not isinstance(new, (int, float)):
+        return new
+    if old == 0:
+        return float(new)  # relative step undefined against zero -- allow, caller logs
+    span = abs(old) * max_step_pct
+    return float(min(max(new, old - span), old + span))
+
+
+def bound_step(old: Any, new: Any, max_step_pct: float) -> Any:
+    """Recursively clamp each live numeric parameter's move to +/-max_step_pct.
+
+    Mirrors the artifact structure (nested dicts like M1 buckets or M4 category
+    weights). Keys present only in `new` pass through unbounded (a brand-new
+    bucket/category has no incumbent to step from). Non-numeric leaves pass
+    through. One noisy month becomes a slow lean, not a lurch (brief section 6).
+    """
+    if isinstance(old, dict) and isinstance(new, dict):
+        return {k: (bound_step(old[k], v, max_step_pct) if k in old else v)
+                for k, v in new.items()}
+    if isinstance(old, (int, float)) and isinstance(new, (int, float)) \
+            and not isinstance(old, bool) and not isinstance(new, bool):
+        return _bound_scalar(old, new, max_step_pct)
+    return new
+
+
 def fit_logistic_recalibration(p_market: np.ndarray, y: np.ndarray) -> dict[str, float]:
     """MLE fit of y ~ sigmoid(alpha + beta * logit(p_market)).
 

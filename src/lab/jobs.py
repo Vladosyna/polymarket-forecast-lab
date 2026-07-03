@@ -82,16 +82,38 @@ def run_shadow_job(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def run_learn_job(config: dict[str, Any]) -> Any:
-    """Monthly learning loop: batch refits, champion/challenger, post-mortems."""
+def run_learn_job(config: dict[str, Any], apply: bool = False) -> Any:
+    """Monthly learning loop: batch refits, champion/challenger, post-mortems.
+
+    Dry-run by default (writes nothing); pass apply=True to persist and promote.
+    The orchestrator's scheduled run leaves apply=False, so every learning cycle
+    is a reviewable diff rather than a silent mutation (brief section 6).
+    """
     from lab.learn.loop import run_learn
     from lab.news.extract import create_llm_client
 
     conn = db.connect(config["storage"]["db_path"])
     llm = create_llm_client(conn, config)
     try:
-        summary = run_learn(conn, config, llm)
+        summary = run_learn(conn, config, llm, apply=apply)
     finally:
         conn.close()
-    log.info("learn job complete", extra={"ctx": {"summary": str(summary)[:200]}})
+    log.info("learn job complete", extra={"ctx": {"apply": apply, "summary": str(summary)[:200]}})
     return summary
+
+
+def run_rollback_job(config: dict[str, Any], model_id: str,
+                     to_version_tag: str | None = None) -> dict[str, Any]:
+    """Manually revert a model's active version to a prior one (outside the cycle)."""
+    from lab.learn import registry
+
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        restored = registry.rollback(conn, config, model_id, reason="rollback",
+                                     to_version_tag=to_version_tag)
+    finally:
+        conn.close()
+    result = {"model_id": model_id,
+              "restored": None if restored is None else restored["version_tag"]}
+    log.info("rollback job complete", extra={"ctx": result})
+    return result

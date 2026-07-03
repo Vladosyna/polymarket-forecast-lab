@@ -1,6 +1,6 @@
 # Polymarket Forecast Lab — Implementation Brief for Claude Code
 
-**v1.4** — learning loop: monthly batch refits (`lab learn`), champion/challenger versioning for M3 parameters and prompts, post-mortem layer with quarterly lessons digest. Learning is batch-and-versioned by design — never per-decision.
+**v1.7** — resolved a real Phase 7.1 ambiguity Claude Code surfaced during implementation: `model_versions` coexists with the Phase 2 `data/models/*.json` artifact files rather than replacing them — the table owns versioning/rollback state via `artifact_path` + hash, `ACTIVE.json` becomes a generated pointer, no inference-time code changes needed.
 
 **Read this entire document before writing any code.** It is the single source of truth for this project. Work through the phases in order. Each phase has acceptance criteria — do not move to the next phase until they pass.
 
@@ -60,11 +60,20 @@ All public, no auth. As of mid-2026 (post CLOB V2 migration, April 2026):
   Public trades, holder/position aggregates.
 - **WebSocket (market channel, public)** — `wss://ws-subscriptions-clob.polymarket.com/ws/`
   Real-time book updates. Use for the liquid tier if REST polling proves too coarse; start with REST.
-- **Historical bootstrap** — HuggingFace dataset `SII-WANGZJ/Polymarket_data` (~1.1B trade records, Parquet, 268K+ markets). Download only the slices needed (resolved binary markets: prices at multiple horizons + outcomes) for fitting recalibration curves and base rates.
-- **External model inputs (for M5, all free):**
-  - *Weather:* `open-meteo.com` API (no key; ECMWF/GFS ensembles) and `api.weather.gov` (NWS) for stations referenced by weather markets.
-  - *Macro:* Cleveland Fed inflation nowcast (public CSV), Atlanta Fed GDPNow (public). FRED API optional (`FRED_API_KEY` in `.env`).
-  - *Cross-platform prices (v1.5, optional):* Kalshi market-data endpoints **only if** publicly accessible without an account; otherwise skip. Betfair requires an account — out of scope.
+- **Historical bootstrap** — HuggingFace dataset `SII-WANGZJ/Polymarket_data` (1.1B records, 268,706 markets; also mirrored on GitHub). Covers Polymarket's inception through end of 2025 — it is a static snapshot, not a live feed. 2026-onward data comes from our own Phase 1 collector, not this dataset. Pull only two of its five files:
+  - `quant.parquet` (~21–27GB) — cleaned trades unified to the YES token; this is the "prices at multiple horizons" source for M1/M2.
+  - `markets.parquet` (~68–165MB) — market metadata and resolution outcomes; joins to `quant.parquet` on market id.
+  Skip `orderfilled.parquet`, `trades.parquet`, `users.parquet` (85GB combined, raw/user-level — not needed for fitting). Fetch via `huggingface_hub`:
+  ```python
+  from huggingface_hub import hf_hub_download
+  hf_hub_download(repo_id="SII-WANGZJ/Polymarket_data", filename="quant.parquet", repo_type="dataset", local_dir="data/bootstrap/")
+  hf_hub_download(repo_id="SII-WANGZJ/Polymarket_data", filename="markets.parquet", repo_type="dataset", local_dir="data/bootstrap/")
+  ```
+  Then filter with `polars.scan_parquet(...)` (lazy) down to resolved binary markets — never load either file fully into memory.
+- **External model inputs (for M5):**
+  - *Weather:* Open-Meteo **Ensemble API** — `https://api.open-meteo.com/v1/ensemble?latitude=&longitude=&hourly=<vars>&models=<model>` — returns per-member forecasts (up to 51 members), which is what P(threshold exceeded) actually needs. The plain `/v1/forecast` endpoint returns one deterministic value and is not sufficient here. No key, CC BY 4.0 (attribute in README), free tier caps at 10,000 calls/day — irrelevant at our scale. `api.weather.gov` (NWS) as a secondary cross-check for US station observations only.
+  - *Macro:* **FRED API is primary**, not optional — it cleanly mirrors both Atlanta Fed nowcasts as documented series: `GDPNOW` (real GDP growth) and `PCENOW` (real PCE growth). Free key from `fredaccount.stlouisfed.org`, stored as `FRED_API_KEY`. Request pattern: `https://api.stlouisfed.org/fred/series/observations?series_id=GDPNOW&api_key=...&file_type=json`. Cleveland Fed's separate CPI/PCE inflation nowcast has no confirmed stable machine endpoint as of this writing — its page is `clevelandfed.org/indicators-and-data/inflation-nowcasting`; inspect its actual download mechanism at Phase 5 implementation time rather than hardcoding a guessed URL, and skip that specific sub-adapter if none is found. GDPNow alone already covers the growth side of the macro category.
+  - *Cross-platform prices (optional):* Kalshi market-data endpoints **only if** publicly accessible without an account; otherwise skip. Betfair requires an account — out of scope.
 
 Domain facts to encode:
 - Every binary market has two outcome tokens (YES/NO); prices are in [0,1] and the pair sums to ≈ 1. Track the YES token; store its `token_id` and the `condition_id` of the market.
@@ -120,6 +129,7 @@ forecast-lab/
 │   │   └── report.py            # jinja2 HTML report
 │   ├── learn/
 │   │   ├── refit.py             # scheduled parameter refits (M1 curves, M2 rates, M3 aggregator, M5 error dists, M4 weights)
+│   │   ├── registry.py          # model_versions CRUD, promotion gate, rollback circuit breaker
 │   │   └── postmortem.py        # structured post-mortems on top-decile misses/wins
 │   ├── shadow/
 │   │   └── portfolio.py         # simulated positions
@@ -209,6 +219,26 @@ CREATE TABLE postmortems (
   analysis_json TEXT,              -- structured: error_source, evidence_quality, resolution_reading, notes
   llm_model TEXT, cost_usd REAL
 );
+
+-- append-only. Rollback = repoint is_active, never rewrite a row.
+-- Coexists with the data/models/*.json artifact files from Phase 2: this table is authoritative
+-- for VERSIONING (active/promoted/retired state, audit trail); the JSON files remain artifact
+-- storage. artifact_path points at the existing file rather than duplicating its contents.
+-- data/models/ACTIVE.json is a generated pointer, rewritten by registry.py whenever is_active
+-- changes — it is a cache of this table, never edited independently.
+CREATE TABLE model_versions (
+  id INTEGER PRIMARY KEY,
+  model_id TEXT NOT NULL,           -- 'm1_debiased', 'm3_evidence', 'm4_ensemble', ...
+  version_tag TEXT NOT NULL,        -- e.g. 'v3'; human-readable, not semver-enforced
+  artifact_path TEXT NOT NULL,      -- e.g. 'data/models/m1_debiased_v3.json'; file content immutable once written
+  params_hash TEXT NOT NULL,        -- sha256 of the artifact file, for integrity verification
+  fit_window_start TEXT, fit_window_end TEXT,   -- walk-forward train window; NULL for hand-set v1 defaults
+  registered_ts TEXT NOT NULL,      -- challengers earn track record only from forecasts after this
+  promoted_ts TEXT,                 -- NULL while still a challenger
+  retired_ts TEXT,                  -- NULL while active
+  retired_reason TEXT CHECK(retired_reason IN ('replaced','rollback') OR retired_reason IS NULL),
+  is_active INTEGER DEFAULT 0       -- exactly one active row per model_id; enforced in registry.py
+);
 ```
 
 Snapshots go to Parquet, not SQLite: columns `ts, condition_id, token_id_yes, best_bid, best_ask, mid, spread, bid_depth_usd, ask_depth_usd, last_trade_price`, partitioned `data/snapshots/date=YYYY-MM-DD/*.parquet`.
@@ -251,11 +281,25 @@ One thin adapter per category. Do not generalize prematurely — two adapters is
 
 **Forecast cadence:** once per market per day per model (config), plus an extra forecast when |24h price move| > 0.10 on a tracked market. M3 runs only on the liquid tier, selected by a **deterministic rule** (top-K by liquidity within priority categories) — never by perceived difficulty, or the skill measurement inherits selection bias. M5 runs on every market its adapters cover. M6 runs on every negRisk event in the universe.
 
-**Learning & versioning (how the system improves from its own record).** Learning happens in batches over resolved outcomes, never per decision — a single win or loss is noise, and a system that adjusts to individual outcomes learns the noise. All mechanisms run inside the monthly `lab learn` job:
-- **Scheduled refits:** M1 curves, M2 base rates, M5 surprise distributions (as specified above), and M4 weights — the built-in reward signal: models earn ensemble weight through realized Brier, nothing else.
-- **M3 aggregator fitting:** once ≥150 resolved M3 forecasts exist, fit (k, τ, cap) by walk-forward Brier minimization.
-- **Champion/challenger:** a new parameter set or extraction prompt never replaces the incumbent silently. It registers as a challenger model id (`m3_evidence@v2`), consumes the SAME stored evidence dossiers as the champion (extraction is shared, so challengers cost almost nothing), runs in parallel in the ledger, and is promoted only after beating the champion out-of-sample with n above the honesty threshold (§7). Every self-modification is a measured experiment.
-- **Post-mortems:** monthly, for the top decile of misses and of wins among resolved forecasts, the LLM produces a structured analysis (error source: evidence / weighting / resolution-criteria reading / category / horizon) stored in `postmortems`; the report carries a quarterly lessons digest. Lessons feed versioned changes, never automatic parameter nudges.
+**Learning & versioning (how the system improves from its own record — and the hard line around the LLM).** Learning happens in batches over resolved outcomes, never per decision — a single win or loss is noise, and a system that adjusts to individual outcomes learns the noise. All mechanisms run inside the monthly `lab learn` job, dry-run by default.
+
+*The line that must never move:* the LLM's weights are never fine-tuned, and the LLM is never re-invoked against a historical dossier after the fact. "Training" in this codebase means exactly two safe things:
+
+1. **Fitting closed-form parameters on frozen data** — M1 curves, M2 base rates, M5 surprise distributions, M4 weights, and the M3 **aggregator** knobs (k, τ, cap). All of these are pure arithmetic over numbers already sitting in the database (prices, outcomes, or — for M3 — the structured evidence objects `{direction, strength, reliability, relevance, published_ts}` extracted at forecast time and frozen in `evidence_runs`). No LLM call happens during any of these refits, so there is no channel for the model's post-hoc knowledge to leak in. This is safe on the same footing as M1/M2/M5.
+2. **Forward-only challenger registration** — a new M3 extraction prompt, or a new `m3b_direct` variant, registers as a new `model_id` (`m3_evidence@v2`) with a `registered_ts` in `model_versions`. It earns forecasts, and skill, only from markets it forecasts *after* that timestamp. It is never scored against, or backtested on, history that predates its own existence — doing so would require the LLM to re-read old news today, when today's model may already know how those old questions resolved.
+
+**Rule of thumb for any future change to this system:** if it requires a *new LLM inference call* on a market that has already resolved, it is forbidden, full stop. If it only requires re-doing arithmetic on numbers already in the database, it is a normal refit.
+
+**Safeguards (so one bad month can't corrupt a good model):**
+- **Walk-forward only.** Every refit fits on data up to cutoff T and validates on data after T. A refit function that accepts a single history window with no train/validation split is a bug — `tests/test_learning_safety.py` asserts the split exists on every refit path.
+- **Bounded step per cycle.** No refit may move a live parameter (recalibration slope, ensemble weight, aggregator k/τ/cap) by more than `max_step_pct` (config, default 20% relative) in one monthly cycle. A refit wanting to move further logs the full proposed change and applies only the capped step; the next cycle continues the move if the evidence still supports it. One noisy month becomes a slow lean, not a lurch.
+- **Promotion requires a confidence interval, not a point estimate.** A challenger is promoted only when its measured skill beats the champion's with the bootstrap CI (§7) excluding zero, reusing `eval/scoring.py` rather than a bespoke metric.
+- **Automatic rollback — the actual safety valve.** After promotion, the new champion keeps being scored forward like anything else. If its trailing skill over the next `rollback_window` resolved forecasts (config, default 50) falls below the retired champion's historical skill under the same CI test, `lab learn` reverts the active pointer automatically and records `retired_reason='rollback'`. Learning that turns out to hurt undoes itself instead of relying solely on the entry gate having been right.
+- **Append-only registry.** Every parameter set or prompt gets a new row in `model_versions`, never edited — but the row points at its artifact via `artifact_path` rather than duplicating it; the artifact itself (curve coefficients, base rates, prompt text) lives in `data/models/*.json` exactly as it has since Phase 2. Rollback means repointing `is_active` at a previous row, not recomputing and hoping.
+- **One kill switch.** `lab learn` refuses to run while `data/PAUSE` exists — the same file the collector already respects (guardrail 8, §9). No second switch to remember.
+- **Dry-run by default.** `lab learn` always produces a diff report first — what would change, by how much, on what n, for which models — and only writes to `model_versions` with an explicit `--apply` flag. Every learning cycle is a reviewable event, not a silent mutation.
+
+**Post-mortems:** monthly, for the top decile of misses and of wins among resolved forecasts, the LLM produces a structured analysis (error source: evidence / weighting / resolution-criteria reading / category / horizon) stored in `postmortems`; the report carries a quarterly lessons digest. Lessons feed *versioned* changes a human decides to make — never an automatic parameter nudge.
 
 ---
 
@@ -268,7 +312,7 @@ One thin adapter per category. Do not generalize prematurely — two adapters is
 - **CLV-style early signal** (doesn't need resolution): for each forecast, measure whether the market price at t+24h / t+72h moved toward the model's view. Report mean signed drift in the direction of the model's disagreement. This detects information timing months before enough markets resolve.
 - **Honesty thresholds & statistical power.** The report displays n everywhere. Tiers: n < 200 resolved markets → "INSUFFICIENT DATA"; 200 ≤ n < 500 → "PRELIMINARY"; n ≥ 500 → standard claim. Additionally the report computes the **minimum detectable effect** at current n from the empirical sd of per-market paired Brier differences (MDE ≈ 2.8 · σ_d / √n, for 80% power at α = 0.05, n = resolved markets) and prints it next to every skill number — a skill estimate smaller than its own MDE is noise by construction. No cherry-picked windows: all-time and trailing-90-days only.
 - **Null control.** The sports control sample (§3 universe policy) is scored identically and shown in the same table. Statistically significant "skill" there invalidates the run pending investigation.
-- **LLM models are live-only.** Never backtest M3/M3b on markets resolved before the LLM's training cutoff — training-data leakage makes such numbers meaningless. Statistical models (M1/M2/M5/M6) may be backtested; LLM skill accrues only forward.
+- **LLM models are live-only.** Never backtest M3/M3b on markets resolved before the LLM's training cutoff — training-data leakage makes such numbers meaningless. Statistical models (M1/M2/M5/M6) may be backtested; LLM skill accrues only forward. The one exception: the M3 **aggregator's** own parameters (k/τ/cap) may be fit on frozen historical evidence objects, because that fit is arithmetic, not a new LLM call (§6).
 
 ---
 
@@ -307,6 +351,7 @@ Domain-specific guardrails:
 12. **No selection bias.** Cheap models (M0/M1/M2/M6, and M5 where its adapters apply) forecast the ENTIRE eligible universe daily. Any subsetting (M3 cost cap) follows the deterministic rule in §6 — never editorial judgment about which markets look "forecastable".
 13. **Price freshness.** A forecast row requires `p_market_at_ts` from a snapshot no older than 15 min (liquid tier) / 90 min (tail). If the latest snapshot is stale, skip the forecast and log it — a forecast paired against a stale price corrupts the skill comparison silently, which is the worst failure class in this system.
 14. **Self-modification is scheduled and versioned.** Parameters and prompts change only via `lab learn` on its monthly schedule, only when min-n thresholds are met, only via walk-forward fitting, and only as challenger versions measured against the incumbent (§6). No code path may adjust any model in response to an individual outcome.
+15. **Learning never re-invokes the LLM on resolved history.** Refits touching M3 are arithmetic over evidence already frozen in `evidence_runs`; new prompts/extraction logic earn skill only from forecasts made after their own `registered_ts`. Full safeguard list (bounded step, CI-gated promotion, automatic rollback, dry-run default) lives in §6 — this rule is the one that may never be relaxed for convenience.
 
 ---
 
@@ -321,7 +366,7 @@ Tasks: Gamma client + universe sync with tiering (config thresholds on liquidity
 **Accept when:** after a 1-hour live run: ≥50 liquid markets tracked; Parquet contains multiple snapshot rounds; process restart produces no duplicate rows; universe re-sync updates `last_synced_ts` without churn; PAUSE file halts polling within one cycle; `lab status` reports correct freshness and flags a synthetic gap in fixture data.
 
 ### Phase 2 — Historical bootstrap & debiasing
-Tasks: downloader for the needed slices of `SII-WANGZJ/Polymarket_data` (resolved binary markets: prices at multiple horizons + outcomes); fit M1 logistic recalibration per horizon bucket (expect slope > 1 at long horizons; verify the tail-bias direction empirically — recent Polymarket data shows a *reversed* favorite-longshot bias) and M2 category base rates; persist versioned curve artifacts under `data/models/`; plot calibration-slope-by-horizon and price-vs-outcome curves into `reports/`.
+Tasks: downloader for `quant.parquet` + `markets.parquet` from `SII-WANGZJ/Polymarket_data` (§3 has the exact fetch code); lazy-filter to resolved binary markets with prices at multiple horizons + outcomes; fit M1 logistic recalibration per horizon bucket (expect slope > 1 at long horizons; verify the tail-bias direction empirically — recent Polymarket data shows a *reversed* favorite-longshot bias) and M2 category base rates; persist versioned curve artifacts under `data/models/`; plot calibration-slope-by-horizon and price-vs-outcome curves into `reports/`.
 **Accept when:** curve artifacts exist and load; unit test asserts monotonicity of each recalibration; the report artifact shows fitted curves per horizon bucket with sample sizes per bin.
 
 ### Phase 3 — Ledger, baseline models, evaluation
@@ -333,7 +378,7 @@ Tasks: `NewsProvider` (Google News RSS + config feed list; NewsAPI optional), do
 **Accept when:** for 10 liquid markets, an end-to-end run produces evidence rows and M3 forecasts in the ledger; aggregator tests pass; simulated cost-cap breach cleanly skips remaining markets with a log line; a stored dossier is human-readable enough to audit one forecast start-to-finish.
 
 ### Phase 5 — Structural models & consistency (M5, M6)
-Tasks: weather adapter (open-meteo / NWS ensembles → threshold probabilities) for whatever weather markets exist in the universe; macro adapter (Cleveland Fed nowcast, GDPNow → bucket probabilities via historical surprise distribution); negRisk coherence scanner with deviation logging; curated `links.yaml` (empty at start) for pairwise logical constraints.
+Tasks: weather adapter using the Open-Meteo **Ensemble API** (not plain forecast — §3) → threshold probabilities from ensemble spread, for whatever weather markets exist in the universe; macro adapter using **FRED** (`GDPNOW`, `PCENOW` series) → bucket probabilities via a historical-surprise error distribution; if a stable Cleveland Fed inflation-nowcast endpoint is found at implementation time, add it as a second macro sub-adapter, otherwise skip it and note why; negRisk coherence scanner with deviation logging; curated `links.yaml` (empty at start) for pairwise logical constraints.
 **Accept when:** for at least one live weather market and one live macro market (fixtures if none live), M5 writes forecasts with a stored input trace; M6 flags a synthetic incoherent negRisk fixture and stays silent on a coherent one; both models appear in the nightly eval.
 
 ### Phase 6 — Ensemble, shadow portfolio, weekly report
@@ -343,6 +388,12 @@ Tasks: M4 with rolling-window weight fit (equal weights until n≥100); shadow p
 ### Phase 7 — Learning loop
 Tasks: `lab learn` command; consolidated scheduled refits (M1/M2/M5 artifacts, M4 weights); M3 aggregator walk-forward fitter gated on ≥150 resolved M3 forecasts; challenger registration and promotion mechanics per §6; post-mortem generator (top-decile misses and wins per month, structured JSON, inside the LLM budget cap) + quarterly lessons digest wired into the report.
 **Accept when:** refits produce versioned artifacts without touching live ones until promotion; on fixture data, a synthetic challenger with better out-of-sample scores gets promoted and a worse one does not; post-mortems generate on fixtures and render in the report; `test_scope.py` still green.
+
+### Phase 7.1 — Learning-loop hardening (retrofit)
+Phase 7 already exists in this repository. This phase audits it against the safeguards in §6 and retrofits what's missing — it does not rebuild Phase 7 from scratch.
+Tasks: add the `model_versions` table (schema migration) as a versioning layer that **coexists** with the existing `data/models/*.json` artifact files from Phase 2 — the table owns active/promoted/retired state and points at artifacts via `artifact_path`, it does not duplicate their contents; `data/models/ACTIVE.json` becomes a generated pointer written by `registry.py`, never edited by hand; no changes to how M0–M6 read their active artifact at inference time. Add `learn/registry.py` (versioned writes, single active pointer per `model_id`, rollback); make walk-forward train/validation split a structural requirement in `refit.py` — a refit call with no validation window should raise, not silently fit on full history; add `max_step_pct` bounding to every refit before it writes; confirm promotion goes through the CI-exclusion test in `eval/scoring.py` rather than a point-estimate comparison, and fix it if it doesn't; implement the rollback circuit breaker as a check `lab learn` runs before any new refit each month; make `lab learn` dry-run by default with output-only diffs, gated behind an explicit `--apply` flag; add `lab rollback <model_id>` for manual override outside the monthly cycle; audit the `m3b_direct` / M3 prompt-challenger code path specifically and confirm every challenger carries a `registered_ts` and is never scored on forecasts predating it.
+Also write `tests/test_learning_safety.py` covering: (a) a refit call missing a validation window raises; (b) a synthetic large-jump scenario gets clamped to `max_step_pct`; (c) a challenger with a better point estimate but a CI that includes zero is NOT promoted; (d) a promoted challenger whose simulated subsequent performance degrades triggers automatic rollback and `retired_reason='rollback'` is recorded.
+**Accept when:** `test_learning_safety.py` passes, all four fixtures included; a real `lab learn` run against accumulated data produces a dry-run diff and writes nothing until `--apply`; `lab rollback` demonstrably restores a prior `model_versions` row as active; `test_scope.py` still green.
 
 ### Phase 8 — Optional dashboard
 Streamlit app reading the same SQLite/Parquet: live universe, latest forecasts vs market, calibration, shadow book. Only after Phase 6 is stable.

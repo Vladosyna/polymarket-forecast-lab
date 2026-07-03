@@ -1,4 +1,7 @@
-"""Phase 7: challenger promotion mechanics and post-mortems on fixtures."""
+"""Phase 7: M3 aggregator gating and post-mortems on fixtures.
+
+Promotion/rollback safety mechanics live in test_learning_safety.py.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +9,8 @@ import json
 
 import pytest
 
-from lab.learn.loop import fit_m3_aggregator, maybe_promote, promote
+from lab.learn.loop import fit_m3_aggregator
 from lab.learn.postmortem import lessons_digest, run_postmortems, select_candidates
-from lab.learn.refit import load_active_artifact, save_artifact
 from lab.store import db
 from lab.util import load_config, now_utc
 
@@ -24,35 +26,6 @@ def config(tmp_path):
         "reports_dir": str(tmp_path / "reports"),
     }
     return cfg
-
-
-def test_better_challenger_promoted_worse_rejected(config):
-    champion = {"kind": "x", "quality": 0.20}
-    path = save_artifact(config, "x", champion, promote=True)
-    assert load_active_artifact(config, "x")["version"] == 1
-
-    # Score = the artifact's own quality field (lower is better).
-    score = lambda art: art["quality"]
-
-    better = {"kind": "x", "quality": 0.10}
-    better_path = save_artifact(config, "x", better, promote=False)
-    assert load_active_artifact(config, "x")["version"] == 1  # untouched until promotion
-    assert maybe_promote(config, "x", better, better_path, score, min_n=10, n_available=50)
-    assert load_active_artifact(config, "x")["version"] == 2
-
-    worse = {"kind": "x", "quality": 0.30}
-    worse_path = save_artifact(config, "x", worse, promote=False)
-    assert not maybe_promote(config, "x", worse, worse_path, score, min_n=10, n_available=50)
-    assert load_active_artifact(config, "x")["version"] == 2  # champion survives
-
-
-def test_promotion_blocked_below_min_n(config):
-    champ_path = save_artifact(config, "y", {"quality": 0.2}, promote=True)
-    better = {"quality": 0.1}
-    better_path = save_artifact(config, "y", better, promote=False)
-    assert not maybe_promote(config, "y", better, better_path,
-                             lambda a: a["quality"], min_n=200, n_available=50)
-    assert load_active_artifact(config, "y")["version"] == 1
 
 
 def test_m3_fit_gated_on_min_resolved(config):

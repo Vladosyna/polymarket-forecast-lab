@@ -162,8 +162,14 @@ def status() -> None:
 
 @app.command()
 def bootstrap(
-    sample_size: int = typer.Option(2000, help="Top-volume resolved markets to fetch price paths for."),
-    min_volume: float = typer.Option(10000.0, help="Minimum lifetime volume (USD) for the sample."),
+    source: str = typer.Option(
+        "hf",
+        help="'hf' = quant.parquet + markets.parquet (brief-pinned; ~21-27 GB download). "
+             "'clob' = markets.parquet + CLOB prices-history (light fallback).",
+    ),
+    sample_size: int = typer.Option(2000, help="[clob] Top-volume resolved markets to fetch."),
+    min_volume: float = typer.Option(10000.0, help="[clob] Minimum lifetime volume (USD)."),
+    max_per_market: int = typer.Option(0, help="[hf] Cap observations per market (0 = no cap)."),
     skip_fetch: bool = typer.Option(False, help="Reuse existing observations.parquet; refit only."),
 ) -> None:
     """Phase 2: historical bootstrap -- download resolved markets, fit M1/M2 artifacts."""
@@ -173,7 +179,9 @@ def bootstrap(
 
     config = load_config()
     if not skip_fetch:
-        asyncio.run(bs.run_bootstrap(config, sample_size=sample_size, min_volume=min_volume))
+        asyncio.run(bs.run_bootstrap(
+            config, source=source, sample_size=sample_size, min_volume=min_volume,
+            max_per_market=(max_per_market or None)))
     obs = bs.load_observations(config)
     typer.echo(f"observations: {len(obs)} rows / {obs['condition_id'].n_unique()} markets")
 
@@ -192,12 +200,39 @@ def bootstrap(
 
 
 @app.command()
-def learn() -> None:
-    """Monthly learning loop: batch refits, champion/challenger, post-mortems."""
+def learn(
+    apply: bool = typer.Option(
+        False,
+        "--apply/--dry-run",
+        help="Persist refits and promote/rollback versions. Default is a dry-run diff "
+             "that writes nothing (brief section 6).",
+    ),
+) -> None:
+    """Monthly learning loop: batch refits, champion/challenger, post-mortems.
+
+    Dry-run by default: computes every proposed change and prints a diff without
+    touching model_versions or ACTIVE.json. Pass --apply to commit.
+    """
     from lab.jobs import run_learn_job
 
-    summary = run_learn_job(load_config())
-    typer.echo(f"learn: {summary}")
+    summary = run_learn_job(load_config(), apply=apply)
+    mode = "APPLIED" if apply else "DRY-RUN (nothing written; pass --apply to commit)"
+    typer.echo(f"learn [{mode}]: {summary}")
+
+
+@app.command()
+def rollback(
+    model_id: str = typer.Argument(..., help="Model key, e.g. m1_curves, m3_params, m4_weights."),
+    to: str = typer.Option(None, "--to", help="Target version_tag (default: previous promotable)."),
+) -> None:
+    """Revert a model's active version to a prior one (manual override)."""
+    from lab.jobs import run_rollback_job
+
+    result = run_rollback_job(load_config(), model_id, to_version_tag=to)
+    if result["restored"] is None:
+        typer.secho(f"rollback: nothing to restore for {model_id}", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"rollback: {model_id} -> {result['restored']} (active)")
 
 
 @app.command()
