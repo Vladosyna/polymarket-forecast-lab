@@ -290,5 +290,90 @@ def ps() -> None:
             typer.echo(f"  {e.get('role'):12} pid={e.get('pid'):<7} age={age_min:.0f}min{tag}")
 
 
+map_app = typer.Typer(help="Cross-venue question matching (M7, Phase 9): propose-then-confirm.")
+app.add_typer(map_app, name="map")
+
+
+@map_app.command("propose")
+def map_propose() -> None:
+    """LLM proposes candidate Kalshi matches for top liquid priority-category markets.
+
+    Metaculus isn't reachable without an account (see api/metaculus.py) --
+    use `lab map confirm --venue metaculus` for a hand-curated pair instead.
+    """
+    import asyncio as _asyncio
+
+    from lab.api.http import TokenBucket
+    from lab.api.kalshi import KalshiClient
+    from lab.models.m7_crossvenue import propose_matches
+    from lab.news.extract import create_llm_client
+    from lab.store import db
+
+    config = load_config()
+    conn = db.connect(config["storage"]["db_path"])
+    llm = create_llm_client(conn, config)
+    if llm is None:
+        typer.secho("map propose: no LLM configured (see llm.api_key_env in config.yaml)",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    async def _run():
+        bucket = TokenBucket(rate=config["collect"]["rate_limit"]["requests_per_second"],
+                             burst=config["collect"]["rate_limit"]["burst"])
+        kalshi = KalshiClient(bucket)
+        try:
+            candidates = await kalshi.open_markets(limit=200)
+            return propose_matches(conn, config, candidates, llm)
+        finally:
+            await kalshi.aclose()
+
+    try:
+        proposals = _asyncio.run(_run())
+    finally:
+        conn.close()
+    typer.echo(f"map propose: {len(proposals)} new candidate(s) added to data/markets_map.yaml")
+    for p in proposals:
+        typer.echo(f"  {p['condition_id']} <-> kalshi:{p['external_id']} "
+                   f"(confidence={p['confidence']:.2f}) {p['rationale']}")
+
+
+@map_app.command("confirm")
+def map_confirm(
+    condition_id: str = typer.Argument(..., help="Polymarket condition_id."),
+    venue: str = typer.Option(..., help="kalshi | metaculus"),
+    external_id: str = typer.Option(
+        None, help="Required if not already in `proposed` (e.g. a hand-found Metaculus pair)."),
+) -> None:
+    """Move a proposed pair into `confirmed` -- or confirm a hand-curated one directly."""
+    from lab.models.m7_crossvenue import confirm_match, load_markets_map, save_markets_map
+
+    data = load_markets_map()
+    ok = confirm_match(data, condition_id, venue, external_id=external_id)
+    if not ok:
+        typer.secho(
+            f"map confirm: no proposed ({condition_id}, {venue}) entry -- pass --external-id "
+            "to confirm a hand-curated pair directly",
+            fg=typer.colors.RED, err=True,
+        )
+        raise typer.Exit(code=1)
+    save_markets_map(data)
+    typer.echo(f"map confirm: {condition_id} <-> {venue} is now live for M7")
+
+
+@map_app.command("list")
+def map_list() -> None:
+    """Show confirmed and proposed (awaiting human review) pairs."""
+    from lab.models.m7_crossvenue import load_markets_map
+
+    data = load_markets_map()
+    typer.echo(f"confirmed ({len(data['confirmed'])}):")
+    for e in data["confirmed"]:
+        typer.echo(f"  {e['condition_id']} <-> {e['venue']}:{e['external_id']}")
+    typer.echo(f"proposed, awaiting confirmation ({len(data['proposed'])}):")
+    for e in data["proposed"]:
+        typer.echo(f"  {e['condition_id']} <-> {e['venue']}:{e['external_id']} "
+                   f"(confidence={e.get('confidence', 0):.2f})")
+
+
 if __name__ == "__main__":
     app()

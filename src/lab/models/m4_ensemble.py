@@ -19,7 +19,7 @@ from lab.models.base import ForecastResult, MarketState, clamp_p
 log = logging.getLogger(__name__)
 
 POOLABLE = ("m0_market", "m1_debiased", "m2_baserate", "m3_evidence",
-            "m5_nowcast", "m6_consistency")
+            "m5_nowcast", "m6_consistency", "m7_crossvenue")
 MIN_RESOLVED_PER_CATEGORY = 100
 
 

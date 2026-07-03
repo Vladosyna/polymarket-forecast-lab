@@ -42,6 +42,7 @@ continuously against public data.
                           ├─ M3 LLM evidence pipeline (news → strict-JSON → deterministic aggregator)
                           ├─ M5 structural nowcasts (weather / macro)
                           ├─ M6 negRisk coherence scanner
+                          ├─ M7 cross-venue signal (Kalshi / Metaculus, confirmed matches only)
                           └─ M4 ensemble (log-odds weighted pool, fit per category)
                                               │
                                               ▼
@@ -76,6 +77,7 @@ phase-by-phase acceptance criteria) this repo was built against.
 | `m3_evidence` | LLM (structured) | news retrieval → strict-JSON evidence extraction → **deterministic** log-odds aggregator (the LLM never writes the final number) |
 | `m5_nowcast` | structural | maps an external quantitative model (open-meteo/NWS ensembles, Cleveland Fed / GDPNow) straight onto the market's resolution criteria |
 | `m6_consistency` | deterministic | negRisk / linked-market coherence scanner — flags legs that don't sum to ~1 |
+| `m7_crossvenue` | cross-venue | log-odds pool of external venues' prices (Kalshi public market data; Metaculus community prediction where a token grants access) on a curated, human-confirmed `markets_map.yaml` — Polymarket's own price stays out |
 | `m4_ensemble` | ensemble | log-odds weighted pool of the above, weights fit per category on resolved history |
 
 A `sports` null-control sample runs the cheap models only: if the lab "finds
@@ -84,9 +86,9 @@ market — the weekly report prints null-control skill next to everything else.
 
 ## Project status
 
-All eight phases in the brief are implemented and tested (77 tests, incl. the
-`test_scope.py` tripwire that fails the build if execution-code strings ever
-land in `src/`):
+All core phases plus the optional cross-venue signal are implemented and
+tested (incl. the `test_scope.py` tripwire that fails the build if
+execution-code strings ever land in `src/`):
 
 - [x] Phase 0 — scaffold, config, CLI skeleton
 - [x] Phase 1 — collection (Gamma/CLOB clients, tiering, snapshot loop, resolution watcher)
@@ -95,8 +97,9 @@ land in `src/`):
 - [x] Phase 4 — M3 evidence pipeline (news → LLM extraction → deterministic aggregation)
 - [x] Phase 5 — M5 structural nowcasts, M6 coherence scanner
 - [x] Phase 6 — M4 ensemble, shadow portfolio (simulation), weekly report
-- [x] Phase 7 — learning loop (`lab learn`: scheduled refits, champion/challenger, post-mortems)
+- [x] Phase 7 / 7.1 — learning loop (`lab learn`: scheduled refits, `model_versions` registry, walk-forward guard, CI-gated promotion, automatic rollback, post-mortems)
 - [ ] Phase 8 — optional Streamlit dashboard
+- [x] Phase 9 — cross-venue signal (M7): Kalshi read-only client (verified live, public, no auth), Metaculus client (requires an operator-supplied API token — Metaculus removed anonymous access; see `src/lab/api/metaculus.py` for the verified request shape), curated propose-then-confirm matching (`lab map propose` / `lab map confirm` / `data/markets_map.yaml`), wired into the ledger and the M4 weight fit
 
 The collector runs continuously against live Polymarket data. Calibration
 statistics need resolved markets to accumulate before any skill claim clears
@@ -134,6 +137,9 @@ cost caps) — every default is documented inline.
 | `lab status` | Data health: snapshot freshness, gaps, watcher lag, spend |
 | `lab learn` | Monthly learning loop: batch refits, champion/challenger, post-mortems |
 | `lab run` | **One-button orchestrator**: collector + scheduled forecast/eval/report/shadow/learn in a single process |
+| `lab map propose` | M7: LLM proposes candidate Kalshi/Metaculus matches into `markets_map.yaml` (`proposed`, not live) |
+| `lab map confirm <condition_id>` | M7: human confirms a proposed (or hand-curated) match — only confirmed pairs are ever forecast |
+| `lab map list` | M7: show confirmed and pending-proposed matches |
 
 ### One button (recommended)
 

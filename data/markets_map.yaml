@@ -1,0 +1,6 @@
+# Cross-venue question matching (M7, Phase 9). Propose-then-confirm:
+# `lab map propose` appends LLM candidates under `proposed`; a human
+# moves a pair into `confirmed` (via `lab map confirm`) to make it live.
+# M7 reads ONLY `confirmed`. This file is the source of truth.
+confirmed: []
+proposed: []

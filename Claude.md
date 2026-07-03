@@ -1,6 +1,6 @@
 # Polymarket Forecast Lab — Implementation Brief for Claude Code
 
-**v1.7** — resolved a real Phase 7.1 ambiguity Claude Code surfaced during implementation: `model_versions` coexists with the Phase 2 `data/models/*.json` artifact files rather than replacing them — the table owns versioning/rollback state via `artifact_path` + hash, `ACTIVE.json` becomes a generated pointer, no inference-time code changes needed.
+**v1.8** — cross-venue signal (M7): Kalshi public market-data endpoints verified (no account, no keys) and promoted to a concrete read-only source alongside the Metaculus public API; curated question-matching via `markets_map.yaml` (LLM proposes, human confirms); Phase 9, optional and gated on Phase 6. Also clarified where more external data helps (M2 base rates, forecast-time features) vs hurts (pooling foreign-venue biases into M1).
 
 **Read this entire document before writing any code.** It is the single source of truth for this project. Work through the phases in order. Each phase has acceptance criteria — do not move to the next phase until they pass.
 
@@ -73,7 +73,8 @@ All public, no auth. As of mid-2026 (post CLOB V2 migration, April 2026):
 - **External model inputs (for M5):**
   - *Weather:* Open-Meteo **Ensemble API** — `https://api.open-meteo.com/v1/ensemble?latitude=&longitude=&hourly=<vars>&models=<model>` — returns per-member forecasts (up to 51 members), which is what P(threshold exceeded) actually needs. The plain `/v1/forecast` endpoint returns one deterministic value and is not sufficient here. No key, CC BY 4.0 (attribute in README), free tier caps at 10,000 calls/day — irrelevant at our scale. `api.weather.gov` (NWS) as a secondary cross-check for US station observations only.
   - *Macro:* **FRED API is primary**, not optional — it cleanly mirrors both Atlanta Fed nowcasts as documented series: `GDPNOW` (real GDP growth) and `PCENOW` (real PCE growth). Free key from `fredaccount.stlouisfed.org`, stored as `FRED_API_KEY`. Request pattern: `https://api.stlouisfed.org/fred/series/observations?series_id=GDPNOW&api_key=...&file_type=json`. Cleveland Fed's separate CPI/PCE inflation nowcast has no confirmed stable machine endpoint as of this writing — its page is `clevelandfed.org/indicators-and-data/inflation-nowcasting`; inspect its actual download mechanism at Phase 5 implementation time rather than hardcoding a guessed URL, and skip that specific sub-adapter if none is found. GDPNow alone already covers the growth side of the macro category.
-  - *Cross-platform prices (optional):* Kalshi market-data endpoints **only if** publicly accessible without an account; otherwise skip. Betfair requires an account — out of scope.
+  - *Cross-venue prices (for M7 — verified public, no accounts, no keys):* **Kalshi** — `https://external-api.kalshi.com/trade-api/v2` (`/series`, `/events`, `/markets`, `/markets/{ticker}/orderbook`); market data requires no auth; ~10 req/s — route through the same global rate limiter. **Metaculus** — official public API (`metaculus.com/api`), community prediction on public questions; a different crowd (reputation-scored forecasters, no money), strongest as an independent signal on long-horizon questions. Manifold is public too but play-money — skip. Betfair requires an account — out of scope.
+  - *M1 warning:* never pool other venues' resolved markets into M1's recalibration fit — M1 models Polymarket-specific bias, and other venues carry different (even opposite) tail biases. External resolved questions may feed M2 base rates only.
 
 Domain facts to encode:
 - Every binary market has two outcome tokens (YES/NO); prices are in [0,1] and the pair sums to ≈ 1. Track the YES token; store its `token_id` and the `condition_id` of the market.
@@ -117,6 +118,7 @@ forecast-lab/
 │   │   ├── m3_evidence.py
 │   │   ├── m5_nowcast.py        # + thin per-category data adapters (weather, macro)
 │   │   ├── m6_consistency.py
+│   │   ├── m7_crossvenue.py     # + api/kalshi.py, api/metaculus.py thin read-only clients (Phase 9)
 │   │   └── m4_ensemble.py
 │   ├── news/
 │   │   ├── providers.py         # RSS + Google News RSS per market; NewsAPI optional
@@ -277,7 +279,9 @@ One thin adapter per category. Do not generalize prematurely — two adapters is
 
 **M6 `m6_consistency` — cross-market coherence scanner.** Deterministic, no LLM. Within a negRisk event, mutually exclusive YES prices must sum to ≈ 1 — record the deviation. For logically linked market pairs (curated `links.yaml`, starts empty), check conditional-probability bounds. Output is a signal attached to forecasts (direction + magnitude of incoherence); M6 emits standalone forecasts only for incoherent legs, pulling them toward the coherent joint solution.
 
-**M4 `m4_ensemble`.** Log-odds weighted pool of M0–M3, M5, M6; weights fit per category on a rolling window of resolved forecasts (equal weights until ≥100 resolved samples in that category). Where M5 exists it should dominate — the fit will discover that; don't hand-tune. (Model IDs are stable; the numbering is historical, ensemble stays last in the pipeline.)
+**M7 `m7_crossvenue` — cross-venue signal on matched questions.** For markets that also trade on Kalshi or carry a Metaculus community prediction, output the log-odds pool of the *external* venues' probabilities — Polymarket's own price stays out (M0 already carries it; the ensemble learns how much to trust each source). Question matching is the failure point and is handled conservatively: a curated `data/markets_map.yaml` where the LLM may *propose* candidate matches (question texts + resolution criteria side by side), but a human confirms every pair before it goes live — one mismatched pair silently poisons the signal. External prices are snapshotted at forecast ts under the same freshness rule (§9.13). Deterministic at forecast time; no LLM call in the loop.
+
+**M4 `m4_ensemble`.** Log-odds weighted pool of M0–M3, M5–M7; weights fit per category on a rolling window of resolved forecasts (equal weights until ≥100 resolved samples in that category). Where M5 exists it should dominate — the fit will discover that; don't hand-tune. (Model IDs are stable; the numbering is historical, ensemble stays last in the pipeline.)
 
 **Forecast cadence:** once per market per day per model (config), plus an extra forecast when |24h price move| > 0.10 on a tracked market. M3 runs only on the liquid tier, selected by a **deterministic rule** (top-K by liquidity within priority categories) — never by perceived difficulty, or the skill measurement inherits selection bias. M5 runs on every market its adapters cover. M6 runs on every negRisk event in the universe.
 
@@ -398,6 +402,10 @@ Also write `tests/test_learning_safety.py` covering: (a) a refit call missing a 
 ### Phase 8 — Optional dashboard
 Streamlit app reading the same SQLite/Parquet: live universe, latest forecasts vs market, calibration, shadow book. Only after Phase 6 is stable.
 
+### Phase 9 — Optional: cross-venue signal (M7)
+Only after Phase 6 is stable; priority categories only. Tasks: thin read-only clients for Kalshi public market data and the Metaculus API (§3 — no accounts, no keys, same global rate limiter); `data/markets_map.yaml` with a propose-then-confirm matching flow (LLM proposes candidate pairs, a human confirms, the file is the source of truth); M7 per §6 wired into the ledger and the M4 weight fit; external-price snapshots stored alongside our own.
+**Accept when:** on ≥5 confirmed matched pairs (fixtures acceptable), M7 writes forecasts with stored external-price traces; a proposed-but-unconfirmed pair is NOT forecast; M7 appears in the nightly eval and in M4's weight fit; `test_scope.py` still green.
+
 ---
 
 ## 11. Operations
@@ -412,7 +420,7 @@ Streamlit app reading the same SQLite/Parquet: live universe, latest forecasts v
 
 ## 12. Explicitly out of scope (do not build)
 
-Order execution or anything touching wallets/keys (belongs in downstream projects — §13); VPN/proxy logic; Betfair (requires an account); Kalshi connector unless its market-data endpoints prove publicly accessible without an account (then read-only, v1.5); ALL crypto/equity price-target markets, not just sub-24h pulses; a database server; user auth; Docker (plain `uv` is fine); notification bots. If a task seems to require any of these, stop and flag it instead.
+Order execution or anything touching wallets/keys (belongs in downstream projects — §13); VPN/proxy logic; Betfair (requires an account); Kalshi *trading* endpoints — its read-only market data is in scope via Phase 9; ALL crypto/equity price-target markets, not just sub-24h pulses; a database server; user auth; Docker (plain `uv` is fine); notification bots. If a task seems to require any of these, stop and flag it instead.
 
 ---
 

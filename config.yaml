@@ -46,7 +46,16 @@ collect:
   snapshot_interval_minutes:
     liquid: 5
     tail: 60
+  # Was briefly 5/3000 on 2026-07-03 to clear a 10.8k resolution backlog
+  # (a one-time consequence of the closed=false Gamma-filter bug fix); backlog
+  # cleared to steady-state (~500, mostly genuinely-not-yet-resolved markets)
+  # within ~1.5h, so back to a normal cadence -- no reason to keep hammering
+  # Gamma once there's no backlog left to work through.
   resolution_poll_minutes: 30
+  # Candidates checked per watch_resolutions() cycle. Modest headroom over the
+  # old hardcoded 200 in case of a future gap, without re-scanning thousands
+  # of still-pending markets every cycle for no benefit.
+  resolution_backlog_limit: 300
   # Order-book levels stored per side in snapshots (historical depth is
   # unrecoverable later; models don't consume it yet).
   book_depth_levels: 10
@@ -162,6 +171,27 @@ schedule:
   # Hourly health/liveness check: re-runs overdue analytics services and forces
   # a collection cycle if the collector has stalled (liquid snapshots too old).
   health_check_interval_minutes: 60
+
+# --- Cross-venue signal (M7, Phase 9, optional) --------------------------
+# `data/markets_map.yaml` is the confirmed-pairs source of truth (hardcoded
+# path, same precedent as M6's links.yaml). `lab map propose` only covers
+# Kalshi -- Metaculus's public API now requires an account/API token as of
+# 2026-07-03 (see api/metaculus.py), so a Metaculus pair must be hand-curated
+# via `lab map confirm --venue metaculus`.
+cross_venue:
+  propose_top_k: 20   # candidate liquid-tier, priority-category markets per `lab map propose` run
+
+# --- Results publishing (private mirror) ----------------------------------
+# After every nightly forecast/eval/report bundle, mirror curated results
+# (reports, latest forecast export, model artifacts) into a private git
+# checkout and push. Curated only -- never the raw data/lab.db or
+# data/snapshots/; bulk-copying and pushing the full collected dataset is
+# an intentionally manual step (scripts/publish_results.py --raw-data),
+# run by hand, not by this automatic job. Never blocks or re-triggers the
+# bundle it follows on failure (e.g. no network) -- see jobs.run_publish_job.
+publish:
+  enabled: true
+  results_dir: ../Polymarket-results   # sibling checkout of the private results repo
 
 # --- Storage -------------------------------------------------------------
 storage:

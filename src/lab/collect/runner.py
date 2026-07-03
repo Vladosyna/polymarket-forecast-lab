@@ -111,7 +111,9 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
 
     async def job_resolutions() -> None:
         if not is_paused(config):
-            await watch_resolutions(gamma, conn)
+            await watch_resolutions(
+                gamma, conn, limit=config["collect"].get("resolution_backlog_limit", 200)
+            )
 
     cadence = config["collect"]["snapshot_interval_minutes"]
     scheduler.add_job(job_sync, "interval",
@@ -219,6 +221,10 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
             await asyncio.to_thread(analytics.run_report_job, config)
 
         await _run("forecast", body)
+        # Outside _run: run_publish_job never raises, and its own success/failure
+        # must not gate the forecast/eval/report age bookkeeping above -- a stalled
+        # git push should not re-trigger (and re-bill) the whole bundle hourly.
+        await asyncio.to_thread(analytics.run_publish_job, config)
 
     async def run_shadow_service() -> None:
         await _run("shadow", lambda: asyncio.to_thread(analytics.run_shadow_job, config))

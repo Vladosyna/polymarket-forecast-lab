@@ -18,11 +18,12 @@ log = logging.getLogger(__name__)
 
 
 def run_forecast_job(config: dict[str, Any]) -> dict[str, Any]:
-    """Full forecast pass: base models + M6 coherence + M4 ensemble."""
+    """Full forecast pass: base models + M6 coherence + M7 cross-venue + M4 ensemble."""
     from lab.forecast import build_default_models, run_forecasts
     from lab.learn.refit import load_active_artifact
     from lab.models.m4_ensemble import M4Ensemble
     from lab.models.m6_consistency import scan_universe, write_m6_forecasts
+    from lab.models.m7_crossvenue import scan_confirmed_pairs, write_m7_forecasts
 
     conn = db.connect(config["storage"]["db_path"])
     store = SnapshotStore(config["storage"]["snapshots_dir"])
@@ -30,6 +31,8 @@ def run_forecast_job(config: dict[str, Any]) -> dict[str, Any]:
         counts = run_forecasts(conn, store, build_default_models(conn, config, store), config)
         findings = asyncio.run(scan_universe(conn, store, config))
         counts["m6_written"] = write_m6_forecasts(conn, store, findings, config)
+        m7_results = asyncio.run(scan_confirmed_pairs(conn, store, config))
+        counts["m7_written"] = write_m7_forecasts(conn, store, m7_results, config)
         m4 = M4Ensemble(conn, load_active_artifact(config, "m4_weights"))
         counts["m4_written"] = run_forecasts(conn, store, [m4], config)["written"]
     finally:
@@ -100,6 +103,29 @@ def run_learn_job(config: dict[str, Any], apply: bool = False) -> Any:
         conn.close()
     log.info("learn job complete", extra={"ctx": {"apply": apply, "summary": str(summary)[:200]}})
     return summary
+
+
+def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
+    """Mirror reports/exports/model artifacts to the private results repo and
+    push. Curated results only -- never the raw db/snapshots; that bulk copy
+    is a manual, user-run step (scripts/publish_results.py --raw-data), not
+    something this automatic nightly job does on its own. Never raises: a
+    publish failure (e.g. no network) must not block or re-trigger the
+    forecast/eval/report bundle it follows."""
+    from lab.publish import publish_results
+
+    if not config.get("publish", {}).get("enabled", False):
+        return {"skipped": "disabled"}
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        result = publish_results(config, conn, include_raw_data=False)
+    except Exception:
+        log.exception("publish job failed")
+        return {"error": "publish_failed"}
+    finally:
+        conn.close()
+    log.info("publish job complete", extra={"ctx": result})
+    return result
 
 
 def run_rollback_job(config: dict[str, Any], model_id: str,

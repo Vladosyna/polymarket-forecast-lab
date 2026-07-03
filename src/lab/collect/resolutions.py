@@ -49,10 +49,10 @@ def extract_final_payout(m: GammaMarket) -> tuple[float, bool] | None:
     return p_yes, "disputed" in statuses
 
 
-async def watch_resolutions(gamma: GammaClient, conn) -> int:
+async def watch_resolutions(gamma: GammaClient, conn, limit: int = 200) -> int:
     """One poll round. Returns number of resolutions recorded."""
     recorded = 0
-    for condition_id in unresolved_closed_markets(conn):
+    for condition_id in unresolved_closed_markets(conn, limit=limit):
         try:
             m = await gamma.market_by_condition(condition_id)
         except Exception:
@@ -69,6 +69,9 @@ async def watch_resolutions(gamma: GammaClient, conn) -> int:
             )
         final = extract_final_payout(m)
         if final is None:
+            # Still commit the closed-flag update above -- don't hold a write
+            # transaction open across the rest of a (possibly long) backlog scan.
+            conn.commit()
             continue
         payout_yes, disputed = final
         db.record_resolution(
@@ -79,7 +82,11 @@ async def watch_resolutions(gamma: GammaClient, conn) -> int:
             source="gamma",
         )
         recorded += 1
-    conn.commit()
+        # Commit per-candidate: at limit=3000 a single end-of-loop commit would
+        # hold one write transaction for minutes, locking out every other
+        # connection (collector jobs, `lab status`, ad-hoc queries) for the
+        # whole scan instead of a single statement's worth of time.
+        conn.commit()
     if recorded:
         log.info("resolutions recorded", extra={"ctx": {"count": recorded}})
     return recorded
