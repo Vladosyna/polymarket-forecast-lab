@@ -82,6 +82,30 @@ def test_macro_adapter_abstains_without_key():
         _state("Will GDP growth be above 2.0%?", category="economics")) is None
 
 
+def test_macro_adapter_sd_override_from_artifact(monkeypatch):
+    """A fitted m5_macro_sd artifact overrides the hand-set default (learn/refit.py)."""
+    adapter = MacroAdapter(api_key="test-key", sd_overrides={"GDPNOW": 1.23})
+    monkeypatch.setattr(adapter, "_latest_nowcast", lambda sid: 2.5)
+    out = adapter.probability(_state("Will Q3 GDP growth be above 2.0%?", category="economics"))
+    assert out is not None
+    _, trace = out
+    assert trace["sd"] == 1.23
+
+
+def test_macro_adapter_sd_override_missing_series_falls_back(monkeypatch):
+    adapter = MacroAdapter(api_key="test-key", sd_overrides={"PCENOW": 0.99})
+    monkeypatch.setattr(adapter, "_latest_nowcast", lambda sid: 2.5)
+    out = adapter.probability(_state("Will Q3 GDP growth be above 2.0%?", category="economics"))
+    _, trace = out
+    assert trace["sd"] == 0.55  # GDPNOW's hand-set default, unaffected by a PCENOW override
+
+
+def test_m5nowcast_wires_macro_artifact_into_default_adapters():
+    m5 = M5Nowcast(macro_artifact={"series": {"GDPNOW": {"sd": 0.42}}})
+    macro = next(a for a in m5.adapters if isinstance(a, MacroAdapter))
+    assert macro._sd_overrides == {"GDPNOW": 0.42}
+
+
 def test_m6_flags_incoherent_negrisk():
     legs = [
         {"condition_id": "a", "p_yes": 0.50},

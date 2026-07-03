@@ -1,4 +1,5 @@
-"""Parameter fits: M1 logistic recalibration curves and M2 category base rates.
+"""Parameter fits: M1 logistic recalibration curves, M2 category base rates,
+and M5's macro surprise distribution.
 
 Used by the Phase 2 bootstrap and re-used by the monthly `lab learn` job.
 Artifacts are versioned JSON under data/models/; the ACTIVE.json pointer
@@ -13,6 +14,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import httpx
 import numpy as np
 from scipy.optimize import minimize
 
@@ -192,6 +194,117 @@ def fit_m2_baserates(rows: list[dict], min_n: int = 50) -> dict[str, Any]:
             "base_rate": float(np.mean(outcomes)),
             "n": len(outcomes),
         }
+    return artifact
+
+
+# --- M5 macro surprise distribution ---------------------------------------
+
+FRED_OBS_URL = "https://api.stlouisfed.org/fred/series/observations"
+
+# Actual BEA release paired against each Atlanta Fed nowcast series. GDPNow/
+# PCENow methodology: a quarter's estimate is revised only until that
+# quarter's own BEA advance estimate is released, then it is fixed forever --
+# so the plain observation history is already point-in-time data. No ALFRED
+# realtime_start/realtime_end vintage query is needed for these two series.
+M5_MACRO_ACTUAL_SERIES = {
+    "GDPNOW": "A191RL1Q225SBEA",   # Real GDP, % change SAAR
+    "PCENOW": "DPCERL1Q225SBEA",   # Real PCE, % change SAAR
+}
+
+
+def fetch_fred_series(series_id: str, api_key: str) -> list[dict[str, Any]]:
+    """Full observation history for a FRED series: [{date, value}, ...]."""
+    resp = httpx.get(FRED_OBS_URL, params={
+        "series_id": series_id, "api_key": api_key, "file_type": "json",
+        "sort_order": "asc", "limit": 100000,
+    }, timeout=30)
+    resp.raise_for_status()
+    out: list[dict[str, Any]] = []
+    for obs in resp.json().get("observations", []):
+        v = obs.get("value")
+        if v in (None, ".", ""):
+            continue
+        try:
+            out.append({"date": obs["date"], "value": float(v)})
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def pair_nowcast_surprises(
+    nowcast_rows: list[dict[str, Any]], actual_rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Pair each realized quarterly release with its last pre-release nowcast.
+
+    A nowcast series keeps updating a quarter's estimate only until that
+    quarter's own advance estimate lands -- which is also what starts the next
+    quarter's nowcast window. So "the last nowcast dated before the next
+    quarter's release period begins" is the final pre-release estimate for the
+    current one.
+    """
+    actual_sorted = sorted(actual_rows, key=lambda r: r["date"])
+    nowcast_sorted = sorted(nowcast_rows, key=lambda r: r["date"])
+    pairs: list[dict[str, Any]] = []
+    for i, a in enumerate(actual_sorted):
+        period_start = a["date"]
+        next_start = actual_sorted[i + 1]["date"] if i + 1 < len(actual_sorted) else None
+        window = [n for n in nowcast_sorted
+                  if n["date"] >= period_start and (next_start is None or n["date"] < next_start)]
+        if not window:
+            continue
+        last_nowcast = window[-1]["value"]
+        pairs.append({
+            "period": period_start, "nowcast": last_nowcast, "actual": a["value"],
+            "surprise": a["value"] - last_nowcast,
+        })
+    return pairs
+
+
+def fit_m5_macro_sd(
+    train_pairs: list[dict[str, Any]], validation_pairs: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Empirical sd of (actual - nowcast) surprises, walk-forward validated.
+
+    Pure arithmetic over FRED's own point-in-time nowcast history and the
+    realized BEA release -- no LLM call and no lab-generated forecast needed,
+    safe on the same footing as the M1/M2 refits (brief section 6).
+    """
+    assert_walk_forward(train_pairs, validation_pairs)
+    train_surprises = np.array([p["surprise"] for p in train_pairs], dtype=float)
+    sd = float(np.std(train_surprises, ddof=1)) if len(train_surprises) > 1 \
+        else abs(float(train_surprises[0]))
+    sd = max(sd, EPS)
+    val_surprises = np.array([p["surprise"] for p in validation_pairs], dtype=float)
+    val_nll = float(np.sum(0.5 * np.log(2 * np.pi * sd ** 2) + val_surprises ** 2 / (2 * sd ** 2)))
+    return {
+        "sd": sd, "n_train": len(train_pairs), "n_validation": len(validation_pairs),
+        "val_nll": val_nll,
+    }
+
+
+def fit_m5_macro_sds(
+    api_key: str, *, min_quarters: int = 12, validation_quarters: int = 8,
+    fetch: Any = fetch_fred_series,
+) -> dict[str, Any]:
+    """Walk-forward sd fit for every FRED_SERIES in m5_nowcast.MacroAdapter.
+
+    Splits each series' paired (nowcast, actual) history chronologically:
+    all but the trailing `validation_quarters` train the sd, the rest hold
+    out for the walk-forward check `assert_walk_forward` requires. Series
+    with fewer than `min_quarters` paired releases are skipped, not guessed.
+    """
+    artifact: dict[str, Any] = {"kind": "m5_macro_sd", "fitted_at": now_utc_iso(), "series": {}}
+    for series_id, actual_series_id in M5_MACRO_ACTUAL_SERIES.items():
+        nowcast_rows = fetch(series_id, api_key)
+        actual_rows = fetch(actual_series_id, api_key)
+        pairs = pair_nowcast_surprises(nowcast_rows, actual_rows)
+        if len(pairs) < min_quarters:
+            log.warning("m5 macro fit: too few paired quarters, skipping",
+                        extra={"ctx": {"series": series_id, "n": len(pairs)}})
+            continue
+        train, validation = pairs[:-validation_quarters], pairs[-validation_quarters:]
+        fit = fit_m5_macro_sd(train, validation)
+        artifact["series"][series_id] = {**fit, "actual_series": actual_series_id}
     return artifact
 
 

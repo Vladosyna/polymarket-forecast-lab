@@ -38,6 +38,7 @@ from lab.learn.refit import (
     bucket_for_days,
     fit_m1_curves,
     fit_m2_baserates,
+    fit_m5_macro_sds,
     load_active_artifact,
     logit,
     save_artifact,
@@ -214,6 +215,18 @@ def _bound_m4_weights(old: dict | None, new: dict, pct: float) -> dict:
     return new
 
 
+def _bound_m5_sds(old: dict | None, new: dict, pct: float) -> dict:
+    """Clamp each series' sd move; leave n/val_nll diagnostics alone."""
+    if not old:
+        return new
+    old_s = old.get("series", {})
+    for name, fit in new.get("series", {}).items():
+        os_ = old_s.get(name)
+        if os_ and "sd" in os_ and "sd" in fit:
+            fit["sd"] = bound_step(os_["sd"], fit["sd"], pct)
+    return new
+
+
 def fit_m1_walk_forward(train: list[dict], validation: list[dict]) -> dict[str, Any]:
     """Refit path with a structural walk-forward guard (brief section 6)."""
     assert_walk_forward(train, validation)
@@ -271,7 +284,9 @@ def _process_challenger(
 # --- M1 / M2 / M4 scheduled refits ----------------------------------------
 
 def refit_statistical_models(conn, config: dict[str, Any], *, apply: bool) -> dict[str, Any]:
-    """M1 curves (CI-gated), M2 base rates + M4 weights (auto, reward signal)."""
+    """M1 curves (CI-gated), M2 base rates + M4 weights + M5 macro sd (auto, reward signal)."""
+    import os
+
     from lab.learn.bootstrap import load_observations
     from lab.models.m4_ensemble import fit_m4_weights
 
@@ -316,6 +331,21 @@ def refit_statistical_models(conn, config: dict[str, Any], *, apply: bool) -> di
         results["m4_weights"] = _process_challenger(
             conn, config, "m4_weights", m4, [], None, apply=apply, auto=True)
         results["m4_weights"]["categories"] = list(m4["categories"])
+
+    fred_key = os.environ.get("FRED_API_KEY")
+    if not fred_key:
+        results["m5_macro_sd"] = {"skipped": "no_fred_api_key"}
+    else:
+        m5cfg = _learn_cfg(config).get("m5_macro", {})
+        m5 = fit_m5_macro_sds(fred_key, min_quarters=m5cfg.get("min_quarters", 12),
+                              validation_quarters=m5cfg.get("validation_quarters", 8))
+        if m5["series"]:
+            m5 = _bound_m5_sds(load_active_artifact(config, "m5_macro_sd"), m5, pct)
+            results["m5_macro_sd"] = _process_challenger(
+                conn, config, "m5_macro_sd", m5, [], None, apply=apply, auto=True)
+            results["m5_macro_sd"]["series"] = list(m5["series"])
+        else:
+            results["m5_macro_sd"] = {"skipped": "insufficient_quarters"}
     return results
 
 

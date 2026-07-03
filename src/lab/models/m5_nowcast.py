@@ -127,15 +127,19 @@ class MacroAdapter:
     P(print > threshold) from a normal surprise distribution centered on the
     latest FRED nowcast (GDPNOW / PCENOW). Requires FRED_API_KEY; without it the
     adapter abstains (returns None) so M5 falls through cleanly rather than
-    guessing. sd defaults are refit by `lab learn`.
+    guessing. sd defaults are hand-set; `sd_overrides` (from the active
+    m5_macro_sd artifact, refit by `lab learn` on real FRED history -- see
+    learn/refit.py) takes precedence once one exists.
     """
 
     FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None,
+                 sd_overrides: dict[str, float] | None = None) -> None:
         # Explicit "" disables; None falls back to the environment.
         self._api_key = api_key if api_key is not None else os.environ.get("FRED_API_KEY")
         self._nowcasts: dict[str, float | None] = {}
+        self._sd_overrides = sd_overrides or {}
 
     def covers(self, market: MarketState) -> bool:
         q = market.question or ""
@@ -180,7 +184,7 @@ class MacroAdapter:
             if nowcast is None:
                 return None
             threshold = float(m.group("threshold"))
-            sd = spec["sd"]
+            sd = self._sd_overrides.get(spec["series_id"], spec["sd"])
             above = not re.search(r"\b(below|under|less than)\b", q, re.I)
             p_above = 1 - norm.cdf(threshold, loc=nowcast, scale=sd)
             p = float(p_above if above else 1 - p_above)
@@ -190,11 +194,22 @@ class MacroAdapter:
         return None
 
 
+def _sd_overrides_from_artifact(artifact: dict[str, Any] | None) -> dict[str, float]:
+    if not artifact:
+        return {}
+    return {series_id: fit["sd"] for series_id, fit in artifact.get("series", {}).items()
+            if "sd" in fit}
+
+
 class M5Nowcast:
     model_id = "m5_nowcast"
 
-    def __init__(self, adapters: list[Any] | None = None) -> None:
-        self.adapters = adapters if adapters is not None else [WeatherAdapter(), MacroAdapter()]
+    def __init__(self, adapters: list[Any] | None = None,
+                 macro_artifact: dict[str, Any] | None = None) -> None:
+        self.adapters = adapters if adapters is not None else [
+            WeatherAdapter(),
+            MacroAdapter(sd_overrides=_sd_overrides_from_artifact(macro_artifact)),
+        ]
 
     def forecast(self, market: MarketState, context: dict[str, Any]) -> ForecastResult | None:
         for adapter in self.adapters:

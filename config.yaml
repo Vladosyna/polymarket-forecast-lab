@@ -135,6 +135,12 @@ learn:
   max_step_pct: 0.20       # no live parameter moves more than 20% (relative) per cycle
   rollback_window: 50      # trailing resolved forecasts the rollback breaker scores over
   promotion_min_n: 200     # min resolved markets before a CI-gated promotion can fire
+  # M5 macro surprise distribution: fit on FRED's own point-in-time GDPNOW/PCENOW
+  # history vs realized BEA releases (no ALFRED vintage query needed -- see
+  # learn/refit.py). Requires FRED_API_KEY; skipped without one.
+  m5_macro:
+    min_quarters: 12         # skip a series with fewer paired (nowcast, actual) quarters
+    validation_quarters: 8   # trailing quarters held out for the walk-forward split
 
 # --- Orchestrator schedule (`lab run`) ----------------------------------
 # The one-button process keeps the collector running and fires these analytics
