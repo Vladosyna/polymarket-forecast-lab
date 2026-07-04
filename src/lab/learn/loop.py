@@ -30,6 +30,7 @@ from typing import Any, Callable
 
 import numpy as np
 
+from lab.eval.anytime import confidence_sequence
 from lab.eval.scoring import cluster_bootstrap_ci
 from lab.learn import registry
 from lab.learn.refit import (
@@ -74,6 +75,10 @@ def _iterations(config: dict[str, Any]) -> int:
     return int(config.get("eval", {}).get("bootstrap_iterations", 2000))
 
 
+def _cs_alpha(config: dict[str, Any]) -> float:
+    return float(config.get("eval", {}).get("confidence_sequence", {}).get("alpha", 0.05))
+
+
 def _load_artifact_file(artifact_path: str) -> dict[str, Any] | None:
     p = Path(artifact_path)
     p = p if p.is_absolute() else PROJECT_ROOT / p
@@ -92,11 +97,18 @@ def passes_ci_gate(
     *,
     iterations: int,
     min_n: int,
+    alpha: float = 0.05,
 ) -> tuple[bool, dict[str, Any]]:
-    """True iff the challenger beats the champion with a CI excluding zero.
+    """True iff the challenger beats the champion with the anytime-valid
+    confidence sequence excluding zero (brief section 7, Phase 11: "promotions,
+    rollbacks... must cite the confidence sequence; the fixed-n CI stays for
+    monthly descriptive snapshots"). Despite the parameter name, `condition_ids`
+    is an opaque cluster key as of Phase 11 -- event_id where a cross-venue
+    match is confirmed, else condition_id.
 
     diffs = champ_brier - chall_brier ; positive = challenger better (lower Brier).
-    CI is the cluster bootstrap by condition_id (correlated repeat forecasts).
+    The classical cluster-bootstrap CI is still computed and returned in `stats`
+    for the descriptive snapshot, but no longer decides promotion/rollback.
     """
     cids = np.asarray(condition_ids)
     diffs = np.asarray(champ_brier, dtype=float) - np.asarray(chall_brier, dtype=float)
@@ -107,8 +119,11 @@ def passes_ci_gate(
         stats["reason"] = "insufficient_n"
         return False, stats
     lo, hi = cluster_bootstrap_ci(diffs, cids, iterations=iterations)
-    stats["ci_lo"], stats["ci_hi"] = lo, hi
-    return (lo > 0), stats
+    stats["ci_lo"], stats["ci_hi"] = lo, hi  # descriptive only (brief section 7)
+    per_cluster_diffs = np.array([float(np.mean(diffs[cids == c])) for c in np.unique(cids)])
+    cs = confidence_sequence(per_cluster_diffs, alpha=alpha)
+    stats["cs_lo"], stats["cs_hi"] = cs.lo, cs.hi
+    return (cs.lo > 0), stats
 
 
 # --- per-model prediction replays (arithmetic only, no LLM) ----------------
@@ -138,10 +153,11 @@ def m1_resolved_rows(conn, limit: int | None = None) -> list[dict]:
     rows = [dict(r) for r in conn.execute(
         """
         SELECT f.condition_id, f.p_market_at_ts AS p_market, r.payout_yes AS outcome,
-               r.resolved_ts,
+               r.resolved_ts, m.event_id AS event_id,
                (julianday(r.resolved_ts) - julianday(f.ts)) AS days_to_resolution
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
+        JOIN markets m ON m.condition_id = f.condition_id
         WHERE f.model_id = 'm0_market'
         ORDER BY r.resolved_ts DESC
         """
@@ -162,10 +178,11 @@ def m3_resolved_rows(conn, limit: int | None = None) -> list[dict]:
     for r in conn.execute(
         """
         SELECT f.condition_id, f.ts, f.p_market_at_ts AS p_market, r.payout_yes AS outcome,
-               r.resolved_ts, e.dossier_json
+               r.resolved_ts, e.dossier_json, m.event_id AS event_id
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
         JOIN evidence_runs e ON e.id = f.evidence_run_id
+        JOIN markets m ON m.condition_id = f.condition_id
         WHERE f.model_id GLOB 'm3_evidence*'
         ORDER BY r.resolved_ts DESC
         """
@@ -176,7 +193,7 @@ def m3_resolved_rows(conn, limit: int | None = None) -> list[dict]:
             continue
         out.append({
             "condition_id": r["condition_id"], "ts": r["ts"], "p_market": r["p_market"],
-            "outcome": r["outcome"], "resolved_ts": r["resolved_ts"],
+            "outcome": r["outcome"], "resolved_ts": r["resolved_ts"], "event_id": r["event_id"],
             "items": dossier.get("evidence_items", []),
         })
     return out[:limit] if limit else out
@@ -263,12 +280,13 @@ def _process_challenger(
     elif not holdout or predict_fn is None:
         decision["reason"] = "no_holdout"
     else:
-        cids = np.array([r["condition_id"] for r in holdout])
+        cids = np.array([r.get("event_id") or r["condition_id"] for r in holdout])
         champ_b = np.array([(predict_fn(champ, r) - r["outcome"]) ** 2 for r in holdout])
         chall_b = np.array([(predict_fn(artifact, r) - r["outcome"]) ** 2 for r in holdout])
         ok, stats = passes_ci_gate(champ_b, chall_b, cids,
                                    iterations=_iterations(config),
-                                   min_n=_promotion_min_n(config))
+                                   min_n=_promotion_min_n(config),
+                                   alpha=_cs_alpha(config))
         decision.update(promoted=ok, **stats)
 
     if apply:
@@ -439,12 +457,13 @@ def run_rollback_checks(conn, config: dict[str, Any], *, apply: bool) -> list[di
         prev_art = _load_artifact_file(prev["artifact_path"])
         if active_art is None or prev_art is None:
             continue
-        cids = np.array([r["condition_id"] for r in holdout])
+        cids = np.array([r.get("event_id") or r["condition_id"] for r in holdout])
         active_b = np.array([(predict_fn(active_art, r) - r["outcome"]) ** 2 for r in holdout])
         prev_b = np.array([(predict_fn(prev_art, r) - r["outcome"]) ** 2 for r in holdout])
         # champ=active, challenger=prev: positive skill => prev beats current => degraded.
         degraded, stats = passes_ci_gate(active_b, prev_b, cids,
-                                         iterations=_iterations(config), min_n=2)
+                                         iterations=_iterations(config), min_n=2,
+                                         alpha=_cs_alpha(config))
         entry: dict[str, Any] = {"model": model_key, "degraded": degraded, "window": len(holdout),
                                  **stats}
         if degraded and apply:

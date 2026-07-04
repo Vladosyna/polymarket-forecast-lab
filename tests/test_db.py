@@ -96,6 +96,39 @@ def test_migrate_multi_venue_is_idempotent(conn):
     assert {"venue", "venue_native_id", "event_id"} <= cols
 
 
+def test_migrate_eval_measurement_upgrade_is_idempotent(conn):
+    # db.connect() (the `conn` fixture) already ran the migration once.
+    applied_again = db.migrate_eval_measurement_upgrade(conn)
+    assert applied_again == {
+        "venue_column": False, "category_column": False,
+        "skill_pw_column": False, "skill_pw_ci_lo_column": False,
+        "skill_pw_ci_hi_column": False, "n_strata_pw_column": False,
+        "cs_lo_column": False, "cs_hi_column": False,
+        "cs_covers_zero_column": False, "n_event_clusters_column": False,
+    }
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(eval_runs)")}
+    assert {"venue", "category", "skill_pw", "skill_pw_ci_lo", "skill_pw_ci_hi",
+           "n_strata_pw", "cs_lo", "cs_hi", "cs_covers_zero", "n_event_clusters"} <= cols
+
+
+def test_migrate_eval_measurement_upgrade_legacy_row_gets_null_new_columns(conn):
+    # A pre-Phase-11 style row (only the original columns populated) must
+    # survive the migration untouched, with new columns reading NULL --
+    # never backfilled/guessed.
+    conn.execute(
+        "INSERT INTO eval_runs (ts, model_id, window_label, n, brier, brier_market, skill, "
+        "skill_ci_lo, skill_ci_hi, log_loss, log_loss_market) "
+        "VALUES ('2026-01-01T00:00:00Z', 'm0_market', 'all_time', 10, 0.2, 0.25, 0.05, 0.01, 0.09, 0.4, 0.5)"
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM eval_runs WHERE model_id = 'm0_market'"
+    ).fetchone()
+    assert row["skill"] == pytest.approx(0.05)
+    assert row["venue"] is None and row["category"] is None
+    assert row["skill_pw"] is None and row["cs_lo"] is None
+
+
 def test_venues_seeded_with_brief_flags(conn):
     rows = {r["venue"]: dict(r) for r in conn.execute("SELECT * FROM venues")}
     assert rows["polymarket"] == {"venue": "polymarket", "trust_tier": "money", "forecastable": 1, "in_m7_pool": 0}

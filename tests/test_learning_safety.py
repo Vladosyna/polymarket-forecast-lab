@@ -104,14 +104,42 @@ def test_ci_gate_rejects_better_point_estimate_with_ci_over_zero():
 
 
 def test_ci_gate_accepts_consistent_improvement():
+    """Phase 11: the gate is now the anytime-valid confidence sequence, not
+    the bootstrap CI (which stays purely descriptive, see passes_ci_gate's
+    docstring). The CS's normal-mixture boundary is calibrated for a target
+    horizon and, unlike the fixed-n bootstrap, doesn't collapse arbitrarily
+    fast just because a synthetic signal happens to be very low-noise -- n=250
+    (enough for the old bootstrap-only gate) no longer suffices here; n=600
+    does, with a comfortable margin, while the effect and noise level are
+    otherwise identical to before."""
     rng = np.random.default_rng(2)
-    n = 250
+    n = 600
     cids = np.arange(n)
     champ = np.full(n, 0.25)
     chall = champ - rng.normal(0.05, 0.01, n)   # consistent, tight improvement
     promoted, stats = passes_ci_gate(champ, chall, cids, iterations=500, min_n=200)
-    assert stats["ci_lo"] > 0
+    assert stats["ci_lo"] > 0     # descriptive bootstrap CI also excludes zero
+    assert stats["cs_lo"] > 0     # the actual gate: the CS excludes zero
     assert promoted is True
+
+
+def test_ci_gate_demonstrably_follows_the_cs_not_the_bootstrap_ci():
+    """Phase 11 acceptance criterion: "promotion/rollback code paths
+    demonstrably consult the CS." At n=250 with this low-noise signal, the
+    fixed-n bootstrap CI already excludes zero, but the anytime-valid CS
+    (more conservative at this sample size) does not -- a real disagreement
+    between the two estimators. The gate must follow the CS and refuse
+    promotion, proving it is no longer a bootstrap-CI decision wearing the
+    same function name."""
+    rng = np.random.default_rng(2)
+    n = 250
+    cids = np.arange(n)
+    champ = np.full(n, 0.25)
+    chall = champ - rng.normal(0.05, 0.01, n)
+    promoted, stats = passes_ci_gate(champ, chall, cids, iterations=500, min_n=200)
+    assert stats["ci_lo"] > 0      # bootstrap CI says "promote"...
+    assert stats["cs_lo"] <= 0     # ...but the CS disagrees...
+    assert promoted is False       # ...and the CS wins.
 
 
 def test_ci_gate_blocks_below_min_n():

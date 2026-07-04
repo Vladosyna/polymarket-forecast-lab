@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -202,6 +202,45 @@ def migrate_multi_venue(conn: sqlite3.Connection) -> dict[str, bool]:
     return applied
 
 
+def migrate_eval_measurement_upgrade(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Idempotent v2.1 migration (Phase 11): ALTER `eval_runs` with the venue/
+    category dimension, the anytime-valid confidence sequence columns, and the
+    precision-weighted stratified estimator columns (CREATE TABLE IF NOT EXISTS
+    in SCHEMA can't add columns to a table that already has rows). Safe to call
+    on every connect() -- each column checks before adding, so a second run is
+    a no-op. Old rows keep venue/category NULL (legacy pooled snapshots from
+    before this migration), never rewritten.
+    """
+    applied = {
+        "venue_column": False, "category_column": False,
+        "skill_pw_column": False, "skill_pw_ci_lo_column": False,
+        "skill_pw_ci_hi_column": False, "n_strata_pw_column": False,
+        "cs_lo_column": False, "cs_hi_column": False,
+        "cs_covers_zero_column": False, "n_event_clusters_column": False,
+    }
+    columns = {
+        "venue_column": ("venue", "TEXT"),
+        "category_column": ("category", "TEXT"),
+        "skill_pw_column": ("skill_pw", "REAL"),
+        "skill_pw_ci_lo_column": ("skill_pw_ci_lo", "REAL"),
+        "skill_pw_ci_hi_column": ("skill_pw_ci_hi", "REAL"),
+        "n_strata_pw_column": ("n_strata_pw", "INTEGER"),
+        "cs_lo_column": ("cs_lo", "REAL"),
+        "cs_hi_column": ("cs_hi", "REAL"),
+        "cs_covers_zero_column": ("cs_covers_zero", "INTEGER"),
+        "n_event_clusters_column": ("n_event_clusters", "INTEGER"),
+    }
+    for key, (column, sql_type) in columns.items():
+        if not _column_exists(conn, "eval_runs", column):
+            conn.execute(f"ALTER TABLE eval_runs ADD COLUMN {column} {sql_type}")
+            applied[key] = True
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_eval_runs_venue_category ON eval_runs(venue, category)"
+    )
+    conn.commit()
+    return applied
+
+
 class ForecastLedgerViolation(RuntimeError):
     """Raised on any attempt to UPDATE or DELETE a forecast row."""
 
@@ -227,6 +266,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=10000")
     conn.executescript(SCHEMA)
     migrate_multi_venue(conn)
+    migrate_eval_measurement_upgrade(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )

@@ -41,26 +41,40 @@ shadow-portfolio numbers, where present, are SIMULATION only.</p>
 <h2>Data health</h2>
 <div class="health">{{ health }}</div>
 
-<h2>Skill vs market (paired Brier)</h2>
+<h2>Skill vs market (paired Brier), by venue and category</h2>
 <p class="note">skill = mean(brier_market − brier_model); positive = beating the market.
-CI: cluster bootstrap by market. A skill estimate smaller than its own MDE is noise by construction.</p>
+95% CI: cluster bootstrap by event (fallback market) -- descriptive only as of Phase 11.
+n markets counts resolved event clusters, not venue-market rows. A skill estimate smaller
+than its own MDE is noise by construction. skill_pw is the precision-weighted stratified
+estimator (brief section 7); a skill claim requires the anytime-valid CS AND skill_pw's own
+CI to both exclude zero and agree in direction.</p>
 {% if skill_rows %}
 <table>
-<tr><th>model</th><th>window</th><th>n rows</th><th>n markets</th><th>tier</th>
+<tr><th>model</th><th>venue</th><th>category</th><th>window</th><th>n rows</th><th>n markets</th><th>tier</th>
 <th>brier model</th><th>brier market</th><th>skill</th><th>95% CI</th><th>MDE</th>
+<th>skill_pw</th><th>skill_pw 95% CI</th><th>n strata</th>
+<th>anytime CS</th><th>CS covers 0?</th>
 <th>log loss</th><th>log loss mkt</th></tr>
 {% for r in skill_rows %}
-<tr><td>{{ r.model_id }}</td><td>{{ r.window }}</td><td>{{ r.n }}</td><td>{{ r.n_markets }}</td>
+<tr><td>{{ r.model_id }}</td><td>{{ r.venue }}</td><td>{{ r.category }}</td>
+<td>{{ r.window }}</td><td>{{ r.n }}</td><td>{{ r.n_markets }}</td>
 <td class="tier-{{ r.tier.split(' ')[0] }}">{{ r.tier }}</td>
 <td>{{ "%.4f"|format(r.brier_model) }}</td><td>{{ "%.4f"|format(r.brier_market) }}</td>
 <td>{{ "%.4f"|format(r.skill) }}</td>
 <td>[{{ "%.4f"|format(r.ci_lo) }}, {{ "%.4f"|format(r.ci_hi) }}]</td>
 <td>{{ "%.4f"|format(r.mde) if r.mde == r.mde else "—" }}</td>
+<td>{{ "%.4f"|format(r.skill_pw) if r.skill_pw is not none else "insufficient data" }}</td>
+<td>{% if r.skill_pw_ci_lo is not none %}[{{ "%.4f"|format(r.skill_pw_ci_lo) }}, {{ "%.4f"|format(r.skill_pw_ci_hi) }}]{% else %}—{% endif %}</td>
+<td>{{ r.n_strata_pw if r.n_strata_pw is not none else "—" }}</td>
+<td>{% if r.cs_lo is not none %}[{{ "%.4f"|format(r.cs_lo) }}, {{ "%.4f"|format(r.cs_hi) }}]{% else %}—{% endif %}</td>
+<td class="{{ 'tier-INSUFFICIENT' if r.cs_covers_zero else 'tier-STANDARD' }}">
+{% if r.cs_covers_zero is not none %}{{ "yes" if r.cs_covers_zero else "no" }}{% else %}—{% endif %}</td>
 <td>{{ "%.4f"|format(r.log_loss) }}</td><td>{{ "%.4f"|format(r.log_loss_market) }}</td></tr>
 {% endfor %}
 </table>
 <p class="note">Rows labeled <b>null_control</b> are the sports control sample: statistically
-significant skill there invalidates the run pending investigation.</p>
+significant skill there invalidates the run pending investigation. Rows with venue/category
+"(legacy)" predate Phase 11 and were never re-scored per-venue.</p>
 {% else %}
 <p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no resolved paired forecasts yet.</p>
 {% endif %}
@@ -97,15 +111,21 @@ Miss error sources: {{ lessons.miss_error_sources }}</p>
 
 
 def latest_eval_rows(conn) -> list[dict]:
-    """Most recent eval_runs row per (model, window)."""
+    """Most recent eval_runs row per (model, window, venue, category).
+
+    `IS` (not `=`) for venue/category: SQLite's `=` is NULL-unsafe, and a
+    legacy pre-Phase-11 row has NULL venue/category -- `IS` groups those
+    together correctly instead of dropping them from every join match.
+    """
     rows = conn.execute(
         """
         SELECT e.* FROM eval_runs e
-        JOIN (SELECT model_id, window_label, MAX(ts) AS ts FROM eval_runs
-              GROUP BY model_id, window_label) latest
+        JOIN (SELECT model_id, window_label, venue, category, MAX(ts) AS ts
+              FROM eval_runs GROUP BY model_id, window_label, venue, category) latest
         ON latest.model_id = e.model_id AND latest.window_label = e.window_label
+           AND latest.venue IS e.venue AND latest.category IS e.category
            AND latest.ts = e.ts
-        ORDER BY e.model_id, e.window_label
+        ORDER BY e.model_id, e.venue, e.category, e.window_label
         """
     ).fetchall()
     return [dict(r) for r in rows]
@@ -122,40 +142,57 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
     skill_rows = []
     bins_by_model: dict[str, list[dict]] = {}
     for r in latest_eval_rows(conn):
-        n_markets = len({
-            row["condition_id"] for row in conn.execute(
-                """SELECT DISTINCT f.condition_id FROM forecasts f
-                   JOIN resolutions res ON res.condition_id = f.condition_id
-                   WHERE f.model_id = ?""", (r["model_id"],))
-        })
+        if r["n_event_clusters"] is not None:
+            # Phase 11 row: the event-cluster count is already computed and
+            # persisted by eval/run.py's evaluate_model -- no need to redo it.
+            n_markets = r["n_event_clusters"]
+        else:
+            # Legacy pre-Phase-11 row (venue/category NULL): fall back to the
+            # old unscoped condition_id count.
+            n_markets = len({
+                row["condition_id"] for row in conn.execute(
+                    """SELECT DISTINCT f.condition_id FROM forecasts f
+                       JOIN resolutions res ON res.condition_id = f.condition_id
+                       WHERE f.model_id = ?""", (r["model_id"],))
+            })
         skill_rows.append({
-            "model_id": r["model_id"], "window": r["window_label"], "n": r["n"],
-            "n_markets": n_markets,
+            "model_id": r["model_id"], "window": r["window_label"],
+            "venue": r["venue"] or "(legacy)", "category": r["category"] or "(legacy)",
+            "n": r["n"], "n_markets": n_markets,
             "tier": honesty_tier(n_markets, config["eval"]["n_insufficient"],
                                  config["eval"]["n_preliminary"]),
             "brier_model": r["brier"], "brier_market": r["brier_market"],
             "skill": r["skill"], "ci_lo": r["skill_ci_lo"], "ci_hi": r["skill_ci_hi"],
             "mde": float("nan"),
+            "skill_pw": r["skill_pw"], "skill_pw_ci_lo": r["skill_pw_ci_lo"],
+            "skill_pw_ci_hi": r["skill_pw_ci_hi"], "n_strata_pw": r["n_strata_pw"],
+            "cs_lo": r["cs_lo"], "cs_hi": r["cs_hi"], "cs_covers_zero": r["cs_covers_zero"],
             "log_loss": r["log_loss"], "log_loss_market": r["log_loss_market"],
         })
         if r["window_label"] == "all_time" and r["calibration_json"]:
             bins_by_model[r["model_id"]] = json.loads(r["calibration_json"])
 
-    # Recompute MDE inline from stored paired rows (cheap at current scale).
+    # Recompute MDE inline from stored paired rows (cheap at current scale),
+    # scoped to each row's own venue/category and keyed by event-cluster.
     from lab.eval.run import resolved_forecast_rows
-    for row in skill_rows:
+    for row, r in zip(skill_rows, latest_eval_rows(conn)):
         if row["window"] != "all_time":
             continue
-        pairs = resolved_forecast_rows(conn, row["model_id"], None)
+        venue_filter = r["venue"]
+        category_filter = None if r["category"] in (None, "ALL") else r["category"]
+        pairs = resolved_forecast_rows(
+            conn, row["model_id"], None, venue=venue_filter, category=category_filter
+        )
         if len(pairs) < 2:
             continue
-        diffs_by_market: dict[str, list[float]] = {}
+        diffs_by_cluster: dict[str, list[float]] = {}
         for p in pairs:
             d = (p["p_market_at_ts"] - p["payout_yes"]) ** 2 - (p["p_yes"] - p["payout_yes"]) ** 2
-            diffs_by_market.setdefault(p["condition_id"], []).append(d)
-        per_market = np.array([np.mean(v) for v in diffs_by_market.values()])
-        if len(per_market) > 1:
-            row["mde"] = float(2.8 * np.std(per_market, ddof=1) / np.sqrt(len(per_market)))
+            cluster_id = p["event_id"] or p["condition_id"]
+            diffs_by_cluster.setdefault(cluster_id, []).append(d)
+        per_cluster = np.array([np.mean(v) for v in diffs_by_cluster.values()])
+        if len(per_cluster) > 1:
+            row["mde"] = float(2.8 * np.std(per_cluster, ddof=1) / np.sqrt(len(per_cluster)))
 
     calibration_plot = None
     if bins_by_model:

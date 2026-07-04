@@ -83,3 +83,71 @@ def test_eval_and_report_on_fixtures(config):
     assert "m_test" in html
     assert "INSUFFICIENT DATA" in html  # n=6 markets is far below 200
     conn.close()
+
+
+def _seed_multi_venue(conn):
+    """>=2 venues x >=2 categories, enough rows per stratum for skill_pw to
+    qualify (min_stratum_n=30, min_strata=3) -- one price bucket per market
+    below plus enough markets to reach 3+ qualifying strata overall."""
+    combos = [
+        ("polymarket", "economics"), ("polymarket", "politics"),
+        ("kalshi", "economics"),
+    ]
+    prices = [0.2, 0.5, 0.8]  # 3 distinct price buckets -> 3 qualifying strata
+    i = 0
+    for venue, category in combos:
+        for price in prices:
+            for _ in range(30):  # >= min_stratum_n per (combo, price bucket)
+                cid = f"{venue}:{i}" if venue != "polymarket" else f"0x{i}"
+                i += 1
+                db.upsert_market(conn, {
+                    "condition_id": cid, "venue": venue, "venue_native_id": cid,
+                    "slug": None, "question": f"q{i}?", "category": category,
+                    "description": "d", "end_date_iso": "2026-12-31T00:00:00+00:00",
+                    "token_id_yes": None, "token_id_no": None, "neg_risk": 0,
+                    "active": 1, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
+                    "tier": "liquid",
+                })
+                outcome = 1.0 if price >= 0.5 else 0.0
+                db.record_resolution(conn, cid, "2026-07-01T00:00:00+00:00", outcome, False, "gamma")
+                db.append_forecast(conn, {
+                    "ts": "2026-06-01T00:00:00+00:00", "condition_id": cid,
+                    "model_id": "m_multi", "p_yes": min(price + 0.1, 0.99),
+                    "p_market_at_ts": price, "spread_at_ts": 0.02,
+                })
+    conn.commit()
+
+
+def test_report_renders_venue_category_matrix_with_both_estimators(config):
+    """Phase 11 acceptance criterion: the report renders the venue x category
+    matrix with both the anytime-valid CS and the precision-weighted
+    stratified estimator."""
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_multi_venue(conn)
+    run_eval(conn, config)
+
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    path = render_report(conn, store, config)
+    html = path.read_text(encoding="utf-8")
+
+    assert "m_multi" in html
+    assert "skill_pw" in html or "insufficient data" in html  # column present either way
+    assert "anytime CS" in html
+    for venue in ("polymarket", "kalshi"):
+        assert venue in html
+    for category in ("economics", "politics", "ALL"):
+        assert category in html
+
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM eval_runs WHERE model_id = 'm_multi' AND window_label = 'all_time'"
+    )]
+    keys = {(r["venue"], r["category"]) for r in rows}
+    assert ("polymarket", "economics") in keys
+    assert ("polymarket", "politics") in keys
+    assert ("kalshi", "economics") in keys
+    # The economics/polymarket cell has 90 rows across 3 price buckets of 30
+    # each -- enough for skill_pw to actually compute (not "insufficient data").
+    econ_poly = next(r for r in rows if (r["venue"], r["category"]) == ("polymarket", "economics"))
+    assert econ_poly["skill_pw"] is not None
+    assert econ_poly["n_strata_pw"] >= 3
+    conn.close()

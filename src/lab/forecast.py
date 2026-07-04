@@ -39,6 +39,28 @@ def null_control_ids(conn, config: dict[str, Any]) -> set[str]:
     return set(rng.sample(ids, min(nc["sample_size"], len(ids))))
 
 
+def null_control_ids_by_venue(conn, config: dict[str, Any]) -> dict[str, set[str]]:
+    """Per-venue deterministic sports sample -- one seeded set per
+    forecastable venue (brief Phase 11: "extend the sports null control to
+    every forecastable venue"). Independent of `null_control_ids` above,
+    which is used for forecast *eligibility* and stays venue-agnostic."""
+    nc = config["universe"]["null_control"]
+    venues = [r["venue"] for r in conn.execute(
+        "SELECT venue FROM venues WHERE forecastable = 1"
+    )]
+    out: dict[str, set[str]] = {}
+    for venue in venues:
+        rows = conn.execute(
+            "SELECT condition_id FROM markets WHERE category = ? AND venue = ? "
+            "ORDER BY condition_id",
+            (nc["category"], venue),
+        ).fetchall()
+        ids = [r["condition_id"] for r in rows]
+        rng = random.Random(nc["random_seed"])
+        out[venue] = set(rng.sample(ids, min(nc["sample_size"], len(ids))))
+    return out
+
+
 def _days_to_resolution(end_date_iso: str | None, now: datetime) -> float | None:
     if not end_date_iso:
         return None
