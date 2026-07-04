@@ -35,9 +35,16 @@ class KalshiMarket(BaseModel):
     """Subset of a Kalshi /markets item used by the lab."""
 
     ticker: str
+    event_ticker: str | None = None
     title: str | None = None
     status: str | None = None
+    result: str | None = None
+    rules_primary: str | None = None
     close_time: str | None = None
+    expiration_time: str | None = None
+    settlement_ts: str | None = None
+    liquidity_dollars: float | None = Field(default=None, alias="liquidity_dollars")
+    volume_fp: float | None = Field(default=None, alias="volume_fp")
     yes_bid_dollars: float | None = Field(default=None, alias="yes_bid_dollars")
     yes_ask_dollars: float | None = Field(default=None, alias="yes_ask_dollars")
     last_price_dollars: float | None = Field(default=None, alias="last_price_dollars")
@@ -45,8 +52,21 @@ class KalshiMarket(BaseModel):
     model_config = {"populate_by_name": True, "extra": "ignore"}
 
     _norm = field_validator(
-        "yes_bid_dollars", "yes_ask_dollars", "last_price_dollars", mode="before"
+        "yes_bid_dollars", "yes_ask_dollars", "last_price_dollars", "liquidity_dollars",
+        mode="before",
     )(_dollars)
+
+    # volume_fp is a contract count (like Gamma's volumeNum), not a price -- no
+    # _dollars clamp/rounding semantics apply, just a plain float coercion.
+    @field_validator("volume_fp", mode="before")
+    @classmethod
+    def _coerce_volume(cls, value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     @property
     def yes_price(self) -> float | None:
@@ -90,4 +110,40 @@ class KalshiClient(BaseClient):
                 markets.append(KalshiMarket.model_validate(item))
             except Exception:
                 continue
+        return markets
+
+    async def series_by_category(self, category: str, limit: int = 200) -> list[dict]:
+        """One page of /series for a given Kalshi category (e.g. 'Economics').
+
+        Single page only -- the universe sync bounds fan-out by
+        max_series_per_sync across the whole cycle (politeness), so no
+        internal pagination loop is needed here.
+        """
+        raw = await self.get_json("/series", params={"category": category, "limit": limit})
+        return raw.get("series", []) if isinstance(raw, dict) else []
+
+    async def markets_for_series(
+        self, series_ticker: str, status: str, limit: int = 200, max_pages: int = 5
+    ) -> list[KalshiMarket]:
+        """All markets for one series+status, paginating via the response
+        cursor until exhausted or `max_pages` is reached (politeness cap --
+        a single series should never need more than a handful of pages)."""
+        markets: list[KalshiMarket] = []
+        cursor: str | None = None
+        for _ in range(max_pages):
+            params: dict[str, Any] = {
+                "series_ticker": series_ticker, "status": status, "limit": limit,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            raw = await self.get_json("/markets", params=params)
+            items = raw.get("markets", []) if isinstance(raw, dict) else []
+            for item in items:
+                try:
+                    markets.append(KalshiMarket.model_validate(item))
+                except Exception:
+                    continue
+            cursor = raw.get("cursor") if isinstance(raw, dict) else None
+            if not cursor or not items:
+                break
         return markets

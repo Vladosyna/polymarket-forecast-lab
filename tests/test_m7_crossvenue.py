@@ -12,6 +12,7 @@ from lab.models.base import ForecastResult
 from lab.models.m7_crossvenue import (
     confirm_match,
     confirmed_by_condition,
+    link_confirmed_event,
     load_markets_map,
     pool_log_odds,
     propose_matches,
@@ -97,6 +98,31 @@ def test_confirm_match_returns_false_with_nothing_to_confirm():
     data = {"confirmed": [], "proposed": []}
     assert confirm_match(data, "0x1", "kalshi") is False
     assert data["confirmed"] == []
+
+
+def test_link_confirmed_event_creates_event_linking_both_markets(config):
+    """Phase 10 acceptance: a confirmed match creates an event linking >=2
+    venue-markets, using the Polymarket market's own question as the title."""
+    conn = db.connect(config["storage"]["db_path"])
+    db.upsert_market(conn, {
+        "condition_id": "0x1", "venue": "polymarket", "venue_native_id": "0x1",
+        "slug": "s", "question": "Will X happen?", "category": "politics",
+        "description": "d", "end_date_iso": "2026-12-31T00:00:00+00:00",
+        "token_id_yes": "1", "token_id_no": "2", "neg_risk": 0,
+        "active": 1, "closed": 0, "liquidity_num": 1.0, "volume_num": 1.0,
+        "tier": "liquid",
+    })
+    conn.commit()
+
+    event_id = link_confirmed_event(conn, "0x1", "kalshi", "T1")
+
+    rows = {r["condition_id"]: r["event_id"]
+           for r in conn.execute("SELECT condition_id, event_id FROM markets")}
+    assert rows["0x1"] == event_id
+    assert rows["kalshi:T1"] == event_id
+    ev = conn.execute("SELECT title FROM events WHERE event_id = ?", (event_id,)).fetchone()
+    assert ev["title"] == "Will X happen?"
+    conn.close()
 
 
 def test_confirmed_by_condition_excludes_proposed():

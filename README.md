@@ -137,6 +137,7 @@ cost caps) — every default is documented inline.
 | `lab status` | Data health: snapshot freshness, gaps, watcher lag, spend |
 | `lab learn` | Monthly learning loop: batch refits, champion/challenger, post-mortems |
 | `lab run` | **One-button orchestrator**: collector + scheduled forecast/eval/report/shadow/learn in a single process |
+| `lab watchdog` | Supervises `lab run`: auto-restarts it 10 minutes after any exit/crash |
 | `lab map propose` | M7: LLM proposes candidate Kalshi/Metaculus matches into `markets_map.yaml` (`proposed`, not live) |
 | `lab map confirm <condition_id>` | M7: human confirms a proposed (or hand-curated) match — only confirmed pairs are ever forecast |
 | `lab map list` | M7: show confirmed and pending-proposed matches |
@@ -148,13 +149,24 @@ schedule in `config.yaml` (`schedule:` section, all UTC): forecast+eval+report
 nightly, shadow weekly, learn monthly. It also runs one forecast/eval/report
 pass on startup (`schedule.run_on_start`). No cron or systemd needed.
 
-On **Windows**, just double-click **`start.bat`** — it launches the
-orchestrator plus the dashboard (http://localhost:8501) in separate windows.
-Press `Ctrl+C` in the orchestrator window to stop. To halt polling without
-killing the process, create the kill file `data/PAUSE` (delete it to resume).
+`lab watchdog` wraps `lab run` as a supervised child process: if it ever exits
+for any reason (crash, hard kill, etc.), the watchdog waits 10 minutes
+(`config.yaml` → `watchdog.restart_delay_seconds`) and restarts it — a
+deliberate cooldown rather than a tight retry loop, so a genuinely broken
+config doesn't hammer Polymarket's API in a crash loop. Any unhandled
+exception in `lab run` itself is now also logged with a full traceback to
+`data/logs/lab.jsonl` before the process exits (`sys.excepthook` + an asyncio
+loop exception handler), so a crash always leaves a diagnosable trace.
+
+On **Windows**, just double-click **`start.bat`** — it launches the watchdog
+(which in turn supervises the orchestrator) plus the dashboard
+(http://localhost:8501) in separate windows. Press `Ctrl+C` in the watchdog
+window to stop everything. To halt polling without killing the process,
+create the kill file `data/PAUSE` (delete it to resume).
 
 ```bash
-uv run lab run            # cross-platform equivalent of start.bat (no dashboard)
+uv run lab watchdog       # cross-platform equivalent of start.bat (no dashboard)
+uv run lab run            # or run the orchestrator directly, without auto-restart
 ```
 
 ### Manual operation (advanced)

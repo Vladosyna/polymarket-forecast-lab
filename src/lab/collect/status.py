@@ -98,6 +98,45 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
         ).fetchone()["n"]
     }
 
+    # Per-venue collector health (Phase 10). Kalshi/Metaculus run a snapshot
+    # loop; Manifold deliberately does not (guardrail 16: markets+resolutions
+    # only, never a price time series) -- no last_snapshot_age for it.
+    out["venues"] = {}
+    for venue in ("kalshi", "metaculus", "manifold"):
+        markets_n = conn.execute(
+            "SELECT COUNT(*) AS n FROM markets WHERE venue = ?", (venue,)
+        ).fetchone()["n"]
+        resolutions_n = conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM resolutions r
+            JOIN markets m ON m.condition_id = r.condition_id
+            WHERE m.venue = ?
+            """,
+            (venue,),
+        ).fetchone()["n"]
+        closed_unresolved = conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM markets m
+            LEFT JOIN resolutions r ON r.condition_id = m.condition_id
+            WHERE m.venue = ? AND m.closed = 1 AND r.condition_id IS NULL
+            """,
+            (venue,),
+        ).fetchone()["n"]
+        entry: dict[str, Any] = {
+            "markets": markets_n, "resolutions": resolutions_n,
+            "closed_unresolved": closed_unresolved,
+        }
+        if venue in ("kalshi", "metaculus"):
+            vdf = df7.filter(pl.col("venue") == venue) if "venue" in df7.columns else pl.DataFrame()
+            if vdf.is_empty():
+                entry["last_snapshot_age_min"] = None
+            else:
+                last_ts = datetime.fromisoformat(vdf.get_column("ts").max()).replace(
+                    tzinfo=timezone.utc
+                )
+                entry["last_snapshot_age_min"] = round((now - last_ts).total_seconds() / 60, 1)
+        out["venues"][venue] = entry
+
     # Today's LLM spend vs cap.
     today = utc_date_str(now)
     out["llm_spend_today_usd"] = round(dbmod.llm_spend_today(conn, today), 4)
@@ -122,5 +161,18 @@ def format_status(status: dict[str, Any]) -> str:
             f"gaps_24h={s['gaps_24h']} gaps_7d={s['gaps_7d']}"
         )
     lines.append(f"  resolution watcher: {status['resolution_watcher']['closed_unresolved']} closed markets unresolved")
+    for venue, v in status.get("venues", {}).items():
+        if "last_snapshot_age_min" in v:
+            age = v["last_snapshot_age_min"]
+            age_str = f"{age}min" if age is not None else "never"
+            lines.append(
+                f"  [{venue}] markets={v['markets']} last_snapshot_age={age_str} "
+                f"resolutions={v['resolutions']} closed_unresolved={v['closed_unresolved']}"
+            )
+        else:
+            lines.append(
+                f"  [{venue}] markets={v['markets']} resolutions={v['resolutions']} "
+                f"closed_unresolved={v['closed_unresolved']} (no snapshot loop -- guardrail 16)"
+            )
     lines.append(f"  LLM spend today: ${status['llm_spend_today_usd']} / cap ${status['llm_daily_cap_usd']}")
     return "\n".join(lines)

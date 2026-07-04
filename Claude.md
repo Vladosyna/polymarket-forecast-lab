@@ -1,6 +1,6 @@
 # Polymarket Forecast Lab — Implementation Brief for Claude Code
 
-**v1.8** — cross-venue signal (M7): Kalshi public market-data endpoints verified (no account, no keys) and promoted to a concrete read-only source alongside the Metaculus public API; curated question-matching via `markets_map.yaml` (LLM proposes, human confirms); Phase 9, optional and gated on Phase 6. Also clarified where more external data helps (M2 base rates, forecast-time features) vs hurts (pooling foreign-venue biases into M1).
+**v2.1** — fixed a real bug: the v1.9 "control-variate skill estimator" centered its covariate at its own in-sample mean, making the correction term identically zero — it wasn't just same-signed as the primary estimator, it was numerically IDENTICAL, so the "agree in sign" check could never fail. Replaced with a precision-weighted stratified estimator (price-bucket strata, inverse-variance pooling) that provably collapses to the raw mean under homogeneous variance and only diverges — meaningfully — when real heterogeneity exists.
 
 **Read this entire document before writing any code.** It is the single source of truth for this project. Work through the phases in order. Each phase has acceptance criteria — do not move to the next phase until they pass.
 
@@ -44,7 +44,7 @@ The system continuously collects public market data, generates timestamped proba
 | Tests | `pytest` | scoring math is test-critical |
 | Dashboard (Phase 6, optional) | Streamlit | reads the same SQLite/Parquet |
 
-Secrets: `.env` with `ANTHROPIC_API_KEY` and optional `NEWSAPI_KEY`. **A test must fail if any code imports web3/eth-account or references the CLOB `POST /order` path** (see §9).
+Secrets: `.env` with `ANTHROPIC_API_KEY` (or the configured LLM provider's key), `FRED_API_KEY`, `METACULUS_API_KEY`, and optional `NEWSAPI_KEY`. **A test must fail if any code imports web3/eth-account or references the CLOB `POST /order` path** (see §9).
 
 ---
 
@@ -73,8 +73,9 @@ All public, no auth. As of mid-2026 (post CLOB V2 migration, April 2026):
 - **External model inputs (for M5):**
   - *Weather:* Open-Meteo **Ensemble API** — `https://api.open-meteo.com/v1/ensemble?latitude=&longitude=&hourly=<vars>&models=<model>` — returns per-member forecasts (up to 51 members), which is what P(threshold exceeded) actually needs. The plain `/v1/forecast` endpoint returns one deterministic value and is not sufficient here. No key, CC BY 4.0 (attribute in README), free tier caps at 10,000 calls/day — irrelevant at our scale. `api.weather.gov` (NWS) as a secondary cross-check for US station observations only.
   - *Macro:* **FRED API is primary**, not optional — it cleanly mirrors both Atlanta Fed nowcasts as documented series: `GDPNOW` (real GDP growth) and `PCENOW` (real PCE growth). Free key from `fredaccount.stlouisfed.org`, stored as `FRED_API_KEY`. Request pattern: `https://api.stlouisfed.org/fred/series/observations?series_id=GDPNOW&api_key=...&file_type=json`. Cleveland Fed's separate CPI/PCE inflation nowcast has no confirmed stable machine endpoint as of this writing — its page is `clevelandfed.org/indicators-and-data/inflation-nowcasting`; inspect its actual download mechanism at Phase 5 implementation time rather than hardcoding a guessed URL, and skip that specific sub-adapter if none is found. GDPNow alone already covers the growth side of the macro category.
-  - *Cross-venue prices (for M7 — verified public, no accounts, no keys):* **Kalshi** — `https://external-api.kalshi.com/trade-api/v2` (`/series`, `/events`, `/markets`, `/markets/{ticker}/orderbook`); market data requires no auth; ~10 req/s — route through the same global rate limiter. **Metaculus** — official public API (`metaculus.com/api`), community prediction on public questions; a different crowd (reputation-scored forecasters, no money), strongest as an independent signal on long-horizon questions. Manifold is public too but play-money — skip. Betfair requires an account — out of scope.
-  - *M1 warning:* never pool other venues' resolved markets into M1's recalibration fit — M1 models Polymarket-specific bias, and other venues carry different (even opposite) tail biases. External resolved questions may feed M2 base rates only.
+  - *Cross-venue sources (M1.x recalibration, M7 signal — all read-only):* **Kalshi** — `https://external-api.kalshi.com/trade-api/v2` (`/series`, `/events`, `/markets`, `/markets/{ticker}/orderbook`); market data requires no auth; ~10 req/s — route through the same global rate limiter. **Metaculus** — official public API (`metaculus.com/api`); community prediction on public questions; authenticate with `METACULUS_API_KEY` from `.env` for higher limits; when a community prediction is hidden (tournament hiding windows), record NULL — never impute. **Manifold** — public API, play money: collected for event mapping and M2 base rates only; excluded from M7, from M1.x fits, and from all skill claims (guardrail 16). Betfair requires an account — out of scope.
+  - *Historical archives (GJP, PredictIt, the HF bootstrap):* M2 base rates only, provenance-tagged. Survivorship and selection effects make them unusable for M1.x fits and for skill claims.
+  - *Pooling rule (amended in v1.9):* naive pooling of venues into one recalibration fit remains forbidden — venue biases differ and can be opposite. The sanctioned mechanism is hierarchical **partial** pooling (§6 M1.x): cross-venue information enters only as shrinkage toward a shared global curve, never as raw pooled observations pretending to be one venue.
 
 Domain facts to encode:
 - Every binary market has two outcome tokens (YES/NO); prices are in [0,1] and the pair sums to ≈ 1. Track the YES token; store its `token_id` and the `condition_id` of the market.
@@ -116,9 +117,10 @@ forecast-lab/
 │   │   ├── m1_debiased.py
 │   │   ├── m2_baserate.py
 │   │   ├── m3_evidence.py
+│   │   ├── m1_hier.py           # v1.9 hierarchical multi-venue recalibration (M1.x)
 │   │   ├── m5_nowcast.py        # + thin per-category data adapters (weather, macro)
 │   │   ├── m6_consistency.py
-│   │   ├── m7_crossvenue.py     # + api/kalshi.py, api/metaculus.py thin read-only clients (Phase 9)
+│   │   ├── m7_crossvenue.py     # + api/kalshi.py, api/metaculus.py, api/manifold.py thin read-only clients (Phases 9–10)
 │   │   └── m4_ensemble.py
 │   ├── news/
 │   │   ├── providers.py         # RSS + Google News RSS per market; NewsAPI optional
@@ -133,6 +135,9 @@ forecast-lab/
 │   │   ├── refit.py             # scheduled parameter refits (M1 curves, M2 rates, M3 aggregator, M5 error dists, M4 weights)
 │   │   ├── registry.py          # model_versions CRUD, promotion gate, rollback circuit breaker
 │   │   └── postmortem.py        # structured post-mortems on top-decile misses/wins
+│   ├── economy/
+│   │   ├── wealth.py            # wealth_ledger updates, sleeping-expert normalization (v2.0)
+│   │   └── mwu.py               # shadow multiplicative-weights challenger for M4 weights (v2.0)
 │   ├── shadow/
 │   │   └── portfolio.py         # simulated positions
 │   └── cli.py
@@ -150,6 +155,27 @@ CREATE TABLE meta (
   key TEXT PRIMARY KEY,             -- 'schema_version', 'created_at', ...
   value TEXT
 );
+
+-- v1.9 multi-venue migration (Phase 10). Applied via ALTER/CREATE migrations on the live DB, never by recreating tables.
+CREATE TABLE venues (
+  venue TEXT PRIMARY KEY,            -- 'polymarket','kalshi','metaculus','manifold'
+  trust_tier TEXT CHECK(trust_tier IN ('money','reputation','play')),
+  forecastable INTEGER DEFAULT 0,    -- venues whose markets we forecast and score: polymarket=1, kalshi=1
+  in_m7_pool INTEGER DEFAULT 0       -- polymarket=0 (M0 already carries it), kalshi=1, metaculus=1, manifold=0
+);
+
+CREATE TABLE events (
+  event_id TEXT PRIMARY KEY,         -- minted on first human-confirmed cross-venue match (markets_map.yaml flow)
+  title TEXT, created_ts TEXT
+);
+
+-- markets gains three columns via ALTER: venue TEXT DEFAULT 'polymarket',
+-- venue_native_id TEXT, event_id TEXT NULL. condition_id remains the universal market key:
+-- non-Polymarket rows synthesize it as '{venue}:{venue_native_id}', so every existing FK,
+-- the forecasts ledger, and the snapshot layout keep working unchanged.
+-- Snapshot parquet gains a 'venue' column; for venues without an order book
+-- (Metaculus community prediction, Manifold), store the venue probability in 'mid'
+-- and leave book fields NULL.
 
 -- discovered markets (binary only, v1)
 CREATE TABLE markets (
@@ -199,7 +225,10 @@ CREATE TABLE eval_runs (
   ts TEXT, model_id TEXT, window_label TEXT,
   n INTEGER,
   brier REAL, brier_market REAL, skill REAL,          -- skill = brier_market - brier (positive = we beat market)
-  skill_ci_lo REAL, skill_ci_hi REAL,                  -- cluster bootstrap by condition_id
+  skill_ci_lo REAL, skill_ci_hi REAL,                  -- cluster bootstrap by event_id (fallback condition_id) — see §7
+  skill_pw REAL,                                       -- precision-weighted stratified skill (§7, v2.1); NULL if <3 strata qualify
+  skill_pw_ci_lo REAL, skill_pw_ci_hi REAL,            -- bootstrap CI on skill_pw
+  n_strata_pw INTEGER,                                 -- qualifying price-bucket strata (n_s >= 30) used
   log_loss REAL, log_loss_market REAL,
   calibration_json TEXT                                -- bins for reliability diagram
 );
@@ -241,6 +270,28 @@ CREATE TABLE model_versions (
   retired_reason TEXT CHECK(retired_reason IN ('replaced','rollback') OR retired_reason IS NULL),
   is_active INTEGER DEFAULT 0       -- exactly one active row per model_id; enforced in registry.py
 );
+
+-- derived from forecasts + resolutions; always recomputable, not a backup-critical table.
+-- One row per (model_id, category, resolved forecast): the Kelly-fraction wealth process already
+-- used by the shadow portfolio (§8), generalized to every model as a scoring/selection layer —
+-- NOT a second trading simulation. Unlike §8 (M4 only, entry-filtered, "would we have traded"),
+-- this table scores EVERY resolved forecast from EVERY model unconditionally, maximizing n for
+-- comparison purposes (§7/§11's whole point). log_wealth_delta is the Kelly log-growth for a
+-- binary bet, same side rule as §8 (YES if p_model > p_market, else NO) — mathematically the
+-- same quantity as the anytime-valid confidence sequence in §7 (a wealth process IS a test martingale).
+CREATE TABLE wealth_ledger (
+  id INTEGER PRIMARY KEY,
+  model_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  condition_id TEXT NOT NULL,
+  event_id TEXT,                     -- for event-level attribution, mirrors §7's clustering
+  ts TEXT NOT NULL,                  -- resolution timestamp
+  kelly_fraction REAL NOT NULL,      -- same 0.2x-capped fraction as shadow_trades (§8)
+  log_wealth_delta REAL NOT NULL,    -- log(1 + f*(1/p_market - 1)) if YES resolves, log(1 - f) if NO
+  cum_log_wealth REAL NOT NULL,      -- running sum for this (model_id, category)
+  n_forecasts INTEGER NOT NULL       -- running count; cum_log_wealth / n_forecasts is the fair,
+                                      -- coverage-normalized comparison metric (sleeping-expert rule, §6)
+);
 ```
 
 Snapshots go to Parquet, not SQLite: columns `ts, condition_id, token_id_yes, best_bid, best_ask, mid, spread, bid_depth_usd, ask_depth_usd, last_trade_price`, partitioned `data/snapshots/date=YYYY-MM-DD/*.parquet`.
@@ -254,6 +305,8 @@ All models implement `Forecaster.forecast(market, context) -> ForecastResult(p_y
 **M0 `m0_market` — the null model.** `p_yes = market mid`. This is the baseline every other model must beat. It is written to the ledger like any other model so paired comparison is trivial.
 
 **M1 `m1_debiased` — horizon-aware market recalibration.** The strongest documented, implementable edge: prediction-market prices are systematically **underconfident at long horizons** (calibration slope > 1 far from resolution, converging to ≈1 near resolution), and recent Polymarket data shows a **reversed favorite-longshot bias** at the tails — so never hardcode a bias direction; fit it. Implementation: logistic recalibration `logit(p̂) = α_h + β_h · logit(p_market)` fitted per time-to-resolution bucket (<7d, 7–30d, 30–90d, >90d) and, once n allows, per category, on historical resolved markets from the bootstrap. β_h > 1 at long horizons = extremizing. Guards: isotonic sanity check, monthly refit, every curve versioned, horizon bucket stored with each forecast.
+
+**M1.x `m1_hier@{venue}` — hierarchical multi-venue recalibration (v1.9).** One recalibration family, one curve per venue: `logit(p̂) = (α_g + α_v) + (β_g + β_v) · logit(p_venue)` per horizon bucket, where the global parameters (α_g, β_g) are fit on all venues and the venue offsets (α_v, β_v) are shrunk toward zero by a ridge penalty scaled ∝ 1/n_v — empirical Bayes: small venues borrow the global shape, large venues earn their own. Penalized logistic via scipy; no MCMC — a NumPyro upgrade is a v2 candidate only if the ridge tier proves insufficient. Fits on polymarket, kalshi, and metaculus outcomes; never on manifold or archives (guardrail 16). Roles: `m1_hier@polymarket` registers as a **challenger** to the incumbent M1 through the champion/challenger machinery below; `m1_hier@kalshi` starts as the active recalibrator for Kalshi forecasts (no incumbent exists); `m1_hier@metaculus` recalibrates the community prediction as an **input signal** for M7 — Metaculus is not a forecast target (`forecastable=0`).
 
 **M2 `m2_baserate` — category base rates.** For question templates that recur ("Will X happen by DATE"), compute historical base rates by category from resolved markets and blend with market prior in log-odds space with a small fixed weight. This is a sanity-check model, expected to be weak alone.
 
@@ -281,9 +334,19 @@ One thin adapter per category. Do not generalize prematurely — two adapters is
 
 **M7 `m7_crossvenue` — cross-venue signal on matched questions.** For markets that also trade on Kalshi or carry a Metaculus community prediction, output the log-odds pool of the *external* venues' probabilities — Polymarket's own price stays out (M0 already carries it; the ensemble learns how much to trust each source). Question matching is the failure point and is handled conservatively: a curated `data/markets_map.yaml` where the LLM may *propose* candidate matches (question texts + resolution criteria side by side), but a human confirms every pair before it goes live — one mismatched pair silently poisons the signal. External prices are snapshotted at forecast ts under the same freshness rule (§9.13). Deterministic at forecast time; no LLM call in the loop.
 
-**M4 `m4_ensemble`.** Log-odds weighted pool of M0–M3, M5–M7; weights fit per category on a rolling window of resolved forecasts (equal weights until ≥100 resolved samples in that category). Where M5 exists it should dominate — the fit will discover that; don't hand-tune. (Model IDs are stable; the numbering is historical, ensemble stays last in the pipeline.)
+**M4 `m4_ensemble`.** Log-odds weighted pool of M0–M3, M5–M7; weights fit per category on a rolling window of resolved forecasts (equal weights until ≥100 resolved samples in that category). v1.9 adds a per-category **extremization exponent** `a ∈ [1.0, 2.5]` (config caps) applied to the pooled logit, fitted in `lab learn` under the bounded-step and challenger rules. Extremization compensates for the pool's shrink toward 0.5 — but only to the degree the sources are independent: scale it with the effective source count `n_eff = n / (1 + (n − 1) · ρ̄)`, where ρ̄ is the mean pairwise correlation of source log-odds estimated on matched events. Correlated venues must not be extremized as if independent; the same n_eff discount applies to M7's external pool. Where M5 exists it should dominate — the fit will discover that; don't hand-tune. (Model IDs are stable; the numbering is historical, ensemble stays last in the pipeline.)
 
 **Forecast cadence:** once per market per day per model (config), plus an extra forecast when |24h price move| > 0.10 on a tracked market. M3 runs only on the liquid tier, selected by a **deterministic rule** (top-K by liquidity within priority categories) — never by perceived difficulty, or the skill measurement inherits selection bias. M5 runs on every market its adapters cover. M6 runs on every negRisk event in the universe.
+
+**Wealth ledger & virtual prediction economy (v2.0).** A scoring and selection layer over M0–M7, not a new forecasting model — it consumes their already-written forecasts and never writes a `p_yes` row of its own.
+
+*Why this is principled, not gamified:* Kelly (1956) and Cover's universal-portfolio results establish an exact duality between log-optimal betting and log-score. A model's wealth, grown by staking a Kelly fraction of its edge against the market price on every resolved forecast, compounds at the model's actual log-score advantage over the market — the same quantity §7's anytime-valid confidence sequence already tests. A capital process and a statistical test for skill are, formally, the same object (Shafer & Vovk's "testing by betting"). The wealth ledger isn't a new risk surface; it's a second, more intuitive readout of a number the lab already computes rigorously.
+
+*Mechanics.* Wired into the existing nightly `lab eval` step — no new CLI command. For every resolved forecast from every model, unconditional on §8's entry filter (this table exists to maximize comparison power, §7/§11's whole point, not to simulate realistic execution), compute the same 0.2×-capped Kelly fraction and side rule §8 uses, and accumulate the resulting log-wealth delta per `(model_id, category)` in `wealth_ledger`.
+
+*Sleeping experts.* M5 only covers weather/macro, M7 only covers matched cross-venue markets. Comparing raw cumulative wealth would reward or punish coverage rather than skill. Always compare `cum_log_wealth / n_forecasts` (average per-forecast log-growth) across models with different coverage — never the raw cumulative total.
+
+*Wealth-based ensemble weighting (the MWU challenger, Phase 14.1).* A new `m4_ensemble@mwu` challenger derives per-category weights from relative wealth via a multiplicative-weights update (Hedge/MWU: `w_i ∝ exp(η_t · cum_log_wealth_i)`), with learning rate `η_t = √(8 ln N / t)` shrinking as resolved-forecast count `t` grows — the standard regret-bound-optimal schedule, not a hand-tuned rate. A weight floor (2%) and ceiling (60%) per model prevent a short streak from collapsing weight onto one model (the documented failure mode in Numerai's staking history). The same correlation discount from the M4 paragraph above (n_eff via ρ̄) applies before weights are normalized — correlated high-wealth models must not jointly dominate. This challenger computes nightly, in shadow, alongside the existing eval step, but is governed by the exact same promotion machinery as any other challenger below: it earns production weight only after clearing the anytime-valid CI-gated promotion, with the standard rollback circuit breaker watching it afterward. This nightly cadence is the one narrowly-scoped, explicitly justified exception to guardrail 14 (§9.17) — every other model's internal parameters remain strictly monthly-batch.
 
 **Learning & versioning (how the system improves from its own record — and the hard line around the LLM).** Learning happens in batches over resolved outcomes, never per decision — a single win or loss is noise, and a system that adjusts to individual outcomes learns the noise. All mechanisms run inside the monthly `lab learn` job, dry-run by default.
 
@@ -297,7 +360,7 @@ One thin adapter per category. Do not generalize prematurely — two adapters is
 **Safeguards (so one bad month can't corrupt a good model):**
 - **Walk-forward only.** Every refit fits on data up to cutoff T and validates on data after T. A refit function that accepts a single history window with no train/validation split is a bug — `tests/test_learning_safety.py` asserts the split exists on every refit path.
 - **Bounded step per cycle.** No refit may move a live parameter (recalibration slope, ensemble weight, aggregator k/τ/cap) by more than `max_step_pct` (config, default 20% relative) in one monthly cycle. A refit wanting to move further logs the full proposed change and applies only the capped step; the next cycle continues the move if the evidence still supports it. One noisy month becomes a slow lean, not a lurch.
-- **Promotion requires a confidence interval, not a point estimate.** A challenger is promoted only when its measured skill beats the champion's with the bootstrap CI (§7) excluding zero, reusing `eval/scoring.py` rather than a bespoke metric.
+- **Promotion requires a confidence interval, not a point estimate.** A challenger is promoted only when its measured skill beats the champion's with the interval excluding zero, reusing `eval/scoring.py` rather than a bespoke metric. From Phase 11 onward that interval is the **anytime-valid confidence sequence** (§7), which stays valid under repeated looks; the fixed-n bootstrap CI remains a descriptive statistic.
 - **Automatic rollback — the actual safety valve.** After promotion, the new champion keeps being scored forward like anything else. If its trailing skill over the next `rollback_window` resolved forecasts (config, default 50) falls below the retired champion's historical skill under the same CI test, `lab learn` reverts the active pointer automatically and records `retired_reason='rollback'`. Learning that turns out to hurt undoes itself instead of relying solely on the entry gate having been right.
 - **Append-only registry.** Every parameter set or prompt gets a new row in `model_versions`, never edited — but the row points at its artifact via `artifact_path` rather than duplicating it; the artifact itself (curve coefficients, base rates, prompt text) lives in `data/models/*.json` exactly as it has since Phase 2. Rollback means repointing `is_active` at a previous row, not recomputing and hoping.
 - **One kill switch.** `lab learn` refuses to run while `data/PAUSE` exists — the same file the collector already respects (guardrail 8, §9). No second switch to remember.
@@ -311,10 +374,12 @@ One thin adapter per category. Do not generalize prematurely — two adapters is
 
 - **Freeze semantics.** A forecast is scored exactly as written at `ts`, against `p_market_at_ts` captured in the same row. No retroactive edits — enforced by an append-only writer and a test.
 - **Scoring at resolution.** For resolved markets: Brier `(p − y)²` and log loss (with clamped p). Compute for the model and for `p_market_at_ts` on the *same rows* (paired).
-- **Skill.** `skill = mean(brier_market − brier_model)` over paired rows. Positive = beating the market. Report with a **cluster bootstrap CI resampling by `condition_id`** (multiple forecasts on the same market are correlated; naive CIs would lie).
+- **Skill.** `skill = mean(brier_market − brier_model)` over paired rows, computed per venue against that venue's own price. Positive = beating the market. Report with a **cluster bootstrap CI resampling by `event_id`** (falling back to `condition_id` where no event mapping exists): forecasts on the same market are correlated, and the same underlying event listed on several venues is still ONE observation of the world — clustering by venue-market would overstate n. Naive CIs would lie.
 - **Calibration.** Reliability diagrams (10 bins) per model, plus per-category breakdown once n allows.
 - **CLV-style early signal** (doesn't need resolution): for each forecast, measure whether the market price at t+24h / t+72h moved toward the model's view. Report mean signed drift in the direction of the model's disagreement. This detects information timing months before enough markets resolve.
-- **Honesty thresholds & statistical power.** The report displays n everywhere. Tiers: n < 200 resolved markets → "INSUFFICIENT DATA"; 200 ≤ n < 500 → "PRELIMINARY"; n ≥ 500 → standard claim. Additionally the report computes the **minimum detectable effect** at current n from the empirical sd of per-market paired Brier differences (MDE ≈ 2.8 · σ_d / √n, for 80% power at α = 0.05, n = resolved markets) and prints it next to every skill number — a skill estimate smaller than its own MDE is noise by construction. No cherry-picked windows: all-time and trailing-90-days only.
+- **Honesty thresholds & statistical power.** The report displays n everywhere; from Phase 11 onward n counts resolved **event clusters**, not venue-market rows. Tiers per venue × category: n < 200 → "INSUFFICIENT DATA"; 200 ≤ n < 500 → "PRELIMINARY"; n ≥ 500 → standard claim. Additionally the report computes the **minimum detectable effect** at current n from the empirical sd of per-cluster paired Brier differences (MDE ≈ 2.8 · σ_d / √n, for 80% power at α = 0.05) and prints it next to every skill number — a skill estimate smaller than its own MDE is noise by construction. No cherry-picked windows: all-time and trailing-90-days only.
+- **Anytime-valid monitoring (v1.9).** Alongside the bootstrap CI, compute a time-uniform confidence sequence (Waudby-Smith–Ramdas asymptotic CS) for the mean paired Brier difference. Nightly reports may be read daily without alpha decay **only** through this interval: promotions, rollbacks, and public skill claims must cite the confidence sequence; the fixed-n CI stays for monthly descriptive snapshots. (v2.0: the wealth ledger's capital process, §6, is the same test martingale expressed as currency rather than an interval — the two are reconciled, not duplicated, in Phase 14.)
+- **Precision-weighted stratified estimator (v2.1 — replaces the v1.9 control-variate check, which was mathematically vacuous).** The original design centered its covariate at its own in-sample mean, which forces the correction term to zero regardless of β: the "corrected" estimate wasn't merely same-signed, it was numerically identical to the raw mean, so the "agree in sign" check could never fail. The fix: stratify resolved forecasts into price buckets on `p_market_at_ts` (5–7 fixed bins, e.g. [0,0.05), [0.05,0.2), ..., [0.95,1]) — chosen because Brier-difference variance is driven directly by price level (Bernoulli variance ≈ `p(1−p)`), so price buckets capture real, independently-known heterogeneity rather than a circularly-defined one. Within each stratum with `n_s ≥ 30`, compute `d̄_s` and its variance; pool via inverse-variance weights: `skill_pw = Σ w_s·d̄_s / Σ w_s`, `w_s = 1/Var(d̄_s)`. Under homogeneous variance across strata this collapses exactly to the raw pooled mean (a required unit-test invariant); it only diverges — meaningfully — when variance is genuinely heterogeneous, which is exactly the condition price buckets are chosen to capture. A claim requires the primary anytime-valid CS AND `skill_pw`'s own bootstrap CI to both exclude zero and agree in direction. Fewer than 3 qualifying strata → report "insufficient data for stratified check," don't compute it on too few cells.
 - **Null control.** The sports control sample (§3 universe policy) is scored identically and shown in the same table. Statistically significant "skill" there invalidates the run pending investigation.
 - **LLM models are live-only.** Never backtest M3/M3b on markets resolved before the LLM's training cutoff — training-data leakage makes such numbers meaningless. Statistical models (M1/M2/M5/M6) may be backtested; LLM skill accrues only forward. The one exception: the M3 **aggregator's** own parameters (k/τ/cap) may be fit on frozen historical evidence objects, because that fit is arithmetic, not a new LLM call (§6).
 
@@ -322,7 +387,7 @@ One thin adapter per category. Do not generalize prematurely — two adapters is
 
 ## 8. Shadow portfolio (simulation only)
 
-Purpose: translate calibration edge into an interpretable number. Everything labeled `SIMULATION` in code, DB, and reports.
+Purpose: translate calibration edge into an interpretable number for the deployed ensemble specifically — realistic, entry-filtered, M4-only. (v2.0: the broader `wealth_ledger`, §6, runs the same Kelly math unconditionally across every model for comparison power; this section stays the one "would we actually have traded this" simulation.) Everything labeled `SIMULATION` in code, DB, and reports.
 
 - Bankroll: simulated $10,000.
 - Entry rule (evaluated daily on liquid tier, using M4): `edge = |p_model − p_market| ≥ 0.05` AND spread ≤ 0.03 AND top-of-book depth ≥ $500 on the entry side AND `0.05 < p_market < 0.95` (tail entries are oracle-risk bets, not forecasting bets).
@@ -356,6 +421,8 @@ Domain-specific guardrails:
 13. **Price freshness.** A forecast row requires `p_market_at_ts` from a snapshot no older than 15 min (liquid tier) / 90 min (tail). If the latest snapshot is stale, skip the forecast and log it — a forecast paired against a stale price corrupts the skill comparison silently, which is the worst failure class in this system.
 14. **Self-modification is scheduled and versioned.** Parameters and prompts change only via `lab learn` on its monthly schedule, only when min-n thresholds are met, only via walk-forward fitting, and only as challenger versions measured against the incumbent (§6). No code path may adjust any model in response to an individual outcome.
 15. **Learning never re-invokes the LLM on resolved history.** Refits touching M3 are arithmetic over evidence already frozen in `evidence_runs`; new prompts/extraction logic earn skill only from forecasts made after their own `registered_ts`. Full safeguard list (bounded step, CI-gated promotion, automatic rollback, dry-run default) lives in §6 — this rule is the one that may never be relaxed for convenience.
+16. **Venue trust & provenance.** Every external observation carries its venue. Manifold (play money) is excluded from the M7 pool, from M1.x fits, and from all skill claims — it feeds event mapping and M2 base rates only. Metaculus community predictions hidden by tournament windows are recorded as NULL, never imputed. Historical archives (GJP, PredictIt, the HF dataset) feed M2 base rates only, provenance-tagged — never M1.x fits for venues we don't collect live, never skill claims.
+17. **Ensemble-weight MWU is a narrow, explicit exception to guardrail 14.** The wealth-based `m4_ensemble@mwu` challenger (§6, Phase 14.1) may update its own per-category weights on every new resolution, in shadow only, because: (a) it touches only meta-level ensemble weights, never any model's internal parameters; (b) its update is a provably regret-bounded algorithm (MWU/Hedge) with a floor and ceiling, not an ad hoc reaction to one outcome; (c) it never affects production forecasts until it clears the same CI-gated promotion as any other challenger. Guardrail 14 remains unqualified for every model-internal parameter — M1.x curves, M3 aggregator knobs, M5 error distributions stay strictly monthly-batch, no exception.
 
 ---
 
@@ -400,11 +467,37 @@ Also write `tests/test_learning_safety.py` covering: (a) a refit call missing a 
 **Accept when:** `test_learning_safety.py` passes, all four fixtures included; a real `lab learn` run against accumulated data produces a dry-run diff and writes nothing until `--apply`; `lab rollback` demonstrably restores a prior `model_versions` row as active; `test_scope.py` still green.
 
 ### Phase 8 — Optional dashboard
-Streamlit app reading the same SQLite/Parquet: live universe, latest forecasts vs market, calibration, shadow book. Only after Phase 6 is stable.
+Streamlit app reading the same SQLite/Parquet: live universe, latest forecasts vs market, calibration, shadow book, and — once Phase 14 exists — the wealth-economy visuals (equity curves, drawdown, null-control band, attribution) as interactive views of what `lab report` already renders statically. Only after Phase 6 is stable; the wealth-economy views additionally require Phase 14.
 
 ### Phase 9 — Optional: cross-venue signal (M7)
 Only after Phase 6 is stable; priority categories only. Tasks: thin read-only clients for Kalshi public market data and the Metaculus API (§3 — no accounts, no keys, same global rate limiter); `data/markets_map.yaml` with a propose-then-confirm matching flow (LLM proposes candidate pairs, a human confirms, the file is the source of truth); M7 per §6 wired into the ledger and the M4 weight fit; external-price snapshots stored alongside our own.
 **Accept when:** on ≥5 confirmed matched pairs (fixtures acceptable), M7 writes forecasts with stored external-price traces; a proposed-but-unconfirmed pair is NOT forecast; M7 appears in the nightly eval and in M4's weight fit; `test_scope.py` still green.
+
+### Phase 10 — Multi-venue collection foundation
+Supersedes the client sub-tasks of Phase 9 (if Phase 9 is unbuilt, M7 now depends on this phase instead). **Calendar priority like Phase 1: external snapshot history is just as unrecoverable — get this collecting, then build Phases 11–13 while it accumulates.**
+Tasks: schema migration per §5 (venues seed rows, `events` table, ALTER on markets, `venue` column in Parquet; synthesized `{venue}:{native_id}` keys — zero FK churn); Kalshi collector (universe sync, snapshots, resolution watcher on settled markets); Metaculus collector (community-prediction snapshots into `mid`, NULL when hidden, resolution watcher; `METACULUS_API_KEY` from `.env`); Manifold collector (markets + resolutions only, guardrail 16); per-host rate limiters behind the global budget; `lab status` gains per-venue freshness/gap lines; the markets_map.yaml propose-then-confirm flow (reused from Phase 9 or implemented here) now also mints `event_id`s on confirmation.
+**Accept when:** a 1-hour live run shows snapshots from ≥2 external venues; restart produces no duplicates; a confirmed match creates an event linking ≥2 venue-markets; `lab status` reports per-venue health; a hidden Metaculus CP is stored as NULL on a fixture; `test_scope.py` still green.
+
+### Phase 11 — Measurement upgrade (correctness before new models)
+Tasks: event-level cluster bootstrap in `eval/scoring.py` (resample by `event_id`, fallback `condition_id`); per-venue paired skill tables (each forecast scored against its own venue's price; forecastable venues read from the `venues` table); anytime-valid confidence sequence per §7 wired into the report and into the promotion/rollback paths; precision-weighted stratified skill estimator per §7 as the secondary column set (`skill_pw` + CI + `n_strata_pw` in `eval_runs`) — if this phase or an earlier draft already implemented the v1.9 control-variate design, replace it; nothing else in Phase 11 changes; the report becomes a venue × category matrix with per-venue honesty tiers; extend the sports null control to every forecastable venue.
+**Accept when:** a synthetic fixture with cross-venue-correlated outcomes yields a WIDER event-clustered CI than market-clustered (test asserts it); on simulated null data the confidence sequence covers zero across all look times in ≥95% of runs; promotion/rollback code paths demonstrably consult the CS; a fixture with homogeneous within-stratum variance makes `skill_pw` equal the raw pooled skill (the non-degeneracy invariant from §7 — this test would have caught the original bug); a fixture with heterogeneous variance makes `skill_pw` diverge from the raw skill; fewer than 3 qualifying strata correctly yields NULL/"insufficient data" rather than a computed value; the report renders the matrix with both estimators.
+
+### Phase 12 — Hierarchical recalibration (M1.x)
+Tasks: `m1_hier` per §6 (penalized logistic, global + ridge-shrunk venue offsets per horizon bucket, scipy); fitted inside `lab learn` under walk-forward and bounded-step rules; register `m1_hier@polymarket` as challenger to the incumbent M1; activate `m1_hier@kalshi` as Kalshi's recalibrator and `m1_hier@metaculus` as the CP-signal recalibrator for M7; curves versioned through the §7.1 registry (`artifact_path` files like everything else).
+**Accept when:** on synthetic multi-venue fixtures, a small-n venue's curve shrinks toward the global and a large-n venue's diverges when its data demands it (test asserts both); a refit without a validation window raises; the challenger is registered without touching the incumbent; `test_scope.py` still green.
+
+### Phase 13 — Aggregation upgrade (extremized, correlation-aware pooling)
+Tasks: per-category extremization exponent in M4 and in M7's external pool per §6 (`a ∈ [1.0, 2.5]`, fitted in `lab learn` under bounded-step + challenger rules); ρ̄ estimation from historical cross-venue logit correlations on matched events; n_eff discount wired into the exponent.
+**Accept when:** unit tests confirm `a = 1.0` reproduces current pooling exactly; duplicating a source (ρ̄ → 1) drives n_eff → 1 and suppresses extra extremization; fitted exponents appear in the report with their n; challenger mechanics respected.
+
+### Phase 14 — Virtual prediction economy: wealth ledger
+Tasks: `wealth_ledger` table (§5); `economy/wealth.py` computing the Kelly log-wealth delta on every resolved forecast from every model (unconditional on §8's entry filter), accumulated per (model_id, category), wired into the existing nightly `lab eval` step — no new CLI command; sleeping-expert normalization (`cum_log_wealth / n_forecasts`) surfaced in the report; report additions: per-model per-category cumulative log-wealth curves (log scale), drawdown, a null-control reference band (the sports null-control model's wealth path as the zero-skill benchmark), bootstrap wealth bands (resample forecast order); linear log-odds P&L attribution for M4 (`contribution_i = w_i · logit(p_i)` — exact, no Shapley sampling needed given the pool is already linear in log-odds).
+**Accept when:** on fixture data, a model that never forecasts a category shows no wealth change for it (sleeping-expert correctness); the coverage-normalized metric ranks a high-coverage mediocre model correctly against a low-coverage sharp one; the null-control band renders alongside real model curves; `test_scope.py` still green (no execution surface added).
+
+### Phase 14.1 — Shadow MWU ensemble weighting
+Depends on Phase 14. Experimental and probationary by design — read §6's wealth-ledger paragraph and guardrail 17 (§9) before starting.
+Tasks: `economy/mwu.py` implementing the Hedge/MWU update with the `η_t = √(8 ln N / t)` schedule, 2%/60% floor/ceiling, and the existing n_eff correlation discount (§6 M4 paragraph) applied before normalization; register `m4_ensemble@mwu` as a challenger via the existing registry (§7.1) with `registered_ts`; compute its shadow weights nightly inside the existing `lab eval` step — no new CLI command, and this is the one process in the codebase permitted to update between `lab learn` cycles, solely because it touches ensemble weights and never model internals (guardrail 17); wire its promotion through the standard anytime-valid CI gate and rollback circuit breaker, with a minimum 90-day / n≥200-per-category probation (§7's honesty tier) before it is even eligible for promotion consideration.
+**Accept when:** on a synthetic fixture, the MWU weights provably respect the floor/ceiling under an adversarial win/loss sequence; duplicating a high-wealth model (ρ̄→1) does not let the pair jointly exceed the ceiling; the challenger is invisible to production forecasts until promoted; a promoted MWU weighting that subsequently underperforms triggers the same automatic rollback as any other challenger; `test_learning_safety.py` gains a case for this challenger; `test_scope.py` still green.
 
 ---
 
@@ -412,7 +505,7 @@ Only after Phase 6 is stable; priority categories only. Tasks: thin read-only cl
 
 - Run collection under tmux or a systemd user unit: `uv run lab collect`. Target host: an always-on Linux box.
 - **Data health is a first-class concern.** The nightly report opens with the `lab status` health block (freshness, gaps, watcher lag, spend). The single worst operational failure is the collector dying silently — snapshot history is unrecoverable.
-- **Timeline expectations.** Weather markets and the sports null-control resolve in days → first calibration stats in ~2–4 weeks. Macro releases: weeks. Long-horizon politics: months. The n ≥ 500 "standard claim" tier realistically arrives at month 3–6 depending on category mix — do not read tea leaves earlier.
+- **Timeline expectations.** Weather markets and the sports null-control resolve in days → first calibration stats in ~2–4 weeks. Macro releases: weeks. Long-horizon politics: months. The n ≥ 500 "standard claim" tier realistically arrives at month 3–6 depending on category mix — do not read tea leaves earlier. Multi-venue (v1.9): Kalshi's daily weather/econ resolutions multiply resolved-event counts in P1/P2 severalfold — expect the standard-claim tier in those categories roughly twice as early; Metaculus adds an independent signal, not short-term n.
 - Nightly cron: `lab forecast && lab eval && lab report`. Weekly: `lab shadow report`. Monthly: `lab learn`.
 - Disk: snapshots at default cadence are small (est. < 200 MB/month at 200 markets); prune policy configurable but default keep-everything.
 - Backup: `data/lab.db` + `data/snapshots/` are the crown jewels — the historical order-book snapshots cannot be re-downloaded later. rsync them somewhere daily from day one.
@@ -420,7 +513,7 @@ Only after Phase 6 is stable; priority categories only. Tasks: thin read-only cl
 
 ## 12. Explicitly out of scope (do not build)
 
-Order execution or anything touching wallets/keys (belongs in downstream projects — §13); VPN/proxy logic; Betfair (requires an account); Kalshi *trading* endpoints — its read-only market data is in scope via Phase 9; ALL crypto/equity price-target markets, not just sub-24h pulses; a database server; user auth; Docker (plain `uv` is fine); notification bots. If a task seems to require any of these, stop and flag it instead.
+Order execution or anything touching wallets/keys (belongs in downstream projects — §13); VPN/proxy logic; Betfair (requires an account); Kalshi *trading* endpoints — its read-only market data is in scope via Phases 9–10; ALL crypto/equity price-target markets, not just sub-24h pulses; a database server; user auth; Docker (plain `uv` is fine); notification bots. If a task seems to require any of these, stop and flag it instead.
 
 ---
 

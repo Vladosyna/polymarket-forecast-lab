@@ -105,6 +105,42 @@ def run_learn_job(config: dict[str, Any], apply: bool = False) -> Any:
     return summary
 
 
+def run_map_propose_job(config: dict[str, Any]) -> dict[str, Any]:
+    """M7: LLM proposes candidate Kalshi matches into markets_map.yaml's `proposed`
+    list -- never touches `confirmed`. Safe to run unattended: a pair only
+    starts feeding M7 once a human runs `lab map confirm` on it (brief section 6,
+    Phase 9 acceptance: "a proposed-but-unconfirmed pair is NOT forecast").
+    Skips cleanly (no-op) if no LLM is configured, same as a missing API key
+    would for M3."""
+    from lab.api.http import TokenBucket
+    from lab.api.kalshi import KalshiClient
+    from lab.models.m7_crossvenue import propose_matches
+    from lab.news.extract import create_llm_client
+
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        llm = create_llm_client(conn, config)
+        if llm is None:
+            log.info("map propose job: no LLM configured, skipping")
+            return {"skipped": "no_llm"}
+        async def _fetch_candidates() -> list[Any]:
+            bucket = TokenBucket(rate=config["collect"]["rate_limit"]["requests_per_second"],
+                                 burst=config["collect"]["rate_limit"]["burst"])
+            kalshi = KalshiClient(bucket)
+            try:
+                return await kalshi.open_markets(limit=200)
+            finally:
+                await kalshi.aclose()
+
+        candidates = asyncio.run(_fetch_candidates())
+        proposals = propose_matches(conn, config, candidates, llm)
+    finally:
+        conn.close()
+    result = {"new_proposals": len(proposals)}
+    log.info("map propose job complete", extra={"ctx": result})
+    return result
+
+
 def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
     """Mirror reports/exports/model artifacts to the private results repo and
     push. Curated results only -- never the raw db/snapshots; that bulk copy

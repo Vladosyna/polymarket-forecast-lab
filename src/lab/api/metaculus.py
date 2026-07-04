@@ -22,9 +22,10 @@ live verification at Phase 9 implementation time (2026-07-03) refined that:
 
 Per guardrail 2 (no account creation for any data source this lab depends on
 by default) this client never creates an account; it activates only when the
-operator supplies their own pre-existing METACULUS_API_TOKEN. Even then it
-abstains cleanly (returns None) whenever the aggregation field is null --
-which, per the above, may be the common case for a non-commercial token.
+operator supplies their own pre-existing METACULUS_API_KEY (renamed from
+METACULUS_API_TOKEN in brief v1.9; the old name still works as a fallback).
+Even then it abstains cleanly (returns None) whenever the aggregation field is
+null -- which, per the above, may be the common case for a non-commercial key.
 """
 
 from __future__ import annotations
@@ -78,11 +79,15 @@ class MetaculusClient(BaseClient):
     def __init__(self, bucket: TokenBucket, api_token: str | None = None,
                  base_url: str = METACULUS_BASE_URL) -> None:
         super().__init__(base_url, bucket)
-        self._token = api_token if api_token is not None else os.environ.get("METACULUS_API_TOKEN")
+        # Renamed METACULUS_API_TOKEN -> METACULUS_API_KEY in brief v1.9;
+        # fall back to the old name so an unmigrated .env keeps working.
+        self._token = api_token if api_token is not None else (
+            os.environ.get("METACULUS_API_KEY") or os.environ.get("METACULUS_API_TOKEN")
+        )
 
     async def question(self, question_id: int) -> MetaculusQuestion | None:
         if not self._token:
-            log.warning("metaculus: no METACULUS_API_TOKEN -- abstaining "
+            log.warning("metaculus: no METACULUS_API_KEY -- abstaining "
                         "(public access requires an account as of 2026-07-03, see module docstring)",
                         extra={"ctx": {"question_id": question_id}})
             return None

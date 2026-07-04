@@ -96,6 +96,21 @@ def confirm_match(data: dict[str, Any], condition_id: str, venue: str,
     return True
 
 
+def link_confirmed_event(conn, condition_id: str, venue: str, external_id: str) -> str:
+    """Mint (or reuse) the event_id linking a Polymarket market to a confirmed
+    external venue-market (brief section 5/Phase 10: "a confirmed match
+    creates an event linking >=2 venue-markets"). Best-effort title from the
+    Polymarket market's own question, if it's already synced."""
+    from lab.store import db as dbmod
+
+    external_cid = dbmod.venue_condition_id(venue, external_id)
+    row = conn.execute(
+        "SELECT question FROM markets WHERE condition_id = ?", (condition_id,)
+    ).fetchone()
+    title = row["question"] if row else None
+    return dbmod.link_event(conn, condition_id, external_cid, title=title)
+
+
 def pool_log_odds(prices: list[float]) -> float:
     """Deterministic log-odds average of external venue probabilities."""
     if not prices:

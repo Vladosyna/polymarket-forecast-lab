@@ -82,3 +82,83 @@ def test_llm_spend_ledger(conn):
     db.record_llm_spend(conn, "2026-07-01", "m3_extraction", 0.12)
     db.record_llm_spend(conn, "2026-07-01", "m3_extraction", 0.08)
     assert db.llm_spend_today(conn, "2026-07-01") == pytest.approx(0.20)
+
+
+# --- v1.9 multi-venue migration (Phase 10) ----------------------------------
+
+def test_migrate_multi_venue_is_idempotent(conn):
+    # db.connect() (the `conn` fixture) already ran the migration once.
+    applied_again = db.migrate_multi_venue(conn)
+    assert applied_again == {
+        "venue_column": False, "venue_native_id_column": False, "event_id_column": False,
+    }
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(markets)")}
+    assert {"venue", "venue_native_id", "event_id"} <= cols
+
+
+def test_venues_seeded_with_brief_flags(conn):
+    rows = {r["venue"]: dict(r) for r in conn.execute("SELECT * FROM venues")}
+    assert rows["polymarket"] == {"venue": "polymarket", "trust_tier": "money", "forecastable": 1, "in_m7_pool": 0}
+    assert rows["kalshi"] == {"venue": "kalshi", "trust_tier": "money", "forecastable": 1, "in_m7_pool": 1}
+    assert rows["metaculus"] == {"venue": "metaculus", "trust_tier": "reputation", "forecastable": 0, "in_m7_pool": 1}
+    assert rows["manifold"] == {"venue": "manifold", "trust_tier": "play", "forecastable": 0, "in_m7_pool": 0}
+
+
+def test_venue_condition_id():
+    assert db.venue_condition_id("polymarket", "0xabc") == "0xabc"
+    assert db.venue_condition_id("kalshi", "KXFOO-26") == "kalshi:KXFOO-26"
+    assert db.venue_condition_id("metaculus", "12345") == "metaculus:12345"
+
+
+def test_upsert_market_defaults_venue_polymarket(conn):
+    db.upsert_market(conn, MARKET)
+    row = conn.execute("SELECT venue, venue_native_id, event_id FROM markets WHERE condition_id = ?",
+                       (MARKET["condition_id"],)).fetchone()
+    assert row["venue"] == "polymarket"
+    assert row["venue_native_id"] == MARKET["condition_id"]
+    assert row["event_id"] is None
+
+
+def test_upsert_market_resync_never_overwrites_event_id(conn):
+    kalshi_row = {**MARKET, "condition_id": "kalshi:KXFOO-26", "venue": "kalshi", "venue_native_id": "KXFOO-26"}
+    db.upsert_market(conn, kalshi_row)
+    db.link_event(conn, MARKET["condition_id"], kalshi_row["condition_id"])
+    db.upsert_market(conn, kalshi_row)  # a routine re-sync of the same market
+    row = conn.execute("SELECT event_id FROM markets WHERE condition_id = ?",
+                       (kalshi_row["condition_id"],)).fetchone()
+    assert row["event_id"] is not None
+
+
+def test_link_event_mints_and_links_both_sides(conn):
+    db.upsert_market(conn, MARKET)
+    kalshi_cid = "kalshi:KXFOO-26"
+    event_id = db.link_event(conn, MARKET["condition_id"], kalshi_cid, title="Will X happen?")
+    rows = {r["condition_id"]: r["event_id"]
+           for r in conn.execute("SELECT condition_id, event_id FROM markets WHERE condition_id IN (?, ?)",
+                                 (MARKET["condition_id"], kalshi_cid))}
+    assert rows[MARKET["condition_id"]] == event_id
+    assert rows[kalshi_cid] == event_id
+    ev = conn.execute("SELECT title FROM events WHERE event_id = ?", (event_id,)).fetchone()
+    assert ev["title"] == "Will X happen?"
+
+
+def test_link_event_idempotent_reuses_same_event(conn):
+    db.upsert_market(conn, MARKET)
+    kalshi_cid = "kalshi:KXFOO-26"
+    first = db.link_event(conn, MARKET["condition_id"], kalshi_cid)
+    second = db.link_event(conn, MARKET["condition_id"], kalshi_cid)
+    assert first == second
+    assert conn.execute("SELECT COUNT(*) AS n FROM events").fetchone()["n"] == 1
+
+
+def test_link_event_upserts_placeholder_for_unsynced_venue_market(conn):
+    """Acceptance criterion (Phase 10): a confirmed match creates an event
+    linking >=2 venue-markets, even if the external venue's own collector
+    hasn't synced that market yet."""
+    db.upsert_market(conn, MARKET)
+    kalshi_cid = "kalshi:KXNOTSYNCED-26"
+    assert conn.execute("SELECT COUNT(*) AS n FROM markets WHERE condition_id = ?",
+                        (kalshi_cid,)).fetchone()["n"] == 0
+    event_id = db.link_event(conn, MARKET["condition_id"], kalshi_cid)
+    linked = conn.execute("SELECT condition_id FROM markets WHERE event_id = ?", (event_id,)).fetchall()
+    assert {r["condition_id"] for r in linked} == {MARKET["condition_id"], kalshi_cid}

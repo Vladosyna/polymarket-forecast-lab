@@ -33,6 +33,11 @@ SNAPSHOT_SCHEMA = {
     # Null in partitions written before the change.
     "bids_json": pl.String,
     "asks_json": pl.String,
+    # v1.9 multi-venue (Phase 10, additive/non-breaking): 'polymarket' (default,
+    # so every pre-existing row and call site is unaffected), 'kalshi',
+    # 'metaculus'. Venues without an order book (Metaculus community
+    # prediction) store their probability in `mid` and leave book fields NULL.
+    "venue": pl.String,
 }
 
 
@@ -59,7 +64,10 @@ class SnapshotStore:
         """Append rows, deduplicating on (ts, condition_id). Returns rows written."""
         if not rows:
             return 0
-        rows = [{col: r.get(col) for col in SNAPSHOT_SCHEMA} for r in rows]
+        rows = [
+            {col: r.get(col, "polymarket" if col == "venue" else None) for col in SNAPSHOT_SCHEMA}
+            for r in rows
+        ]
         df = pl.DataFrame(rows, schema=SNAPSHOT_SCHEMA)
         written = 0
         # A batch can straddle midnight; group rows into their date partitions.

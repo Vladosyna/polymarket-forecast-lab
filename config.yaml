@@ -172,6 +172,15 @@ schedule:
   # a collection cycle if the collector has stalled (liquid snapshots too old).
   health_check_interval_minutes: 60
 
+# --- Watchdog (optional supervisor) ---------------------------------------
+# `lab watchdog` runs `lab run` as a child process and auto-restarts it after
+# any exit (crash or otherwise). The delay is deliberate: it gives an operator
+# a window to notice something is wrong before the watchdog silently
+# resurrects a process that might be crash-looping, and it avoids hammering
+# Polymarket's API with restart attempts if something is actually broken.
+watchdog:
+  restart_delay_seconds: 600   # 10 minutes
+
 # --- Cross-venue signal (M7, Phase 9, optional) --------------------------
 # `data/markets_map.yaml` is the confirmed-pairs source of truth (hardcoded
 # path, same precedent as M6's links.yaml). `lab map propose` only covers
@@ -179,7 +188,60 @@ schedule:
 # 2026-07-03 (see api/metaculus.py), so a Metaculus pair must be hand-curated
 # via `lab map confirm --venue metaculus`.
 cross_venue:
-  propose_top_k: 20   # candidate liquid-tier, priority-category markets per `lab map propose` run
+  propose_top_k: 20        # candidate liquid-tier, priority-category markets per `lab map propose` run
+  propose_cron: "0 5 * * 1" # weekly, Monday 05:00 UTC -- orchestrator runs `lab map propose`
+                             # automatically. It only ever appends to `proposed`; a human still
+                             # must run `lab map confirm` before a pair feeds M7 (propose-then-
+                             # confirm is a hard requirement, not something automation may skip).
+
+# --- Multi-venue collectors (Phase 10, v1.9) -------------------------------
+# Each venue gets its OWN TokenBucket instance (per-host rate limiters, brief
+# Phase 10) -- not literally the same object as Polymarket's, but likewise
+# conservative, so one venue being slow/rate-limited never stalls another.
+venues:
+  kalshi:
+    sync_interval_minutes: 60
+    snapshot_interval_minutes: 5
+    resolution_poll_minutes: 30
+    rate_limit:
+      requests_per_second: 8   # brief section 3: Kalshi tolerates ~10 req/s; stay under it
+      burst: 16
+    # Kalshi's own /series category field (verified live 2026-07-04), mapped to
+    # our taxonomy so tiering/priority logic matches Polymarket's categories.
+    # Crypto/Financials excluded outright -- same "structurally unforecastable"
+    # rule as Polymarket (brief section 3 universe policy): these are 15-min
+    # crypto price-target markets, the market price IS the forecast.
+    category_map:
+      Economics: economics
+      "Climate and Weather": weather
+      Politics: politics
+      Elections: politics
+      World: geopolitics
+      Entertainment: entertainment
+      Sports: sports
+    excluded_series_categories: ["Crypto", "Financials"]
+    max_series_per_sync: 40   # bounds per-cycle series fan-out (politeness + runtime)
+    tiers:
+      liquid: { min_liquidity: 1000, min_volume: 5000 }
+      tail: { min_liquidity: 0, min_volume: 0 }
+
+  metaculus:
+    snapshot_interval_minutes: 60
+    resolution_poll_minutes: 60
+    rate_limit:
+      requests_per_second: 3
+      burst: 6
+    # No broad universe sync (brief Phase 10 task text is explicit: snapshots +
+    # resolution watcher only) -- Metaculus only ever tracks questions already
+    # confirmed in markets_map.yaml; nothing forecastable/collectable until a
+    # human confirms a match, same propose-then-confirm gate M7 already uses.
+
+  manifold:
+    sync_interval_minutes: 60
+    rate_limit:
+      requests_per_second: 5
+      burst: 10
+    max_markets_per_sync: 1000   # bounded, paginated fetch of resolved+open binary markets
 
 # --- Results publishing (private mirror) ----------------------------------
 # After every nightly forecast/eval/report bundle, mirror curated results

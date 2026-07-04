@@ -12,12 +12,27 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT
+);
+
+-- v1.9 multi-venue foundation (Phase 10, brief section 5). `markets` itself
+-- gains venue/venue_native_id/event_id via ALTER in _migrate_multi_venue()
+-- below -- CREATE TABLE IF NOT EXISTS can't add columns to an existing table.
+CREATE TABLE IF NOT EXISTS venues (
+  venue TEXT PRIMARY KEY,
+  trust_tier TEXT CHECK(trust_tier IN ('money','reputation','play')),
+  forecastable INTEGER DEFAULT 0,
+  in_m7_pool INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  event_id TEXT PRIMARY KEY,
+  title TEXT, created_ts TEXT
 );
 
 CREATE TABLE IF NOT EXISTS markets (
@@ -128,6 +143,65 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_model_versions_active
 """
 
 
+# venue -> (trust_tier, forecastable, in_m7_pool). Brief section 5/16: Polymarket
+# and Kalshi are real-money and forecastable; Metaculus (reputation-scored) feeds
+# M7's external pool but is never itself a forecast target; Manifold (play-money)
+# feeds event mapping and M2 base rates only -- excluded from M7 and forecasting.
+VENUE_SEEDS: tuple[tuple[str, str, int, int], ...] = (
+    ("polymarket", "money", 1, 0),
+    ("kalshi", "money", 1, 1),
+    ("metaculus", "reputation", 0, 1),
+    ("manifold", "play", 0, 0),
+)
+
+
+def venue_condition_id(venue: str, native_id: str) -> str:
+    """Synthesized market key for non-Polymarket rows (brief section 5):
+    condition_id stays the universal key so every existing FK, the forecasts
+    ledger, and the snapshot layout keep working unchanged. Polymarket's own
+    condition_id (its native hash) is used as-is, never prefixed."""
+    return native_id if venue == "polymarket" else f"{venue}:{native_id}"
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    return any(r[1] == column for r in conn.execute(f"PRAGMA table_info({table})"))
+
+
+def migrate_multi_venue(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Idempotent v1.9 migration (Phase 10): ALTER `markets` with venue columns
+    (CREATE TABLE IF NOT EXISTS above can't add columns to a table that already
+    exists) and seed the `venues` table. Safe to call on every connect() --
+    each step checks before acting, so a second run is a no-op. Never rewrites
+    or drops anything; a fresh DB gets the columns from the first connect()
+    with no separate migration event.
+    """
+    applied = {"venue_column": False, "venue_native_id_column": False, "event_id_column": False}
+    if not _column_exists(conn, "markets", "venue"):
+        conn.execute("ALTER TABLE markets ADD COLUMN venue TEXT DEFAULT 'polymarket'")
+        applied["venue_column"] = True
+    if not _column_exists(conn, "markets", "venue_native_id"):
+        conn.execute("ALTER TABLE markets ADD COLUMN venue_native_id TEXT")
+        applied["venue_native_id_column"] = True
+        # Backfill: for pre-existing (Polymarket) rows, the native id IS the
+        # condition_id -- new venues populate this at insert time instead.
+        conn.execute(
+            "UPDATE markets SET venue_native_id = condition_id WHERE venue_native_id IS NULL"
+        )
+    if not _column_exists(conn, "markets", "event_id"):
+        conn.execute("ALTER TABLE markets ADD COLUMN event_id TEXT")
+        applied["event_id_column"] = True
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_venue ON markets(venue)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_event ON markets(event_id)")
+    for venue, trust_tier, forecastable, in_m7_pool in VENUE_SEEDS:
+        conn.execute(
+            "INSERT OR IGNORE INTO venues(venue, trust_tier, forecastable, in_m7_pool) "
+            "VALUES (?, ?, ?, ?)",
+            (venue, trust_tier, forecastable, in_m7_pool),
+        )
+    conn.commit()
+    return applied
+
+
 class ForecastLedgerViolation(RuntimeError):
     """Raised on any attempt to UPDATE or DELETE a forecast row."""
 
@@ -152,6 +226,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     # other instead of failing with "database is locked" under WAL.
     conn.execute("PRAGMA busy_timeout=10000")
     conn.executescript(SCHEMA)
+    migrate_multi_venue(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )
@@ -172,16 +247,26 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 
 def upsert_market(conn: sqlite3.Connection, row: dict) -> None:
-    """Idempotent market upsert; preserves first_seen_ts across re-syncs."""
+    """Idempotent market upsert; preserves first_seen_ts across re-syncs.
+
+    Venue-aware (v1.9, Phase 10) but fully backward-compatible: callers that
+    don't pass venue/venue_native_id (every pre-Phase-10 call site) default to
+    'polymarket' with venue_native_id = condition_id. `event_id` is deliberately
+    excluded from the ON CONFLICT UPDATE -- a cross-venue link minted by
+    `lab map confirm` must survive the next routine universe re-sync.
+    """
+    row = {"venue": "polymarket", "venue_native_id": row.get("condition_id"), "event_id": None, **row}
     conn.execute(
         """
         INSERT INTO markets (condition_id, slug, question, category, description,
                              end_date_iso, token_id_yes, token_id_no, neg_risk,
                              active, closed, liquidity_num, volume_num, tier,
+                             venue, venue_native_id, event_id,
                              first_seen_ts, last_synced_ts)
         VALUES (:condition_id, :slug, :question, :category, :description,
                 :end_date_iso, :token_id_yes, :token_id_no, :neg_risk,
                 :active, :closed, :liquidity_num, :volume_num, :tier,
+                :venue, :venue_native_id, :event_id,
                 :now, :now)
         ON CONFLICT(condition_id) DO UPDATE SET
             slug=excluded.slug, question=excluded.question, category=excluded.category,
@@ -193,6 +278,42 @@ def upsert_market(conn: sqlite3.Connection, row: dict) -> None:
         """,
         {**row, "now": now_utc_iso()},
     )
+
+
+def link_event(conn: sqlite3.Connection, condition_id_a: str, condition_id_b: str,
+              title: str | None = None) -> str:
+    """Mint (or reuse) an event linking two venue-markets on human confirmation
+    (brief section 5/Phase 10: "event_id minted on first human-confirmed
+    cross-venue match"). Idempotent: re-linking the same pair is a no-op.
+    Upserts a minimal placeholder row for either side not yet synced by its
+    venue's own collector, so the link always succeeds.
+    """
+    import uuid
+
+    for cid in (condition_id_a, condition_id_b):
+        conn.execute(
+            "INSERT OR IGNORE INTO markets (condition_id, venue, venue_native_id, tier, "
+            "active, closed, first_seen_ts, last_synced_ts) VALUES (?, ?, ?, 'ignored', 0, 0, ?, ?)",
+            (cid, cid.split(":", 1)[0] if ":" in cid else "polymarket",
+             cid.split(":", 1)[1] if ":" in cid else cid, now_utc_iso(), now_utc_iso()),
+        )
+    rows = conn.execute(
+        "SELECT condition_id, event_id FROM markets WHERE condition_id IN (?, ?)",
+        (condition_id_a, condition_id_b),
+    ).fetchall()
+    existing = next((r["event_id"] for r in rows if r["event_id"]), None)
+    event_id = existing or f"evt_{uuid.uuid4().hex[:16]}"
+    if existing is None:
+        conn.execute(
+            "INSERT OR IGNORE INTO events(event_id, title, created_ts) VALUES (?, ?, ?)",
+            (event_id, title, now_utc_iso()),
+        )
+    conn.execute(
+        "UPDATE markets SET event_id = ? WHERE condition_id IN (?, ?) AND (event_id IS NULL OR event_id = ?)",
+        (event_id, condition_id_a, condition_id_b, event_id),
+    )
+    conn.commit()
+    return event_id
 
 
 def record_resolution(

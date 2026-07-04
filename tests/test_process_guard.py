@@ -17,6 +17,7 @@ def test_classify_cmdline_roles():
     assert classify_cmdline(["python.exe", "-m", "lab", "run"]) == "orchestrator"
     assert classify_cmdline(["python.exe", "-m", "lab", "collect"]) == "collector"
     assert classify_cmdline(["python", "-m", "uv", "run", "lab", "collect"]) == "collector"
+    assert classify_cmdline(["python.exe", "-m", "lab", "watchdog"]) == "watchdog"
     assert classify_cmdline(
         ["python", "-m", "streamlit", "run", "src/lab/dashboard.py"]) == "dashboard"
     assert classify_cmdline(["python", "-m", "lab", "status"]) is None

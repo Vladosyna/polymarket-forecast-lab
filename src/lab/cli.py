@@ -8,12 +8,33 @@ loudly rather than silently succeeding.
 from __future__ import annotations
 
 import asyncio
+import logging
+import sys
 
 import typer
 
 from lab.util import load_config, setup_logging, use_stable_event_loop
 
 use_stable_event_loop()
+
+_log = logging.getLogger("lab.crash")
+
+
+def _log_uncaught_exception(exc_type, exc_value, exc_tb) -> None:
+    """Last-resort handler: any exception that would otherwise only print to a
+    console window (invisible once that window closes, e.g. start.bat) or
+    vanish entirely gets one guaranteed line -- with full traceback -- in
+    data/logs/lab.jsonl before the process exits. KeyboardInterrupt still
+    prints normally (Ctrl+C is an expected, deliberate stop, not a crash)."""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    _log.critical("uncaught exception -- process is about to exit",
+                  exc_info=(exc_type, exc_value, exc_tb))
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+sys.excepthook = _log_uncaught_exception
 
 app = typer.Typer(
     name="lab",
@@ -82,6 +103,16 @@ def run() -> None:
 
     typer.echo("Forecast Lab orchestrator starting (Ctrl+C to stop)...")
     asyncio.run(run_orchestrator(load_config()))
+
+
+@app.command()
+def watchdog() -> None:
+    """Supervise `lab run`: auto-restarts it after any exit, after a cooldown
+    delay (config.yaml watchdog.restart_delay_seconds, default 10 min)."""
+    from lab.collect.runner import run_watchdog
+
+    typer.echo("Forecast Lab watchdog starting (auto-restarts `lab run`, Ctrl+C to stop everything)...")
+    run_watchdog(load_config())
 
 
 @app.command()
@@ -243,7 +274,7 @@ def guard(
         help="Also stop a lone outdated instance (use before restarting after a code update).",
     ),
 ) -> None:
-    """Stop redundant or unmanaged lab instances (orchestrator, collector, dashboard)."""
+    """Stop redundant or unmanaged lab instances (orchestrator, collector, dashboard, watchdog)."""
     from lab import process_guard
 
     result = process_guard.cleanup(load_config(), retire_sole_outdated=retire_outdated)
@@ -344,8 +375,14 @@ def map_confirm(
     external_id: str = typer.Option(
         None, help="Required if not already in `proposed` (e.g. a hand-found Metaculus pair)."),
 ) -> None:
-    """Move a proposed pair into `confirmed` -- or confirm a hand-curated one directly."""
-    from lab.models.m7_crossvenue import confirm_match, load_markets_map, save_markets_map
+    """Move a proposed pair into `confirmed` -- or confirm a hand-curated one directly.
+
+    Also mints (or reuses) the event_id linking the two venue-markets in the DB
+    (brief section 5/Phase 10) -- the markets_map.yaml confirmation is the one
+    and only place an event gets created, matching M7's single source of truth.
+    """
+    from lab.models.m7_crossvenue import confirm_match, link_confirmed_event, load_markets_map, save_markets_map
+    from lab.store import db
 
     data = load_markets_map()
     ok = confirm_match(data, condition_id, venue, external_id=external_id)
@@ -357,7 +394,14 @@ def map_confirm(
         )
         raise typer.Exit(code=1)
     save_markets_map(data)
-    typer.echo(f"map confirm: {condition_id} <-> {venue} is now live for M7")
+    entry = next(e for e in data["confirmed"] if e["condition_id"] == condition_id and e["venue"] == venue)
+
+    conn = db.connect(load_config()["storage"]["db_path"])
+    try:
+        event_id = link_confirmed_event(conn, condition_id, venue, entry["external_id"])
+    finally:
+        conn.close()
+    typer.echo(f"map confirm: {condition_id} <-> {venue} is now live for M7 (event_id={event_id})")
 
 
 @map_app.command("list")

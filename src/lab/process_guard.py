@@ -30,7 +30,7 @@ from lab.util import PROJECT_ROOT, now_utc_iso
 
 log = logging.getLogger(__name__)
 
-ROLES = ("orchestrator", "collector", "dashboard")
+ROLES = ("orchestrator", "collector", "dashboard", "watchdog")
 _REGISTRY_NAME = "processes.json"
 
 
@@ -140,6 +140,8 @@ def classify_cmdline(cmdline: list[str]) -> str | None:
                    or "lab" in t.split(os.sep)[-1]) for t in tokens) or " lab" in f" {joined}"
     if not has_lab:
         return None
+    if "watchdog" in tokens:
+        return "watchdog"
     # collector check precedes orchestrator so "uv run lab collect" is a collector
     if "collect" in tokens:
         return "collector"
