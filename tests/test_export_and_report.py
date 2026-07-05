@@ -9,6 +9,7 @@ import pytest
 from lab.eval.report import render_report
 from lab.eval.run import run_eval
 from lab.export import EXPORT_FIELDS, export_jsonl
+from lab.learn.refit import save_artifact
 from lab.store import db
 from lab.store.snapshots import SnapshotStore
 from lab.util import load_config
@@ -150,4 +151,31 @@ def test_report_renders_venue_category_matrix_with_both_estimators(config):
     econ_poly = next(r for r in rows if (r["venue"], r["category"]) == ("polymarket", "economics"))
     assert econ_poly["skill_pw"] is not None
     assert econ_poly["n_strata_pw"] >= 3
+    conn.close()
+
+
+def test_report_renders_pooling_diagnostics_section(config):
+    """Phase 13 acceptance: fitted extremization exponents appear in the
+    report with their n (n_members / n_eff)."""
+    conn = db.connect(config["storage"]["db_path"])
+    _seed(conn, n_markets=2)  # just enough for render_report to run end-to-end
+    save_artifact(config, "m4_extremization", {
+        "kind": "m4_extremization",
+        "categories": {"politics": {"a": 1.8, "rho_bar": 0.4, "n_members_at_fit": 5,
+                                    "n_train": 100, "n_validation": 25}},
+    })
+    save_artifact(config, "m7_extremization", {
+        "kind": "m7_extremization",
+        "categories": {"_all": {"a": 1.3, "rho_bar": 0.6, "n_members_at_fit": 2.0,
+                                "n_train": 80, "n_validation": 20}},
+    })
+
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    path = render_report(conn, store, config)
+    html = path.read_text(encoding="utf-8")
+
+    assert "Pooling / extremization diagnostics" in html
+    assert "M4 ensemble" in html and "M7 cross-venue" in html
+    assert "1.800" in html  # M4's fitted a
+    assert "1.300" in html  # M7's fitted a
     conn.close()

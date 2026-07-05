@@ -38,6 +38,7 @@ from lab.learn.refit import (
     bound_step,
     bucket_for_days,
     fit_m1_curves,
+    fit_m1_hier_curves,
     fit_m2_baserates,
     fit_m5_macro_sds,
     load_active_artifact,
@@ -45,6 +46,7 @@ from lab.learn.refit import (
     save_artifact,
     sigmoid,
 )
+from lab.models.m1_hier import apply_hier_curve
 from lab.news.aggregate import aggregate
 from lab.util import PROJECT_ROOT, now_utc_iso
 
@@ -135,12 +137,44 @@ def _m1_predict(artifact: dict[str, Any], row: dict[str, Any]) -> float:
     return float(sigmoid(fit["alpha"] + fit["beta"] * logit(row["p_market"])))
 
 
+def _m1_hier_predict(artifact: dict[str, Any], row: dict[str, Any]) -> float:
+    bucket = bucket_for_days(row["days_to_resolution"])
+    if bucket is None or bucket not in artifact.get("buckets", {}):
+        return float(row["p_market"])
+    return apply_hier_curve(artifact, row.get("venue") or "polymarket", bucket, row["p_market"])
+
+
 def _m3_predict(artifact: dict[str, Any], row: dict[str, Any]) -> float:
     p = artifact.get("params") or {}
     if not p:
         return float(row["p_market"])
     return float(aggregate(row["p_market"], row["items"], row["ts"],
                            k=p["k"], tau_days=p["tau_days"], max_shift=p["max_shift"])["p_yes"])
+
+
+def _extremization_predict(artifact: dict[str, Any], row: dict[str, Any], category_key: str) -> float:
+    """Shared replay logic for m4_extremization/m7_extremization: apply the
+    fitted, correlation-discounted exponent to the pool's raw logit. `row`
+    already carries `p_pooled` -- today's un-extremized pool -- so no member
+    reconstruction is needed."""
+    from lab.learn.pooling import discount_extremization_exponent
+
+    spec = artifact.get("categories", {}).get(category_key)
+    if not spec:
+        return float(row["p_pooled"])
+    a_eff = discount_extremization_exponent(
+        spec["a"], n=max(1, int(round(spec.get("n_members_at_fit", 1)))),
+        rho_bar=spec.get("rho_bar", 0.0),
+    )
+    return float(sigmoid(a_eff * logit(row["p_pooled"])))
+
+
+def _m4_extremization_predict(artifact: dict[str, Any], row: dict[str, Any]) -> float:
+    return _extremization_predict(artifact, row, row.get("category") or "unknown")
+
+
+def _m7_extremization_predict(artifact: dict[str, Any], row: dict[str, Any]) -> float:
+    return _extremization_predict(artifact, row, "_all")
 
 
 # --- resolved-row loaders (carry condition_id for clustering) --------------
@@ -153,7 +187,7 @@ def m1_resolved_rows(conn, limit: int | None = None) -> list[dict]:
     rows = [dict(r) for r in conn.execute(
         """
         SELECT f.condition_id, f.p_market_at_ts AS p_market, r.payout_yes AS outcome,
-               r.resolved_ts, m.event_id AS event_id,
+               r.resolved_ts, m.event_id AS event_id, m.venue AS venue,
                (julianday(r.resolved_ts) - julianday(f.ts)) AS days_to_resolution
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
@@ -199,6 +233,41 @@ def m3_resolved_rows(conn, limit: int | None = None) -> list[dict]:
     return out[:limit] if limit else out
 
 
+def m4_resolved_rows(conn, limit: int | None = None) -> list[dict]:
+    """Resolved m4_ensemble forecasts (Phase 13). `p_yes` here IS today's raw,
+    un-extremized pool -- extremization doesn't exist in what's stored yet --
+    so it doubles directly as the `p_pooled` fit_extremization_exponent/
+    _m4_extremization_predict expect. Newest-resolved first."""
+    rows = [dict(r) for r in conn.execute(
+        """
+        SELECT f.condition_id, f.p_yes AS p_pooled, r.payout_yes AS outcome,
+               r.resolved_ts, m.category AS category, m.event_id AS event_id
+        FROM forecasts f
+        JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
+        JOIN markets m ON m.condition_id = f.condition_id
+        WHERE f.model_id = 'm4_ensemble'
+        ORDER BY r.resolved_ts DESC
+        """
+    )]
+    return rows[:limit] if limit else rows
+
+
+def m7_resolved_rows(conn, limit: int | None = None) -> list[dict]:
+    """Resolved m7_crossvenue forecasts (Phase 13), same shape as m4_resolved_rows."""
+    rows = [dict(r) for r in conn.execute(
+        """
+        SELECT f.condition_id, f.p_yes AS p_pooled, r.payout_yes AS outcome,
+               r.resolved_ts, m.category AS category, m.event_id AS event_id
+        FROM forecasts f
+        JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
+        JOIN markets m ON m.condition_id = f.condition_id
+        WHERE f.model_id = 'm7_crossvenue'
+        ORDER BY r.resolved_ts DESC
+        """
+    )]
+    return rows[:limit] if limit else rows
+
+
 # --- bounded fits ----------------------------------------------------------
 
 def _bound_m1_curves(old: dict | None, new: dict, pct: float) -> dict:
@@ -232,6 +301,20 @@ def _bound_m4_weights(old: dict | None, new: dict, pct: float) -> dict:
     return new
 
 
+def _bound_extremization(old: dict | None, new: dict, pct: float) -> dict:
+    """Clamp each category's `a` move (Phase 13). Shared by m4_extremization
+    and m7_extremization -- both use the same {"categories": {key: {"a": ...}}}
+    shape (m7's is a single "_all" pseudo-category)."""
+    if not old:
+        return new
+    old_c = old.get("categories", {})
+    for cat, spec in new.get("categories", {}).items():
+        oc = old_c.get(cat)
+        if oc and "a" in oc and "a" in spec:
+            spec["a"] = bound_step({"a": oc["a"]}, {"a": spec["a"]}, pct)["a"]
+    return new
+
+
 def _bound_m5_sds(old: dict | None, new: dict, pct: float) -> dict:
     """Clamp each series' sd move; leave n/val_nll diagnostics alone."""
     if not old:
@@ -248,6 +331,40 @@ def fit_m1_walk_forward(train: list[dict], validation: list[dict]) -> dict[str, 
     """Refit path with a structural walk-forward guard (brief section 6)."""
     assert_walk_forward(train, validation)
     return fit_m1_curves(train)
+
+
+def _bound_m1_hier_curves(old: dict | None, new: dict, pct: float) -> dict:
+    """Clamp each bucket's global alpha/beta AND each venue's offset move;
+    leave diagnostics (n, nll) alone. Mirrors _bound_m1_curves, extended to
+    also walk each venue's offset dict (Phase 12, M1.x)."""
+    if not old:
+        return new
+    old_buckets = old.get("buckets", {})
+    for name, fit in new.get("buckets", {}).items():
+        ob = old_buckets.get(name)
+        if not ob:
+            continue
+        og, ng = ob.get("global"), fit.get("global")
+        if og and ng and "alpha" in og and "beta" in og:
+            bounded = bound_step({"alpha": og["alpha"], "beta": og["beta"]},
+                                 {"alpha": ng["alpha"], "beta": ng["beta"]}, pct)
+            ng["alpha"], ng["beta"] = bounded["alpha"], bounded["beta"]
+        old_venues = ob.get("venues", {})
+        for venue, vfit in fit.get("venues", {}).items():
+            ovfit = old_venues.get(venue)
+            if ovfit and "alpha_offset" in ovfit and "beta_offset" in ovfit:
+                bounded = bound_step(
+                    {"alpha_offset": ovfit["alpha_offset"], "beta_offset": ovfit["beta_offset"]},
+                    {"alpha_offset": vfit["alpha_offset"], "beta_offset": vfit["beta_offset"]}, pct)
+                vfit["alpha_offset"], vfit["beta_offset"] = bounded["alpha_offset"], bounded["beta_offset"]
+    return new
+
+
+def fit_m1_hier_walk_forward(train: list[dict], validation: list[dict]) -> dict[str, Any]:
+    """Refit path with a structural walk-forward guard (brief section 6),
+    mirrors fit_m1_walk_forward for the hierarchical multi-venue curve."""
+    assert_walk_forward(train, validation)
+    return fit_m1_hier_curves(train)
 
 
 # --- challenger registration + promotion decision -------------------------
@@ -327,6 +444,23 @@ def refit_statistical_models(conn, config: dict[str, Any], *, apply: bool) -> di
         results["m1_curves"] = {"skipped": "insufficient_data",
                                 "n_train": len(obs), "n_holdout": len(live)}
 
+    # M1.x hierarchical recalibration (Phase 12): same train/validation split as
+    # m1_curves above -- the bootstrap `obs` carries no venue tag and defaults to
+    # 'polymarket' (fit_m1_hier_curves' own convention), while `live` (m0_market's
+    # forward record) already spans every forecastable venue via its markets join.
+    # Registers under its OWN artifact key ('m1_hier_curves'), so the very first
+    # fit auto-promotes (no incumbent to touch) and every later refit is CI-gated
+    # against its own prior version -- m1_curves' active pointer is never touched.
+    if obs and live:
+        m1h = fit_m1_hier_walk_forward(train=obs, validation=live)
+        m1h = _bound_m1_hier_curves(load_active_artifact(config, "m1_hier_curves"), m1h, pct)
+        results["m1_hier_curves"] = _process_challenger(
+            conn, config, "m1_hier_curves", m1h, live, _m1_hier_predict, apply=apply)
+        results["m1_hier_curves"].update(n_train=len(obs), n_holdout=len(live))
+    else:
+        results["m1_hier_curves"] = {"skipped": "insufficient_data",
+                                     "n_train": len(obs), "n_holdout": len(live)}
+
     per_market: dict[str, dict] = {}
     for o in obs:
         cid = o.get("condition_id")
@@ -365,6 +499,91 @@ def refit_statistical_models(conn, config: dict[str, Any], *, apply: bool) -> di
         else:
             results["m5_macro_sd"] = {"skipped": "insufficient_quarters"}
     return results
+
+
+# --- extremization exponent fit (Phase 13) ---------------------------------
+
+def fit_m4_extremization(conn, config: dict[str, Any], *, apply: bool = False) -> dict[str, Any]:
+    """Per-category extremization exponent for M4's pool (Phase 13, CLAUDE.md
+    M4/M7 extremization). Walk-forward per category: the oldest 80% of each
+    category's resolved m4_ensemble forecasts fits the grid search (brief
+    section 6), the newest 20% is held out; all categories' holdouts are
+    combined into one flat CI-gate validation set (same discipline as
+    fit_m3_aggregator, adapted for a per-category artifact)."""
+    from lab.learn.pooling import estimate_rho_bar_m4, fit_extremization_exponent
+    from lab.models.m4_ensemble import POOLABLE
+
+    min_n = int(_learn_cfg(config).get("m4_extremization_min_n", 60))
+    rows = list(reversed(m4_resolved_rows(conn)))  # oldest-first for walk-forward
+    by_cat: dict[str, list[dict]] = {}
+    for r in rows:
+        by_cat.setdefault(r["category"] or "unknown", []).append(r)
+
+    rho_by_cat = estimate_rho_bar_m4(conn, config, model_ids=POOLABLE)
+    artifact: dict[str, Any] = {"kind": "m4_extremization", "fitted_at": now_utc_iso(), "categories": {}}
+    combined_validation: list[dict] = []
+    for cat, cat_rows in by_cat.items():
+        if len(cat_rows) < min_n:
+            continue
+        split = int(len(cat_rows) * 0.8)
+        train, validation = cat_rows[:split], cat_rows[split:]
+        fit = fit_extremization_exponent(train, validation)  # asserts walk-forward internally
+        artifact["categories"][cat] = {
+            "a": fit["a"], "rho_bar": rho_by_cat.get(cat, 0.0),
+            "n_members_at_fit": len(POOLABLE),
+            "n_train": fit["n_train"], "n_validation": fit["n_validation"],
+        }
+        combined_validation.extend(validation)
+
+    if not artifact["categories"]:
+        return {"skipped": "insufficient_data", "n_resolved": len(rows)}
+
+    pct = _max_step_pct(config)
+    artifact = _bound_extremization(load_active_artifact(config, "m4_extremization"), artifact, pct)
+    decision = _process_challenger(
+        conn, config, "m4_extremization", artifact, combined_validation,
+        _m4_extremization_predict, apply=apply)
+    decision.update(categories=list(artifact["categories"]), n_resolved=len(rows))
+    return decision
+
+
+def fit_m7_extremization(conn, config: dict[str, Any], *, apply: bool = False) -> dict[str, Any]:
+    """Single overall extremization exponent for M7's external pool (Phase
+    13) -- confirmed cross-venue pairs are few (Phase 9's own acceptance bar
+    was only >=5), so a per-category split would starve every cell; one
+    pooled fit instead, keyed "_all"."""
+    from lab.learn.pooling import estimate_rho_bar_m7, fit_extremization_exponent
+    from lab.models.m7_crossvenue import confirmed_by_condition, load_markets_map
+    from lab.store.snapshots import SnapshotStore
+
+    min_n = int(_learn_cfg(config).get("m7_extremization_min_n", 60))
+    rows = list(reversed(m7_resolved_rows(conn)))  # oldest-first
+    if len(rows) < min_n:
+        return {"skipped": "insufficient_data", "n_resolved": len(rows)}
+
+    split = int(len(rows) * 0.8)
+    train, validation = rows[:split], rows[split:]
+    fit = fit_extremization_exponent(train, validation)  # asserts walk-forward internally
+
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    rho = estimate_rho_bar_m7(conn, store, config)
+    by_cid = confirmed_by_condition(load_markets_map())
+    n_members = (sum(len(v) for v in by_cid.values()) / len(by_cid)) if by_cid else 2.0
+
+    artifact: dict[str, Any] = {
+        "kind": "m7_extremization", "fitted_at": now_utc_iso(),
+        "categories": {"_all": {
+            "a": fit["a"], "rho_bar": rho if rho is not None else 0.0,
+            "n_members_at_fit": n_members,
+            "n_train": fit["n_train"], "n_validation": fit["n_validation"],
+        }},
+    }
+    pct = _max_step_pct(config)
+    artifact = _bound_extremization(load_active_artifact(config, "m7_extremization"), artifact, pct)
+    decision = _process_challenger(
+        conn, config, "m7_extremization", artifact, validation, _m7_extremization_predict, apply=apply)
+    decision.update(n_resolved=len(rows))
+    return decision
 
 
 # --- M3 aggregator walk-forward fit ----------------------------------------
@@ -441,7 +660,9 @@ def run_rollback_checks(conn, config: dict[str, Any], *, apply: bool) -> list[di
     """
     window = _rollback_window(config)
     checks = [("m1_curves", _m1_predict, m1_resolved_rows),
-              ("m3_params", _m3_predict, m3_resolved_rows)]
+              ("m3_params", _m3_predict, m3_resolved_rows),
+              ("m4_extremization", _m4_extremization_predict, m4_resolved_rows),
+              ("m7_extremization", _m7_extremization_predict, m7_resolved_rows)]
     out: list[dict[str, Any]] = []
     for model_key, predict_fn, rows_fn in checks:
         active = registry.active_version(conn, model_key)
@@ -480,7 +701,8 @@ def run_learn(conn, config: dict[str, Any], llm=None, *, apply: bool = False) ->
 
     Refuses to run while data/PAUSE exists (the same kill switch the collector
     respects). Order: rollback circuit breaker -> refits -> M3 aggregator ->
-    post-mortems (post-mortems run only on apply, since they cost LLM budget).
+    extremization exponents (Phase 13) -> post-mortems (post-mortems run only
+    on apply, since they cost LLM budget).
     """
     from lab.collect.runner import is_paused
 
@@ -492,6 +714,8 @@ def run_learn(conn, config: dict[str, Any], llm=None, *, apply: bool = False) ->
     summary["rollbacks"] = run_rollback_checks(conn, config, apply=apply)
     summary["refits"] = refit_statistical_models(conn, config, apply=apply)
     summary["m3_aggregator"] = fit_m3_aggregator(conn, config, apply=apply)
+    summary["m4_extremization"] = fit_m4_extremization(conn, config, apply=apply)
+    summary["m7_extremization"] = fit_m7_extremization(conn, config, apply=apply)
     if apply:
         from lab.learn.postmortem import run_postmortems
         summary["postmortems"] = run_postmortems(conn, config, llm)

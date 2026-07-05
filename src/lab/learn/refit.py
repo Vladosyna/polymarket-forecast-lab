@@ -181,6 +181,91 @@ def fit_m1_curves(observations: list[dict]) -> dict[str, Any]:
     return artifact
 
 
+HIER_ALLOWED_VENUES = ("polymarket", "kalshi", "metaculus")  # guardrail 16: never manifold/archives
+
+
+def fit_m1_hier_curves(
+    observations: list[dict], min_bucket_n: int = 100, min_venue_n: int = 5
+) -> dict[str, Any]:
+    """M1.x hierarchical recalibration (Phase 12, CLAUDE.md M1.x): one global
+    logistic curve per horizon bucket plus a ridge-shrunk per-venue offset,
+    logit(p_hat) = (alpha_g + alpha_v) + (beta_g + beta_v) * logit(p_market).
+
+    The ridge penalty on each venue's offset scales as (bucket_n / n_v): a
+    venue with few observations in a bucket (e.g. Metaculus, ~40 resolved/
+    month) is pulled hard toward the global curve -- partial pooling; a venue
+    with many observations (e.g. Kalshi at scale) can diverge freely where its
+    own data demands it. Venues below min_venue_n in a bucket get no offset
+    parameter at all (M1Hier falls back to the global-only curve for them --
+    the same outcome as an infinitely-shrunk offset, without wasting a
+    parameter on noise).
+
+    observations: [{p_market, outcome, days_to_resolution, venue}, ...].
+    Guardrail 16: fits only on polymarket/kalshi/metaculus rows -- any other
+    venue tag is dropped before fitting, a second explicit backstop beyond
+    whatever filtering the caller already did.
+    """
+    artifact: dict[str, Any] = {"kind": "m1_hier_curves", "fitted_at": now_utc_iso(), "buckets": {}}
+    obs = [o for o in observations if o.get("venue", "polymarket") in HIER_ALLOWED_VENUES]
+    if not obs:
+        log.warning("m1_hier fit: no observations")
+        return artifact
+
+    for name in HORIZON_BUCKETS:
+        lo, hi = HORIZON_BUCKETS[name]
+        subset = [o for o in obs if lo <= o["days_to_resolution"] < hi]
+        if len(subset) < min_bucket_n:
+            log.warning("m1_hier fit: bucket has too few observations, skipping",
+                        extra={"ctx": {"bucket": name, "n": len(subset)}})
+            continue
+
+        p = np.array([o["p_market"] for o in subset], dtype=float)
+        y = np.array([o["outcome"] for o in subset], dtype=float)
+        venues = np.array([o.get("venue", "polymarket") for o in subset])
+        x = logit(p)
+        bucket_n = len(subset)
+
+        venue_counts = {v: int(np.sum(venues == v)) for v in sorted(set(venues.tolist()))}
+        fit_venues = [v for v in venue_counts if venue_counts[v] >= min_venue_n]
+        venue_idx = {v: i for i, v in enumerate(fit_venues)}
+        venue_mask = {v: (venues == v) for v in fit_venues}
+        n_params = 2 + 2 * len(fit_venues)
+
+        def unpack(params: np.ndarray) -> tuple[float, float, dict[str, tuple[float, float]]]:
+            offsets = {v: (float(params[2 + 2 * i]), float(params[2 + 2 * i + 1]))
+                      for v, i in venue_idx.items()}
+            return float(params[0]), float(params[1]), offsets
+
+        def objective(params: np.ndarray, _venue_mask=venue_mask, _venue_counts=venue_counts,
+                     _bucket_n=bucket_n, _x=x, _y=y) -> float:
+            alpha_g, beta_g, offsets = unpack(params)
+            alpha = np.full(_bucket_n, alpha_g)
+            beta = np.full(_bucket_n, beta_g)
+            penalty = 0.0
+            for v, (av, bv) in offsets.items():
+                alpha[_venue_mask[v]] += av
+                beta[_venue_mask[v]] += bv
+                penalty += (_bucket_n / _venue_counts[v]) * (av ** 2 + bv ** 2)
+            p_hat = np.clip(sigmoid(alpha + beta * _x), EPS, 1 - EPS)
+            nll = -float(np.sum(_y * np.log(p_hat) + (1 - _y) * np.log(1 - p_hat)))
+            return nll + penalty
+
+        x0 = np.zeros(n_params)
+        x0[1] = 1.0  # beta_g starting point, same convention as fit_logistic_recalibration
+        res = minimize(objective, x0, method="L-BFGS-B")
+        alpha_g, beta_g, offsets = unpack(res.x)
+
+        artifact["buckets"][name] = {
+            "global": {"alpha": alpha_g, "beta": beta_g, "n": bucket_n},
+            "venues": {
+                v: {"alpha_offset": av, "beta_offset": bv, "n": venue_counts[v]}
+                for v, (av, bv) in offsets.items()
+            },
+            "nll": float(res.fun),
+        }
+    return artifact
+
+
 def fit_m2_baserates(rows: list[dict], min_n: int = 50) -> dict[str, Any]:
     """Category base rates from resolved markets: [{category, outcome}, ...]."""
     artifact: dict[str, Any] = {"kind": "m2_baserates", "fitted_at": now_utc_iso(), "categories": {}}

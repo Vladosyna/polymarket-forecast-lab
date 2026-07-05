@@ -67,3 +67,45 @@ def test_fitted_weights_favor_better_model(conn):
     weights = art["categories"]["politics"]["weights"]
     assert weights["m1_debiased"] > weights["m0_market"]
     assert sum(weights.values()) == pytest.approx(1.0)
+
+
+# --- Phase 13: extremization applied at forecast time -----------------------
+
+def test_no_extremization_artifact_is_byte_identical_to_today(conn):
+    """Regression guard: omitting extremization_artifact (the default) must
+    reproduce today's plain log-odds pool exactly -- no behavior change for
+    existing deployments until a fit actually runs."""
+    _add_forecast(conn, "0x1", "m0_market", 0.5)
+    _add_forecast(conn, "0x1", "m1_debiased", 0.7)
+    conn.commit()
+    without = M4Ensemble(conn, None).forecast(_state(), {})
+    with_none = M4Ensemble(conn, None, None).forecast(_state(), {})
+    assert without.p_yes == pytest.approx(with_none.p_yes)
+    assert with_none.meta["extremization_a_eff"] == pytest.approx(1.0)
+
+
+def test_extremization_shifts_pool_away_from_plain_average(conn):
+    _add_forecast(conn, "0x1", "m0_market", 0.5)
+    _add_forecast(conn, "0x1", "m1_debiased", 0.7)
+    conn.commit()
+    plain = M4Ensemble(conn, None).forecast(_state(), {})
+    ext_artifact = {"categories": {"politics": {"a": 2.0, "rho_bar": 0.0}}}
+    extremized = M4Ensemble(conn, None, ext_artifact).forecast(_state(), {})
+
+    assert extremized.meta["extremization_a_eff"] == pytest.approx(2.0)  # rho_bar=0 -> full a
+    # Both members agree YES-leaning (0.5, 0.7) -> extremizing pushes further
+    # from 0.5 in the same direction, not toward it.
+    assert extremized.p_yes > plain.p_yes > 0.5
+
+
+def test_extremization_fully_correlated_pair_collapses_to_identity(conn):
+    """rho_bar=1.0 with n=2 members -> n_eff=1 -> a_eff=1.0 regardless of the
+    fitted a (Phase 13's "duplicating a source suppresses extremization")."""
+    _add_forecast(conn, "0x1", "m0_market", 0.5)
+    _add_forecast(conn, "0x1", "m1_debiased", 0.7)
+    conn.commit()
+    plain = M4Ensemble(conn, None).forecast(_state(), {})
+    ext_artifact = {"categories": {"politics": {"a": 2.5, "rho_bar": 1.0}}}
+    extremized = M4Ensemble(conn, None, ext_artifact).forecast(_state(), {})
+    assert extremized.meta["extremization_a_eff"] == pytest.approx(1.0)
+    assert extremized.p_yes == pytest.approx(plain.p_yes)

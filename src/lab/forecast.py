@@ -103,7 +103,7 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
     states: list[MarketState] = []
     rows = conn.execute(
         """
-        SELECT condition_id, question, category, description, end_date_iso, tier
+        SELECT condition_id, question, category, description, end_date_iso, tier, venue
         FROM markets WHERE tier IN ('liquid','tail') AND active = 1 AND closed = 0
         """
     ).fetchall()
@@ -135,6 +135,7 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
                 spread=snap["spread"],
                 snapshot_ts=snap["ts"],
                 days_to_resolution=_days_to_resolution(m["end_date_iso"], now),
+                venue=m["venue"] or "polymarket",
             )
         )
     if skipped_stale:
@@ -247,6 +248,20 @@ def build_default_models(conn, config: dict[str, Any], store=None) -> list[Forec
         models.append(M2BaseRate(m2_art))
     else:
         log.warning("forecast: no m2_baserates artifact; M2 disabled")
+
+    from lab.models.m1_hier import M1Hier
+
+    m1h_art = load_active_artifact(config, "m1_hier_curves")
+    if m1h_art:
+        # Forecast in parallel with m1_debiased on both venues that reach the
+        # eligible universe (Metaculus never does -- it's never tiered
+        # liquid/tail; its offset is applied inside m7_crossvenue instead).
+        # Phase 12 keeps these observable challengers, not auto-pooled into
+        # M4 (see plan: the m3b_direct precedent -- POOLABLE never includes it).
+        models.append(M1Hier(m1h_art, venue="polymarket"))
+        models.append(M1Hier(m1h_art, venue="kalshi"))
+    else:
+        log.warning("forecast: no m1_hier_curves artifact; m1_hier disabled")
 
     from lab.models.m5_nowcast import M5Nowcast
 

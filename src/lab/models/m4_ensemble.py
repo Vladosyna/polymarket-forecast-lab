@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 
+from lab.learn.pooling import discount_extremization_exponent, extremize_logit
 from lab.learn.refit import logit, sigmoid
 from lab.models.base import ForecastResult, MarketState, clamp_p
 
@@ -63,9 +64,15 @@ def fit_m4_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
 class M4Ensemble:
     model_id = "m4_ensemble"
 
-    def __init__(self, conn, weights_artifact: dict[str, Any] | None) -> None:
+    def __init__(self, conn, weights_artifact: dict[str, Any] | None,
+                extremization_artifact: dict[str, Any] | None = None) -> None:
         self.conn = conn
         self.artifact = weights_artifact or {"categories": {}}
+        # Phase 13: per-category extremization exponent, correlation-discounted
+        # at pool time using the ACTUAL member count present (not the frozen
+        # count from fit time -- discount_extremization_exponent's n_eff math
+        # wants today's real pool size). No artifact yet -> a=1.0, identity.
+        self.extremization_artifact = extremization_artifact or {"categories": {}}
 
     def _todays_pool(self, condition_id: str) -> dict[str, float]:
         rows = self.conn.execute(
@@ -94,10 +101,18 @@ class M4Ensemble:
         else:
             w = np.ones(len(members))  # equal weights until n >= 100
         w = w / w.sum()
-        pooled = float(sigmoid(np.dot(w, [logit(pool[m]) for m in members])))
+        raw_logit = float(np.dot(w, [logit(pool[m]) for m in members]))
+
+        ext_spec = self.extremization_artifact.get("categories", {}).get(market.category)
+        a_raw = ext_spec["a"] if ext_spec else 1.0
+        rho_bar = ext_spec.get("rho_bar", 0.0) if ext_spec else 0.0
+        a_eff = discount_extremization_exponent(a_raw, n=len(members), rho_bar=rho_bar)
+        pooled = float(sigmoid(extremize_logit(raw_logit, a_eff)))
+
         return ForecastResult(
             p_yes=clamp_p(pooled),
             meta={"members": members, "weights": w.tolist(),
                   "weighted": bool(cat_weights),
+                  "extremization_a_eff": a_eff, "extremization_rho_bar": rho_bar,
                   "artifact_version": self.artifact.get("version")},
         )

@@ -111,11 +111,32 @@ def link_confirmed_event(conn, condition_id: str, venue: str, external_id: str) 
     return dbmod.link_event(conn, condition_id, external_cid, title=title)
 
 
-def pool_log_odds(prices: list[float]) -> float:
-    """Deterministic log-odds average of external venue probabilities."""
+def _pair_horizon_bucket(end_date_iso: str | None, now: datetime) -> str | None:
+    """Horizon bucket for the Polymarket side of a confirmed pair, used to pick
+    which m1_hier_curves bucket recalibrates the Metaculus quote."""
+    from lab.learn.refit import bucket_for_days
+
+    if not end_date_iso:
+        return None
+    try:
+        end = datetime.fromisoformat(end_date_iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    days = max(0.0, (end - now).total_seconds() / 86400)
+    return bucket_for_days(days)
+
+
+def pool_log_odds(prices: list[float], a_eff: float = 1.0) -> float:
+    """Deterministic log-odds average of external venue probabilities,
+    optionally extremized by a correlation-discounted exponent (Phase 13,
+    CLAUDE.md M4/M7 extremization). a_eff=1.0 (the default) is a bit-exact
+    identity -- current pooling behavior, unchanged."""
     if not prices:
         raise ValueError("pool_log_odds requires at least one price")
-    return float(sigmoid(sum(logit(p) for p in prices) / len(prices)))
+    raw_logit = sum(logit(p) for p in prices) / len(prices)
+    return float(sigmoid(a_eff * raw_logit))
 
 
 async def scan_confirmed_pairs(conn, store, config: dict[str, Any],
@@ -127,6 +148,9 @@ async def scan_confirmed_pairs(conn, store, config: dict[str, Any],
     from lab.api.http import TokenBucket
     from lab.api.kalshi import KalshiClient
     from lab.api.metaculus import MetaculusClient
+    from lab.learn.pooling import discount_extremization_exponent
+    from lab.learn.refit import load_active_artifact
+    from lab.models.m1_hier import apply_hier_curve
     from lab.store.snapshots import utc_date_str
 
     data = load_markets_map(markets_map_path)
@@ -138,16 +162,19 @@ async def scan_confirmed_pairs(conn, store, config: dict[str, Any],
     dates = [utc_date_str(now - timedelta(days=d)) for d in range(2)]
     latest = store.latest_per_market(dates)
     snap_by_cid = {r["condition_id"]: r for r in latest.to_dicts()} if not latest.is_empty() else {}
-    tier_by_cid = {
-        r["condition_id"]: r["tier"]
+    market_by_cid = {
+        r["condition_id"]: r
         for r in conn.execute(
-            "SELECT condition_id, tier FROM markets WHERE condition_id IN ({})".format(
+            "SELECT condition_id, tier, end_date_iso FROM markets WHERE condition_id IN ({})".format(
                 ",".join("?" for _ in by_cid)
             ),
             list(by_cid),
         )
     } if by_cid else {}
     max_age = config["forecast"]["max_snapshot_age_minutes"]
+    hier_artifact = load_active_artifact(config, "m1_hier_curves")
+    ext_artifact = load_active_artifact(config, "m7_extremization")
+    ext_spec = (ext_artifact or {}).get("categories", {}).get("_all")
 
     bucket = TokenBucket(rate=config["collect"]["rate_limit"]["requests_per_second"],
                         burst=config["collect"]["rate_limit"]["burst"])
@@ -157,7 +184,8 @@ async def scan_confirmed_pairs(conn, store, config: dict[str, Any],
     try:
         for cid, pairs in by_cid.items():
             snap = snap_by_cid.get(cid)
-            tier = tier_by_cid.get(cid)
+            market = market_by_cid.get(cid)
+            tier = market["tier"] if market else None
             if snap is None or snap["mid"] is None or tier is None:
                 continue
             snap_ts = datetime.fromisoformat(snap["ts"])
@@ -168,27 +196,46 @@ async def scan_confirmed_pairs(conn, store, config: dict[str, Any],
                 log.warning("m7: skipping stale-snapshot market",
                            extra={"ctx": {"condition_id": cid, "age_min": age_min}})
                 continue
+            horizon_bucket = _pair_horizon_bucket(market["end_date_iso"], now) if market else None
 
             quotes: list[dict[str, Any]] = []
             for pair in pairs:
                 price = None
+                recalibrated = False
                 if pair["venue"] == "kalshi":
                     m = await kalshi.market(pair["external_id"])
                     price = m.yes_price if m else None
                 elif pair["venue"] == "metaculus":
                     q = await metaculus.question(int(pair["external_id"]))
                     price = q.community_prediction if q else None
+                    # M1.x input signal (Phase 12, CLAUDE.md M1.x): recalibrate
+                    # the raw community prediction through the metaculus venue
+                    # offset before pooling -- Metaculus is never a forecast
+                    # target itself, only an M7 input. Falls back to the raw CP
+                    # unchanged when no artifact/bucket fit exists yet.
+                    if (price is not None and hier_artifact is not None and horizon_bucket is not None
+                            and horizon_bucket in hier_artifact.get("buckets", {})):
+                        price = apply_hier_curve(hier_artifact, "metaculus", horizon_bucket, price)
+                        recalibrated = True
                 if price is not None and 0 < price < 1:
                     quotes.append({
                         "venue": pair["venue"], "external_id": pair["external_id"],
                         "price": price, "fetched_ts": now_utc_iso(),
+                        "recalibrated": recalibrated,
                     })
             if not quotes:
                 continue
-            pooled = pool_log_odds([q["price"] for q in quotes])
+            # Phase 13: correlation-discounted extremization, using the ACTUAL
+            # number of venues pooled for THIS market (n=len(quotes)), not the
+            # frozen count from fit time -- n_eff wants today's real pool size.
+            a_raw = ext_spec["a"] if ext_spec else 1.0
+            rho_bar = ext_spec.get("rho_bar", 0.0) if ext_spec else 0.0
+            a_eff = discount_extremization_exponent(a_raw, n=len(quotes), rho_bar=rho_bar)
+            pooled = pool_log_odds([q["price"] for q in quotes], a_eff=a_eff)
             results[cid] = ForecastResult(
                 p_yes=clamp_p(pooled),
-                meta={"quotes": quotes, "n_pooled": len(quotes)},
+                meta={"quotes": quotes, "n_pooled": len(quotes),
+                      "extremization_a_eff": a_eff, "extremization_rho_bar": rho_bar},
             )
     finally:
         await kalshi.aclose()

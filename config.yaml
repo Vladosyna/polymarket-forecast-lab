@@ -155,6 +155,11 @@ learn:
   m5_macro:
     min_quarters: 12         # skip a series with fewer paired (nowcast, actual) quarters
     validation_quarters: 8   # trailing quarters held out for the walk-forward split
+  # Extremization exponent fits (Phase 13, CLAUDE.md M4/M7 extremization).
+  # Below these, a category (M4) / overall (M7) stays at a=1.0 (no extremization) --
+  # the same "insufficient data" default as everywhere else in this project.
+  m4_extremization_min_n: 60   # per-category resolved m4_ensemble forecasts needed
+  m7_extremization_min_n: 60   # resolved m7_crossvenue forecasts needed (single pooled fit)
 
 # --- Orchestrator schedule (`lab run`) ----------------------------------
 # The one-button process keeps the collector running and fires these analytics

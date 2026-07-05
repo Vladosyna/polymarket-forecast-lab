@@ -4,10 +4,12 @@ brief's Phase 9 acceptance criterion ("fixtures acceptable")."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
+from lab.learn.refit import save_artifact, sigmoid
 from lab.models.base import ForecastResult
 from lab.models.m7_crossvenue import (
     confirm_match,
@@ -17,6 +19,7 @@ from lab.models.m7_crossvenue import (
     pool_log_odds,
     propose_matches,
     save_markets_map,
+    scan_confirmed_pairs,
     write_m7_forecasts,
 )
 from lab.store import db
@@ -44,6 +47,17 @@ def test_pool_log_odds_averages_in_logit_space():
     assert pool_log_odds([0.9, 0.1]) == pytest.approx(0.5, abs=1e-9)
     with pytest.raises(ValueError):
         pool_log_odds([])
+
+
+def test_pool_log_odds_a_eff_default_is_identity():
+    from lab.learn.refit import logit, sigmoid
+
+    plain = pool_log_odds([0.6, 0.8])
+    extremized = pool_log_odds([0.6, 0.8], a_eff=2.0)
+    assert plain == pytest.approx(pool_log_odds([0.6, 0.8], a_eff=1.0))
+    expected = float(sigmoid(2.0 * (logit(0.6) + logit(0.8)) / 2))
+    assert extremized == pytest.approx(expected)
+    assert extremized != pytest.approx(plain)
 
 
 def test_markets_map_roundtrip(tmp_path):
@@ -182,6 +196,137 @@ def test_write_m7_forecasts_writes_five_confirmed_pairs_and_skips_unconfirmed(co
     assert conn.execute(
         "SELECT COUNT(*) AS n FROM forecasts WHERE condition_id='0xUNCONFIRMED'"
     ).fetchone()["n"] == 0
+    conn.close()
+
+
+class FakeMetaculusClient:
+    def __init__(self, bucket, raw_cp: float = 0.5) -> None:
+        self.raw_cp = raw_cp
+
+    async def question(self, question_id):
+        return type("Q", (), {"community_prediction": self.raw_cp})()
+
+    async def aclose(self) -> None:
+        pass
+
+
+class FakeKalshiClientNoMatch:
+    def __init__(self, bucket) -> None:
+        pass
+
+    async def market(self, ticker):
+        return None
+
+    async def aclose(self) -> None:
+        pass
+
+
+def test_scan_confirmed_pairs_recalibrates_metaculus_cp_via_m1_hier(config, tmp_path, monkeypatch):
+    """Phase 12: a confirmed Metaculus pair's community prediction is
+    recalibrated through the m1_hier_curves metaculus offset before pooling,
+    when an active artifact with a matching bucket fit is present."""
+    monkeypatch.setattr("lab.api.metaculus.MetaculusClient", FakeMetaculusClient)
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", FakeKalshiClientNoMatch)
+
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    _seed_market_with_snapshot(conn, store, "0x1")  # end_date_iso far out -> gt90d bucket
+    conn.commit()
+
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map(
+        {"confirmed": [{"condition_id": "0x1", "venue": "metaculus", "external_id": "123"}],
+         "proposed": []},
+        map_path,
+    )
+    save_artifact(config, "m1_hier_curves", {
+        "kind": "m1_hier_curves",
+        "buckets": {
+            "gt90d": {
+                "global": {"alpha": 0.0, "beta": 1.0, "n": 500},
+                "venues": {"metaculus": {"alpha_offset": 1.0, "beta_offset": 0.0, "n": 40}},
+            },
+        },
+    })
+
+    results = asyncio.run(scan_confirmed_pairs(conn, store, config, markets_map_path=map_path))
+
+    assert "0x1" in results
+    quote = results["0x1"].meta["quotes"][0]
+    assert quote["recalibrated"] is True
+    assert quote["price"] == pytest.approx(float(sigmoid(1.0)))  # alpha_offset=1.0, raw cp=0.5 -> logit=0
+    conn.close()
+
+
+def test_scan_confirmed_pairs_leaves_cp_unchanged_without_artifact(config, tmp_path, monkeypatch):
+    monkeypatch.setattr("lab.api.metaculus.MetaculusClient", FakeMetaculusClient)
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", FakeKalshiClientNoMatch)
+
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    _seed_market_with_snapshot(conn, store, "0x1")
+    conn.commit()
+
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map(
+        {"confirmed": [{"condition_id": "0x1", "venue": "metaculus", "external_id": "123"}],
+         "proposed": []},
+        map_path,
+    )
+    # No m1_hier_curves artifact saved -> ACTIVE.json has no entry for it.
+
+    results = asyncio.run(scan_confirmed_pairs(conn, store, config, markets_map_path=map_path))
+
+    assert "0x1" in results
+    quote = results["0x1"].meta["quotes"][0]
+    assert quote["recalibrated"] is False
+    assert quote["price"] == pytest.approx(0.5)  # raw CP, unchanged
+    conn.close()
+
+
+def test_scan_confirmed_pairs_applies_m7_extremization_artifact(config, tmp_path, monkeypatch):
+    """Phase 13: an active m7_extremization artifact extremizes the pooled
+    quote using the ACTUAL number of venues pooled for this market."""
+    monkeypatch.setattr("lab.api.metaculus.MetaculusClient", FakeMetaculusClient)
+
+    class FakeKalshiClientWithMatch:
+        def __init__(self, bucket) -> None:
+            pass
+
+        async def market(self, ticker):
+            return type("M", (), {"yes_price": 0.6})()
+
+        async def aclose(self) -> None:
+            pass
+
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", FakeKalshiClientWithMatch)
+
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    _seed_market_with_snapshot(conn, store, "0x1")
+    conn.commit()
+
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map(
+        {"confirmed": [
+            {"condition_id": "0x1", "venue": "metaculus", "external_id": "123"},
+            {"condition_id": "0x1", "venue": "kalshi", "external_id": "T1"},
+        ], "proposed": []},
+        map_path,
+    )
+    save_artifact(config, "m7_extremization", {
+        "kind": "m7_extremization",
+        "categories": {"_all": {"a": 2.0, "rho_bar": 0.0}},
+    })
+
+    results = asyncio.run(scan_confirmed_pairs(conn, store, config, markets_map_path=map_path))
+
+    assert "0x1" in results
+    plain_pooled = pool_log_odds([0.5, 0.6])  # raw metaculus CP + kalshi price, no extremization
+    extremized_pooled = pool_log_odds([0.5, 0.6], a_eff=2.0)
+    assert results["0x1"].meta["extremization_a_eff"] == pytest.approx(2.0)  # rho_bar=0, n=2 -> full a
+    assert results["0x1"].p_yes == pytest.approx(extremized_pooled)
+    assert results["0x1"].p_yes != pytest.approx(plain_pooled)
     conn.close()
 
 

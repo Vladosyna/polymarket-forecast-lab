@@ -73,22 +73,70 @@ phase-by-phase acceptance criteria) this repo was built against.
 |---|---|---|
 | `m0_market` | null baseline | market mid — the number every other model must beat |
 | `m1_debiased` | statistical | logistic recalibration of the market price, fit per time-to-resolution bucket; the direction of the bias is *fit*, never hardcoded |
+| `m1_hier@{venue}` | statistical (hierarchical) | one global recalibration shape plus a ridge-shrunk per-venue offset (`α_g+α_v`, `β_g+β_v`), fit jointly across Polymarket/Kalshi/Metaculus — a small-n venue borrows the global curve, a large-n venue diverges where its own data demands it. Forecasts in parallel with `m1_debiased` as an observable challenger (not yet pooled into M4 — same precedent as `m3b_direct` below); its Metaculus offset also recalibrates the raw community prediction before M7 pools it |
 | `m2_baserate` | statistical | historical base rate by recurring question template, blended in log-odds space |
 | `m3_evidence` | LLM (structured) | news retrieval → strict-JSON evidence extraction → **deterministic** log-odds aggregator (the LLM never writes the final number) |
 | `m5_nowcast` | structural | maps an external quantitative model (open-meteo/NWS ensembles, Cleveland Fed / GDPNow) straight onto the market's resolution criteria |
 | `m6_consistency` | deterministic | negRisk / linked-market coherence scanner — flags legs that don't sum to ~1 |
-| `m7_crossvenue` | cross-venue | log-odds pool of external venues' prices (Kalshi public market data; Metaculus community prediction where a token grants access) on a curated, human-confirmed `markets_map.yaml` — Polymarket's own price stays out |
-| `m4_ensemble` | ensemble | log-odds weighted pool of the above, weights fit per category on resolved history |
+| `m7_crossvenue` | cross-venue | log-odds pool of external venues' prices (Kalshi public market data; Metaculus community prediction where a token grants access, recalibrated through `m1_hier`'s Metaculus offset first) on a curated, human-confirmed `markets_map.yaml` — Polymarket's own price stays out. The pooled logit is extremized by a fitted, correlation-discounted exponent (Phase 13) |
+| `m4_ensemble` | ensemble | log-odds weighted pool of the above, weights fit per category on resolved history; the pooled logit is extremized by a per-category exponent, discounted by how correlated the pooled sources actually are (Phase 13) so a handful of near-duplicate signals can't buy false confidence |
 
 A `sports` null-control sample runs the cheap models only: if the lab "finds
 skill" on a near-efficient market like sports, the harness is broken, not the
 market — the weekly report prints null-control skill next to everything else.
 
+## Statistical principles
+
+A short field guide to the estimators this repo actually computes — see
+[`eval/`](src/lab/eval/) and [`learn/`](src/lab/learn/) for the code.
+
+- **Paired scoring against the market.** Every skill number is
+  `mean(brier_market − brier_model)` on the *same* forecast rows, never an
+  unpaired comparison — this removes the dominant variance component
+  (question difficulty) for free.
+  [`eval/scoring.py`](src/lab/eval/scoring.py).
+- **Event-level cluster bootstrap.** The same real-world event can be priced
+  on several venues; resampling by venue-market row would treat correlated
+  observations as independent. The bootstrap resamples whole `event_id`
+  clusters instead (falling back to `condition_id` where no cross-venue link
+  exists). [`eval/cluster.py`](src/lab/eval/cluster.py).
+- **Anytime-valid confidence sequence.** Nightly reports are read
+  continuously, which invalidates a fixed-n p-value under repeated looks. The
+  report computes a time-uniform normal-mixture confidence sequence (Howard,
+  Ramdas, McAuliffe & Sekhon, *Annals of Statistics* 49(2), 2021, Prop. 3/5) —
+  this interval, not the classical bootstrap CI, is what actually gates model
+  promotion and rollback. [`eval/anytime.py`](src/lab/eval/anytime.py).
+- **Precision-weighted stratified estimator.** Brier-difference variance is
+  driven directly by price level (`p(1−p)`), so pooling naively can mask real
+  heterogeneity. Resolved forecasts are stratified into price buckets, each
+  stratum's mean paired difference is inverse-variance weighted, and the
+  pooled estimate provably collapses to the raw mean under homogeneous
+  variance — it only diverges when the heterogeneity is real.
+  [`eval/stratified.py`](src/lab/eval/stratified.py).
+- **Hierarchical partial pooling (`m1_hier`, Phase 12).** One recalibration
+  shape is shared across venues; each venue earns its own offset only in
+  proportion to how much data it has (a ridge penalty scaled ∝ 1/n_venue) —
+  a new venue borrows the global curve instead of overfitting its first
+  month of noise. [`learn/refit.py`](src/lab/learn/refit.py)
+  (`fit_m1_hier_curves`).
+- **Correlation-discounted extremization (Phase 13).** A log-odds pool of
+  correlated sources is provably overconfident if extremized as though they
+  were independent. The fitted exponent is scaled by the correlation-adjusted
+  effective source count (`n_eff = n / (1 + (n−1)·ρ̄)`) before it's ever
+  applied — a duplicated or near-duplicate source buys no extra confidence.
+  [`learn/pooling.py`](src/lab/learn/pooling.py).
+
+All of the above are fit or computed monthly inside `lab learn`, dry-run by
+default, walk-forward validated, bounded-step, and CI-gated on promotion —
+never in response to a single outcome (guardrails 14/15 in
+[`CLAUDE.md`](CLAUDE.md)).
+
 ## Project status
 
-All core phases plus the optional cross-venue signal are implemented and
-tested (incl. the `test_scope.py` tripwire that fails the build if
-execution-code strings ever land in `src/`):
+All core phases, the multi-venue collection foundation, the measurement
+upgrade, and the hierarchical/pooling refinements are implemented and tested
+(incl. the `test_scope.py` tripwire that fails the build if execution-code
+strings ever land in `src/`):
 
 - [x] Phase 0 — scaffold, config, CLI skeleton
 - [x] Phase 1 — collection (Gamma/CLOB clients, tiering, snapshot loop, resolution watcher)
@@ -98,8 +146,16 @@ execution-code strings ever land in `src/`):
 - [x] Phase 5 — M5 structural nowcasts, M6 coherence scanner
 - [x] Phase 6 — M4 ensemble, shadow portfolio (simulation), weekly report
 - [x] Phase 7 / 7.1 — learning loop (`lab learn`: scheduled refits, `model_versions` registry, walk-forward guard, CI-gated promotion, automatic rollback, post-mortems)
-- [ ] Phase 8 — optional Streamlit dashboard
+- [x] Phase 8 — Streamlit dashboard (read-only: live universe, forecasts vs market, calibration, shadow book)
 - [x] Phase 9 — cross-venue signal (M7): Kalshi read-only client (verified live, public, no auth), Metaculus client (requires an operator-supplied API token — Metaculus removed anonymous access; see `src/lab/api/metaculus.py` for the verified request shape), curated propose-then-confirm matching (`lab map propose` / `lab map confirm` / `data/markets_map.yaml`), wired into the ledger and the M4 weight fit
+- [x] Phase 10 — multi-venue collection foundation: Kalshi/Metaculus/Manifold collectors, `venues`/`events` schema, synthesized `{venue}:{native_id}` keys, per-venue `lab status` lines
+- [x] Phase 11 — measurement upgrade: event-level cluster bootstrap, anytime-valid confidence sequence (the actual promotion/rollback gate), precision-weighted stratified estimator, venue × category report matrix
+- [x] Phase 12 — hierarchical recalibration (`m1_hier`): ridge-shrunk per-venue offsets on a shared global horizon curve, fit across Polymarket/Kalshi/Metaculus
+- [x] Phase 13 — extremized, correlation-aware pooling: per-category extremization exponent on M4's and M7's pools, discounted by the correlation-adjusted effective source count
+
+**Planned, not yet built:**
+- Phase 14 — virtual prediction economy: `wealth_ledger`, Kelly log-wealth accounting per (model, category), sleeping-expert-normalized comparison (`cum_log_wealth / n_forecasts`), equity-curve/drawdown report and dashboard views.
+- Phase 14.1 — shadow MWU ensemble weighting: a wealth-derived, regret-bounded (Hedge/MWU) challenger to M4's category weights, probationary and CI-gated through the same registry as any other challenger.
 
 The collector runs continuously against live Polymarket data. Calibration
 statistics need resolved markets to accumulate before any skill claim clears

@@ -20,6 +20,7 @@ class MarketState:
     spread: float | None
     snapshot_ts: str         # ts of the snapshot backing p_market
     days_to_resolution: float | None
+    venue: str = "polymarket"  # Phase 10 venue tag; default preserves pre-Phase-12 behavior
 
 
 @dataclass

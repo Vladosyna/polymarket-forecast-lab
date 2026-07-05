@@ -79,6 +79,25 @@ significant skill there invalidates the run pending investigation. Rows with ven
 <p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no resolved paired forecasts yet.</p>
 {% endif %}
 
+<h2>Pooling / extremization diagnostics</h2>
+<p class="note">Per-category extremization exponent applied to M4's pool and to M7's external
+venue pool (brief section 6, Phase 13). a=1.0 means no extremization (today's plain log-odds
+pool). rho_bar is the mean pairwise correlation of pooled sources on matched events/forecasts;
+n_eff is the correlation-discounted effective source count actually used to scale how much of
+the fitted a gets applied at forecast time.</p>
+{% if pooling_rows %}
+<table>
+<tr><th>pool</th><th>category</th><th>a (fitted)</th><th>rho_bar</th><th>n members</th><th>n_eff</th></tr>
+{% for r in pooling_rows %}
+<tr><td>{{ r.pool }}</td><td>{{ r.category }}</td><td>{{ "%.3f"|format(r.a) }}</td>
+<td>{{ "%.3f"|format(r.rho_bar) }}</td><td>{{ "%.1f"|format(r.n_members) }}</td>
+<td>{{ "%.2f"|format(r.n_eff) }}</td></tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no extremization exponent fitted yet.</p>
+{% endif %}
+
 <h2>Calibration</h2>
 {% if calibration_plot %}<img src="{{ calibration_plot }}" alt="reliability diagram">
 {% else %}<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no resolved forecasts to plot.</p>{% endif %}
@@ -194,6 +213,23 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         if len(per_cluster) > 1:
             row["mde"] = float(2.8 * np.std(per_cluster, ddof=1) / np.sqrt(len(per_cluster)))
 
+    from lab.learn.pooling import effective_source_count
+    from lab.learn.refit import load_active_artifact as _load_active_artifact
+
+    pooling_rows = []
+    for pool_label, artifact_key in (("M4 ensemble", "m4_extremization"),
+                                     ("M7 cross-venue", "m7_extremization")):
+        artifact = _load_active_artifact(config, artifact_key)
+        if not artifact:
+            continue
+        for cat, spec in artifact.get("categories", {}).items():
+            n_members = spec.get("n_members_at_fit", 1)
+            rho_bar = spec.get("rho_bar", 0.0)
+            pooling_rows.append({
+                "pool": pool_label, "category": cat, "a": spec["a"], "rho_bar": rho_bar,
+                "n_members": n_members, "n_eff": effective_source_count(n_members, rho_bar),
+            })
+
     calibration_plot = None
     if bins_by_model:
         plot_path = plot_reliability(bins_by_model, reports / "reliability.png")
@@ -223,6 +259,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         lessons=lessons_digest(conn),
         health=health,
         skill_rows=skill_rows,
+        pooling_rows=pooling_rows,
         calibration_plot=calibration_plot,
         clv_rows=clv_rows,
         llm_total=llm_total,

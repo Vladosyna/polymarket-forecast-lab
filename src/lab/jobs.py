@@ -33,7 +33,8 @@ def run_forecast_job(config: dict[str, Any]) -> dict[str, Any]:
         counts["m6_written"] = write_m6_forecasts(conn, store, findings, config)
         m7_results = asyncio.run(scan_confirmed_pairs(conn, store, config))
         counts["m7_written"] = write_m7_forecasts(conn, store, m7_results, config)
-        m4 = M4Ensemble(conn, load_active_artifact(config, "m4_weights"))
+        m4 = M4Ensemble(conn, load_active_artifact(config, "m4_weights"),
+                        load_active_artifact(config, "m4_extremization"))
         counts["m4_written"] = run_forecasts(conn, store, [m4], config)["written"]
     finally:
         conn.close()
