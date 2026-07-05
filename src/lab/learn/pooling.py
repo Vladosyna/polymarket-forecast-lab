@@ -98,13 +98,134 @@ def fit_extremization_exponent(
     }
 
 
-def estimate_rho_bar_m4(conn, config: dict[str, Any], model_ids: tuple[str, ...],
-                        min_pairs_per_category: int = 30) -> dict[str, float]:
-    """Per category: mean pairwise Pearson correlation of logit(p_yes) across
-    `model_ids`, matched on same-day (condition_id, ts) forecasts. Categories
-    with too few overlapping-pair observations are omitted entirely -- the
-    caller treats a missing category as rho_bar=0.0 (no discount), the
-    conservative default until enough data exists to estimate it."""
+# --- weight floor/ceiling + correlation clustering (Phase 14.1) ------------
+
+def clamp_and_renormalize_weights(w: dict[str, float], floor: float, ceiling: float,
+                                  max_iter: int = 200) -> dict[str, float]:
+    """Iteratively clamp each weight to [floor, ceiling] and renormalize to
+    sum 1, repeating until stable. Small pools (<=8 models) converge in a
+    handful of iterations. Assumes floor*len(w) <= 1 <= ceiling*len(w) --
+    feasible for the brief's 2%/60% defaults at realistic pool sizes.
+
+    rtol=0 in the convergence check is deliberate: the default rtol=1e-5
+    would call this "converged" while a value clipped to the ceiling is
+    still renormalized back to ~1e-5 relative *above* the ceiling on every
+    remaining iteration -- a small residual that would otherwise never
+    shrink away. A final explicit clip guarantees the hard bound regardless.
+    """
+    keys = list(w)
+    n = len(keys)
+    if n == 0:
+        return {}
+    vals = np.array([w[k] for k in keys], dtype=float)
+    total = vals.sum()
+    vals = vals / total if total > 0 else np.full(n, 1.0 / n)
+    for _ in range(max_iter):
+        clipped = np.clip(vals, floor, ceiling)
+        s = clipped.sum()
+        renormalized = clipped / s if s > 0 else np.full(n, 1.0 / n)
+        if np.allclose(renormalized, vals, atol=1e-14, rtol=0):
+            vals = renormalized
+            break
+        vals = renormalized
+    # Final hard clip: renormalizing after the last clip can nudge a value
+    # a hair back outside [floor, ceiling] even at convergence -- guarantee
+    # the bound exactly, at the cost of summing to 1 only approximately
+    # (acceptable: this is a soft safety cap, not a probability simplex).
+    vals = np.clip(vals, floor, ceiling)
+    return dict(zip(keys, vals.tolist()))
+
+
+def cluster_correlated_models(pairwise_rho: dict[tuple[str, str], float], models: list[str],
+                              threshold: float = 0.8) -> list[set[str]]:
+    """Union-find grouping of models whose pairwise correlation >= threshold.
+
+    A pool-wide scalar rho_bar can't guarantee a correlated PAIR's joint
+    weight stays under the ceiling once other, uncorrelated models are also
+    in the pool (their zero correlation dilutes the mean) -- clustering on
+    the actual pairwise values is what makes that guarantee possible.
+    """
+    parent = {m: m for m in models}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for (a, b), rho in pairwise_rho.items():
+        if a in parent and b in parent and rho >= threshold:
+            union(a, b)
+
+    groups: dict[str, set[str]] = {}
+    for m in models:
+        groups.setdefault(find(m), set()).add(m)
+    return list(groups.values())
+
+
+def clamp_weights_with_cluster_ceiling(w: dict[str, float], clusters: list[set[str]],
+                                       floor: float, ceiling: float,
+                                       max_iter: int = 200) -> dict[str, float]:
+    """floor applies per model; ceiling applies to each cluster's COMBINED
+    weight (mass freed by scaling an over-ceiling cluster down is
+    redistributed to models OUTSIDE it, proportional to their current
+    share) -- so a correlated pair can't jointly exceed the ceiling just
+    because each half individually stays under it.
+
+    Degenerate case: a cluster spanning the WHOLE pool has nothing outside
+    it to redistribute to, so the ceiling is unenforceable there -- falls
+    back to equal weights across the pool, the most conservative response
+    to total correlation.
+    """
+    models = list(w)
+    n = len(models)
+    if n == 0:
+        return {}
+    idx = {m: i for i, m in enumerate(models)}
+    vals = np.array([w[m] for m in models], dtype=float)
+    total = vals.sum()
+    vals = vals / total if total > 0 else np.full(n, 1.0 / n)
+
+    for cluster in clusters:
+        if len(cluster) == n:
+            vals = np.full(n, 1.0 / n)
+            return dict(zip(models, vals.tolist()))
+
+    for _ in range(max_iter):
+        prev = vals.copy()
+        for cluster in clusters:
+            cluster_idx = [idx[m] for m in cluster]
+            cluster_sum = vals[cluster_idx].sum()
+            if cluster_sum > ceiling + 1e-12:
+                outside_idx = [i for i in range(n) if i not in cluster_idx]
+                outside_sum = vals[outside_idx].sum()
+                freed = cluster_sum - ceiling
+                vals[cluster_idx] *= ceiling / cluster_sum
+                if outside_sum > 0:
+                    vals[outside_idx] *= (outside_sum + freed) / outside_sum
+        vals = np.clip(vals, floor, None)
+        s = vals.sum()
+        vals = vals / s if s > 0 else np.full(n, 1.0 / n)
+        if np.allclose(vals, prev, atol=1e-14, rtol=0):
+            break
+    vals = np.clip(vals, floor, None)
+    return dict(zip(models, vals.tolist()))
+
+
+def _pairwise_logit_correlations_by_category(
+    conn, model_ids: tuple[str, ...], min_pairs: int
+) -> dict[str, dict[tuple[str, str], float]]:
+    """Per category, per-model-pair Pearson correlation of logit(p_yes) on
+    matched same-day (condition_id, ts) forecasts. Shared by
+    estimate_rho_bar_m4 (pool-averaged, Phase 13) and estimate_pairwise_rho_m4
+    (per-pair, Phase 14.1's cluster-aware ceiling) -- one query/pairing pass,
+    two different reductions over the same per-pair values.
+    """
     rows = conn.execute(
         """
         SELECT f.condition_id, f.ts, f.model_id, f.p_yes, m.category AS category
@@ -120,7 +241,7 @@ def estimate_rho_bar_m4(conn, config: dict[str, Any], model_ids: tuple[str, ...]
         key = (r["condition_id"], r["ts"])
         by_category.setdefault(cat, {}).setdefault(key, {})[r["model_id"]] = float(logit(r["p_yes"]))
 
-    out: dict[str, float] = {}
+    out: dict[str, dict[tuple[str, str], float]] = {}
     for cat, points in by_category.items():
         pair_logits: dict[tuple[str, str], list[tuple[float, float]]] = {}
         for logits_by_model in points.values():
@@ -128,18 +249,40 @@ def estimate_rho_bar_m4(conn, config: dict[str, Any], model_ids: tuple[str, ...]
             for a, b in itertools.combinations(present, 2):
                 pair_logits.setdefault((a, b), []).append((logits_by_model[a], logits_by_model[b]))
 
-        correlations = []
+        pair_corr: dict[tuple[str, str], float] = {}
         for pair, values in pair_logits.items():
-            if len(values) < min_pairs_per_category:
+            if len(values) < min_pairs:
                 continue
             xs = np.array([v[0] for v in values])
             ys = np.array([v[1] for v in values])
             if np.std(xs) == 0 or np.std(ys) == 0:
                 continue
-            correlations.append(float(np.corrcoef(xs, ys)[0, 1]))
-        if correlations:
-            out[cat] = float(np.mean(correlations))
+            pair_corr[pair] = float(np.corrcoef(xs, ys)[0, 1])
+        if pair_corr:
+            out[cat] = pair_corr
     return out
+
+
+def estimate_rho_bar_m4(conn, config: dict[str, Any], model_ids: tuple[str, ...],
+                        min_pairs_per_category: int = 30) -> dict[str, float]:
+    """Per category: mean pairwise Pearson correlation of logit(p_yes) across
+    `model_ids`, matched on same-day (condition_id, ts) forecasts. Categories
+    with too few overlapping-pair observations are omitted entirely -- the
+    caller treats a missing category as rho_bar=0.0 (no discount), the
+    conservative default until enough data exists to estimate it."""
+    by_cat_pairs = _pairwise_logit_correlations_by_category(conn, model_ids, min_pairs_per_category)
+    return {cat: float(np.mean(list(pairs.values()))) for cat, pairs in by_cat_pairs.items()}
+
+
+def estimate_pairwise_rho_m4(conn, config: dict[str, Any], model_ids: tuple[str, ...],
+                             category: str, min_pairs: int = 30) -> dict[tuple[str, str], float]:
+    """Per-pair Pearson correlation of logit(p_yes) for ONE category -- the
+    same matched-forecast-rows logic estimate_rho_bar_m4 uses internally,
+    exposed per-pair instead of pool-averaged (Phase 14.1: a single scalar
+    rho_bar can't identify which specific pair is redundant once other,
+    uncorrelated models dilute the pool-wide mean)."""
+    by_cat_pairs = _pairwise_logit_correlations_by_category(conn, model_ids, min_pairs)
+    return by_cat_pairs.get(category, {})
 
 
 def estimate_rho_bar_m7(conn, store, config: dict[str, Any],

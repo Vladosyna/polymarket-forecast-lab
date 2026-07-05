@@ -160,6 +160,20 @@ learn:
   # the same "insufficient data" default as everywhere else in this project.
   m4_extremization_min_n: 60   # per-category resolved m4_ensemble forecasts needed
   m7_extremization_min_n: 60   # resolved m7_crossvenue forecasts needed (single pooled fit)
+  # Weight floor/ceiling (Phase 14.1, v2.2 parity): the incumbent monthly M4
+  # weight fit gets the SAME per-model protection given to the MWU challenger
+  # below, so it isn't less protected against streak-driven concentration
+  # than the challenger trying to unseat it.
+  m4_weight_floor: 0.02
+  m4_weight_ceiling: 0.60
+  # Shadow MWU ensemble weighting (Phase 14.1). Nightly (inside `lab eval`,
+  # not the monthly `lab learn` cycle) -- guardrail 17's one narrow, explicit
+  # exception to guardrail 14, because it touches only meta-level ensemble
+  # weights, never model internals.
+  mwu:
+    correlation_cluster_threshold: 0.8   # pairwise rho >= this groups models for the cluster ceiling
+    probation_days: 90                    # minimum age of the first mwu-tagged version before promotion is even considered
+    probation_min_n: 200                  # per-category resolved forecasts required, mirrors promotion_min_n's honesty tier
 
 # --- Orchestrator schedule (`lab run`) ----------------------------------
 # The one-button process keeps the collector running and fires these analytics

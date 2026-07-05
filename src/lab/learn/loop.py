@@ -177,6 +177,23 @@ def _m7_extremization_predict(artifact: dict[str, Any], row: dict[str, Any]) -> 
     return _extremization_predict(artifact, row, "_all")
 
 
+def _m4_weights_predict(artifact: dict[str, Any], row: dict[str, Any]) -> float:
+    """Replays M4Ensemble.forecast()'s pooling logic (minus extremization --
+    a separate, independently-versioned step) using `row["members"]`
+    (m4_pool_rows) and the given weights artifact. Used to CI-gate the MWU
+    challenger against the incumbent m4_weights (Phase 14.1)."""
+    members = sorted(row["members"])
+    cat_weights = artifact.get("categories", {}).get(row["category"], {}).get("weights")
+    if cat_weights:
+        w = np.array([cat_weights.get(m, 0.0) for m in members])
+        if w.sum() <= 0:
+            w = np.ones(len(members))
+    else:
+        w = np.ones(len(members))
+    w = w / w.sum()
+    return float(sigmoid(np.dot(w, [logit(row["members"][m]) for m in members])))
+
+
 # --- resolved-row loaders (carry condition_id for clustering) --------------
 
 def m1_resolved_rows(conn, limit: int | None = None) -> list[dict]:
@@ -266,6 +283,55 @@ def m7_resolved_rows(conn, limit: int | None = None) -> list[dict]:
         """
     )]
     return rows[:limit] if limit else rows
+
+
+def m4_pool_rows(conn) -> list[dict]:
+    """Resolved markets with an m4_ensemble forecast, joined back to each
+    POOLABLE member's own contemporaneous p_yes (their latest forecast on or
+    before m4_ensemble's own last forecast date) -- enables replaying the
+    pool under alternative weight artifacts (MWU challenger vs incumbent,
+    Phase 14.1). One row per resolved market (the pool's LAST pre-resolution
+    state, not one row per historical daily snapshot -- this replays "would
+    this weight vector have produced a better final decision," which only
+    needs each market's last pool composition, not the full multi-day
+    history Phase 11's skill scoring uses for a different purpose)."""
+    from lab.models.m4_ensemble import POOLABLE
+
+    m4_latest = conn.execute(
+        """
+        SELECT f.condition_id, MAX(f.ts) AS m4_ts, m.category AS category,
+               m.event_id AS event_id, r.payout_yes AS outcome, r.resolved_ts
+        FROM forecasts f
+        JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
+        JOIN markets m ON m.condition_id = f.condition_id
+        WHERE f.model_id = 'm4_ensemble'
+        GROUP BY f.condition_id
+        """
+    ).fetchall()
+
+    placeholders = ",".join("?" for _ in POOLABLE)
+    out: list[dict] = []
+    for row in m4_latest:
+        member_rows = conn.execute(
+            f"""
+            SELECT f.model_id, f.p_yes FROM forecasts f
+            JOIN (SELECT model_id, MAX(ts) AS ts FROM forecasts
+                  WHERE condition_id = ? AND model_id IN ({placeholders}) AND ts <= ?
+                  GROUP BY model_id) latest
+            ON latest.model_id = f.model_id AND latest.ts = f.ts
+            WHERE f.condition_id = ?
+            """,
+            (row["condition_id"], *POOLABLE, row["m4_ts"], row["condition_id"]),
+        ).fetchall()
+        members = {r["model_id"]: r["p_yes"] for r in member_rows}
+        if len(members) < 2:
+            continue
+        out.append({
+            "condition_id": row["condition_id"], "category": row["category"] or "unknown",
+            "event_id": row["event_id"], "outcome": row["outcome"],
+            "resolved_ts": row["resolved_ts"], "members": members,
+        })
+    return out
 
 
 # --- bounded fits ----------------------------------------------------------

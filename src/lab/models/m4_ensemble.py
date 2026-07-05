@@ -13,7 +13,11 @@ from typing import Any
 
 import numpy as np
 
-from lab.learn.pooling import discount_extremization_exponent, extremize_logit
+from lab.learn.pooling import (
+    clamp_and_renormalize_weights,
+    discount_extremization_exponent,
+    extremize_logit,
+)
 from lab.learn.refit import logit, sigmoid
 from lab.models.base import ForecastResult, MarketState, clamp_p
 
@@ -25,8 +29,15 @@ MIN_RESOLVED_PER_CATEGORY = 100
 
 
 def fit_m4_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
-    """Per-category softmax(-brier) weights over resolved forecasts."""
+    """Per-category softmax(-brier) weights over resolved forecasts, floor/
+    ceiling-clamped (Phase 14.1, v2.2 parity: "the same 2%/60% per-model
+    floor and ceiling given to the MWU challenger... the incumbent shouldn't
+    be less protected... than the challenger trying to unseat it")."""
     from lab.util import now_utc_iso
+
+    learn_cfg = config.get("learn", {})
+    floor = float(learn_cfg.get("m4_weight_floor", 0.02))
+    ceiling = float(learn_cfg.get("m4_weight_ceiling", 0.60))
 
     artifact: dict[str, Any] = {"kind": "m4_weights", "fitted_at": now_utc_iso(),
                                 "categories": {}}
@@ -54,8 +65,9 @@ def fit_m4_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
         # realized Brier and nothing else (temperature 0.05 ~ Brier scale).
         w = np.exp(-briers / 0.05)
         w = w / w.sum()
+        weights = clamp_and_renormalize_weights(dict(zip(sorted(models), w.tolist())), floor, ceiling)
         artifact["categories"][cat] = {
-            "weights": dict(zip(sorted(models), w.tolist())),
+            "weights": weights,
             "n_resolved": total_n,
         }
     return artifact

@@ -69,6 +69,29 @@ def test_fitted_weights_favor_better_model(conn):
     assert sum(weights.values()) == pytest.approx(1.0)
 
 
+def test_fit_m4_weights_respects_floor_and_ceiling(conn):
+    """Phase 14.1, v2.2 parity: the incumbent monthly fit gets the same
+    2%/60% floor/ceiling as the MWU challenger. m1's Brier is so much better
+    than m0's here that the naive softmax alone would push m1 above 98% and
+    m0 below 2% -- the clamp must bring both back into [0.02, 0.60]."""
+    config = load_config()
+    for i in range(120):
+        cid = f"0x{i}"
+        conn.execute(
+            "INSERT INTO markets (condition_id, category, tier, active, closed) "
+            "VALUES (?, 'politics', 'liquid', 1, 1)", (cid,))
+        outcome = float(i % 2)
+        db.record_resolution(conn, cid, "2026-07-01T00:00:00+00:00", outcome, False, "gamma")
+        _add_forecast(conn, cid, "m0_market", 0.5)
+        _add_forecast(conn, cid, "m1_debiased", 0.8 if outcome else 0.2)
+    conn.commit()
+    art = fit_m4_weights(conn, config)
+    weights = art["categories"]["politics"]["weights"]
+    assert weights["m1_debiased"] == pytest.approx(0.60, abs=1e-4)
+    assert weights["m0_market"] == pytest.approx(0.40, abs=1e-4)
+    assert sum(weights.values()) == pytest.approx(1.0)
+
+
 # --- Phase 13: extremization applied at forecast time -----------------------
 
 def test_no_extremization_artifact_is_byte_identical_to_today(conn):

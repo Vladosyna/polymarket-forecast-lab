@@ -44,8 +44,11 @@ def run_forecast_job(config: dict[str, Any]) -> dict[str, Any]:
 
 def run_eval_job(config: dict[str, Any]) -> list[dict[str, Any]]:
     """Score resolved paired forecasts; also updates the wealth ledger
-    (Phase 14: "wired into the existing nightly lab eval step -- no new CLI
-    command")."""
+    (Phase 14) and the shadow MWU ensemble-weight challenger (Phase 14.1) --
+    both "wired into the existing nightly lab eval step -- no new CLI
+    command." Guardrail 17: MWU is the one process permitted to update
+    m4_weights between monthly `lab learn` cycles."""
+    from lab.economy.mwu import update_mwu_challenger
     from lab.economy.wealth import update_wealth_ledger
     from lab.eval.run import run_eval
 
@@ -53,9 +56,11 @@ def run_eval_job(config: dict[str, Any]) -> list[dict[str, Any]]:
     try:
         summaries = run_eval(conn, config)
         wealth_summary = update_wealth_ledger(conn, config)
+        mwu_summary = update_mwu_challenger(conn, config)
     finally:
         conn.close()
-    log.info("eval job complete", extra={"ctx": {"models": len(summaries), "wealth": wealth_summary}})
+    log.info("eval job complete", extra={"ctx": {"models": len(summaries), "wealth": wealth_summary,
+                                                  "mwu": mwu_summary}})
     return summaries
 
 

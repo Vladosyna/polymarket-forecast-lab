@@ -138,14 +138,30 @@ A short field guide to the estimators this repo actually computes — see
   just because it forecast less. [`economy/wealth.py`](src/lab/economy/wealth.py),
   [`eval/wealth_plots.py`](src/lab/eval/wealth_plots.py).
 
+- **Shadow MWU ensemble weighting (Phase 14.1).** A Hedge/multiplicative-
+  weights challenger derives M4's category weights from relative wealth
+  (`w_i ∝ exp(η_t · avg_log_wealth_i)`, `η_t = √(8 ln N / t)` — the standard
+  regret-bound-optimal schedule), then clamps them with the same floor/
+  ceiling the incumbent monthly fit now also carries. A single pool-wide
+  correlation scalar can't stop a duplicated high-wealth model's *pair* from
+  jointly dominating (it dilutes toward the mean once uncorrelated models
+  are also in the pool), so the ceiling is enforced per correlation-*cluster*
+  (union-find on pairwise correlation) instead of per model. Registers as a
+  challenger under the exact same `model_versions` key the monthly fit uses,
+  so promotion is a pointer flip — no changes needed anywhere else — gated
+  by a 90-day/n≥200-per-category probation before it's even eligible for the
+  standard CI-gated promotion. [`economy/mwu.py`](src/lab/economy/mwu.py).
+
 All of the above are fit or computed monthly inside `lab learn`, dry-run by
 default, walk-forward validated, bounded-step, and CI-gated on promotion —
 never in response to a single outcome (guardrails 14/15 in
-[`CLAUDE.md`](CLAUDE.md)). The wealth ledger is the one exception worth
-noting explicitly: it's arithmetic over already-resolved forecasts wired
-into the nightly `lab eval` step (not the monthly `lab learn` cycle), because
-it's a scoring/selection layer, not a model parameter — it never writes a
-forecast of its own.
+[`CLAUDE.md`](CLAUDE.md)). Two narrow, explicitly-justified exceptions run
+nightly instead, inside `lab eval`: the wealth ledger (pure arithmetic over
+already-resolved forecasts, not a model parameter — it never writes a
+forecast of its own) and the shadow MWU challenger above (guardrail 17 —
+it touches only meta-level ensemble weights, never any model's internals,
+and never affects production forecasts until it clears the same promotion
+gate as any other challenger).
 
 ## Project status
 
@@ -169,9 +185,9 @@ strings ever land in `src/`):
 - [x] Phase 12 — hierarchical recalibration (`m1_hier`): ridge-shrunk per-venue offsets on a shared global horizon curve, fit across Polymarket/Kalshi/Metaculus
 - [x] Phase 13 — extremized, correlation-aware pooling: per-category extremization exponent on M4's and M7's pools, discounted by the correlation-adjusted effective source count
 - [x] Phase 14 — virtual prediction economy: `wealth_ledger`, Kelly log-wealth accounting per (model, category) wired into the nightly `lab eval` step, sleeping-expert-normalized comparison (`cum_log_wealth / n_forecasts`), equity-curve/drawdown/attribution report section and a dedicated dashboard mode
+- [x] Phase 14.1 — shadow MWU ensemble weighting: a wealth-derived, regret-bounded (Hedge/MWU) challenger to M4's category weights, cluster-aware floor/ceiling clamped, 90-day/n≥200-per-category probation, CI-gated and rollback-guarded through the same registry as any other challenger
 
-**Planned, not yet built:**
-- Phase 14.1 — shadow MWU ensemble weighting: a wealth-derived, regret-bounded (Hedge/MWU) challenger to M4's category weights, probationary and CI-gated through the same registry as any other challenger.
+Every phase in the engineering brief ([`CLAUDE.md`](CLAUDE.md)) is now implemented and tested.
 
 The collector runs continuously against live Polymarket data. Calibration
 statistics need resolved markets to accumulate before any skill claim clears

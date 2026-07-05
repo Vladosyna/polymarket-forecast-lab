@@ -238,6 +238,52 @@ def test_degraded_champion_auto_rolls_back(config):
     conn.close()
 
 
+def test_mwu_challenger_degraded_auto_rolls_back(config):
+    """Phase 14.1's own acceptance line: 'test_learning_safety.py gains a
+    case for this challenger.' The shadow MWU weighting (economy/mwu.py)
+    registers under the SAME 'm4_weights' key the incumbent monthly fit
+    uses, so its rollback reuses the identical registry mechanics -- proven
+    here with a dedicated nightly (not monthly) check, since guardrail 17
+    lets this one challenger update between lab learn cycles."""
+    from lab.economy.mwu import _mwu_rollback_check
+
+    conn = db.connect(config["storage"]["db_path"])
+    ts = now_utc().isoformat(timespec="seconds")
+    for i in range(60):
+        cid = f"mwu-{i}"
+        conn.execute(
+            "INSERT INTO markets (condition_id, category, tier, active, closed) "
+            "VALUES (?, 'politics', 'liquid', 1, 1)", (cid,))
+        outcome = float(i % 2)
+        db.record_resolution(conn, cid, ts, outcome, False, "gamma")
+        db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": "m0_market",
+                                  "p_yes": 0.5, "p_market_at_ts": 0.5})
+        db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": "m1_debiased",
+                                  "p_yes": 0.9 if outcome else 0.1, "p_market_at_ts": 0.5})
+        db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": "m4_ensemble",
+                                  "p_yes": 0.7 if outcome else 0.3, "p_market_at_ts": 0.5})
+    conn.commit()
+
+    good = {"kind": "m4_weights",
+           "categories": {"politics": {"weights": {"m0_market": 0.02, "m1_debiased": 0.98},
+                                       "n_resolved": 60}}}
+    bad = {"kind": "m4_weights",
+          "categories": {"politics": {"weights": {"m0_market": 0.98, "m1_debiased": 0.02},
+                                      "n_resolved": 60}}}
+    v1 = _register(conn, config, "m4_weights", good)
+    registry.set_active(conn, config, "m4_weights", v1)
+    v2 = _register(conn, config, "m4_weights", bad)
+    registry.set_active(conn, config, "m4_weights", v2)
+    assert registry.active_version(conn, "m4_weights")["id"] == v2
+
+    entry = _mwu_rollback_check(conn, config, apply=True)
+    assert entry is not None
+    assert entry["degraded"] is True
+    assert registry.active_version(conn, "m4_weights")["id"] == v1
+    assert registry.get_version(conn, v2)["retired_reason"] == "rollback"
+    conn.close()
+
+
 # --- forward-only registered_ts scoring (guardrail 15) --------------------
 
 def test_registered_challenger_not_scored_before_registration(config):
