@@ -43,15 +43,19 @@ def run_forecast_job(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_eval_job(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Score resolved paired forecasts."""
+    """Score resolved paired forecasts; also updates the wealth ledger
+    (Phase 14: "wired into the existing nightly lab eval step -- no new CLI
+    command")."""
+    from lab.economy.wealth import update_wealth_ledger
     from lab.eval.run import run_eval
 
     conn = db.connect(config["storage"]["db_path"])
     try:
         summaries = run_eval(conn, config)
+        wealth_summary = update_wealth_ledger(conn, config)
     finally:
         conn.close()
-    log.info("eval job complete", extra={"ctx": {"models": len(summaries)}})
+    log.info("eval job complete", extra={"ctx": {"models": len(summaries), "wealth": wealth_summary}})
     return summaries
 
 

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -132,6 +132,31 @@ CREATE TABLE IF NOT EXISTS model_versions (
   is_active INTEGER DEFAULT 0       -- exactly one active row per model_id; enforced in registry.py + index
 );
 
+-- derived from forecasts + resolutions; always recomputable, not a backup-critical table.
+-- Phase 14 (brief section 6/14): the Kelly-fraction wealth process already used by the
+-- shadow portfolio (Phase 6), generalized to every model as a scoring/selection layer --
+-- NOT a second trading simulation. Unlike shadow_trades (M4-only, entry-filtered, "would
+-- we have traded"), this table scores EVERY resolved forecast from EVERY model
+-- unconditionally, maximizing n for comparison purposes. log_wealth_delta is the Kelly
+-- log-growth for a binary bet, same side rule as shadow_trades (YES if p_model > p_market,
+-- else NO). forecast_id is additive beyond the brief's literal DDL -- an idempotency key
+-- (every other column keeps its documented meaning) since a model can forecast the same
+-- market many times before resolution and cum_log_wealth/n_forecasts are running sums.
+CREATE TABLE IF NOT EXISTS wealth_ledger (
+  id INTEGER PRIMARY KEY,
+  model_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  condition_id TEXT NOT NULL,
+  event_id TEXT,                     -- for event-level attribution, mirrors eval's clustering
+  forecast_id INTEGER NOT NULL,      -- FK to forecasts.id; idempotency key
+  ts TEXT NOT NULL,                  -- resolution timestamp
+  kelly_fraction REAL NOT NULL,      -- same 0.2x-capped fraction as shadow_trades
+  log_wealth_delta REAL NOT NULL,    -- log(1 - f + f/price) if the bet won, log(1 - f) if lost
+  cum_log_wealth REAL NOT NULL,      -- running sum for this (model_id, category)
+  n_forecasts INTEGER NOT NULL       -- running count; cum_log_wealth / n_forecasts is the fair,
+                                      -- coverage-normalized comparison metric (sleeping-expert rule)
+);
+
 CREATE INDEX IF NOT EXISTS idx_forecasts_condition ON forecasts(condition_id);
 CREATE INDEX IF NOT EXISTS idx_forecasts_model_ts ON forecasts(model_id, ts);
 CREATE INDEX IF NOT EXISTS idx_markets_tier ON markets(tier);
@@ -140,6 +165,8 @@ CREATE INDEX IF NOT EXISTS idx_model_versions_model ON model_versions(model_id);
 -- DB-level backstop for the single-active invariant (registry.py also enforces it).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_model_versions_active
   ON model_versions(model_id) WHERE is_active = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wealth_ledger_forecast ON wealth_ledger(forecast_id);
+CREATE INDEX IF NOT EXISTS idx_wealth_ledger_model_category ON wealth_ledger(model_id, category);
 """
 
 

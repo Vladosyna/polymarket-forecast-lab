@@ -6,13 +6,14 @@ import json
 
 import pytest
 
+from lab.economy.wealth import update_wealth_ledger
 from lab.eval.report import render_report
 from lab.eval.run import run_eval
 from lab.export import EXPORT_FIELDS, export_jsonl
 from lab.learn.refit import save_artifact
 from lab.store import db
 from lab.store.snapshots import SnapshotStore
-from lab.util import load_config
+from lab.util import load_config, now_utc
 
 
 @pytest.fixture()
@@ -178,4 +179,31 @@ def test_report_renders_pooling_diagnostics_section(config):
     assert "M4 ensemble" in html and "M7 cross-venue" in html
     assert "1.800" in html  # M4's fitted a
     assert "1.300" in html  # M7's fitted a
+    conn.close()
+
+
+def test_report_renders_wealth_null_control_band_alongside_real_curves(config):
+    """Phase 14 acceptance: the null-control band renders alongside real
+    model curves."""
+    conn = db.connect(config["storage"]["db_path"])
+    ts = now_utc().isoformat(timespec="seconds")
+    for i, category in enumerate(["politics", "politics", "sports", "sports"]):
+        cid = f"0xw{i}"
+        conn.execute(
+            "INSERT INTO markets (condition_id, question, category, tier, active, closed) "
+            "VALUES (?, ?, ?, 'liquid', 1, 1)", (cid, f"Q{i}?", category),
+        )
+        db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": "m0_market",
+                                  "p_yes": 0.6, "p_market_at_ts": 0.5})
+        db.record_resolution(conn, cid, ts, 1.0, False, "gamma")
+    conn.commit()
+    update_wealth_ledger(conn, config)
+
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    path = render_report(conn, store, config)
+    html = path.read_text(encoding="utf-8")
+
+    assert "Virtual prediction economy" in html
+    assert "wealth_curves.png" in html
+    assert ">politics<" in html and ">sports<" in html  # real category + null control both rendered
     conn.close()

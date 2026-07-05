@@ -115,6 +115,37 @@ Positive = the model tends to be early. Needs no resolutions.</p>
 </table>
 {% else %}<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no forecasts with t+24h snapshots yet.</p>{% endif %}
 
+<h2>Virtual prediction economy — wealth ledger (SIMULATION-adjacent, no real stakes)</h2>
+<p class="note">Kelly log-wealth accounting per (model, category) -- a scoring/selection layer
+over every model's already-written forecasts, not a new signal (brief section 6/14). Compare
+models by <b>cum_log_wealth / n_forecasts</b> (coverage-normalized), never the raw cumulative
+total -- a model covering fewer markets shouldn't be rewarded or penalized for coverage alone.
+The "sports" category is the null-control reference: skill there should stay near zero.</p>
+{% if wealth_rankings %}
+<table>
+<tr><th>model</th><th>category</th><th>cum log-wealth</th><th>n forecasts</th><th>avg log-wealth/forecast</th></tr>
+{% for r in wealth_rankings %}
+<tr><td>{{ r.model_id }}</td><td>{{ r.category }}</td>
+<td>{{ "%.4f"|format(r.cum_log_wealth) }}</td><td>{{ r.n_forecasts }}</td>
+<td>{{ "%.5f"|format(r.avg_log_wealth) }}</td></tr>
+{% endfor %}
+</table>
+{% if wealth_curves_plot %}<img src="{{ wealth_curves_plot }}" alt="wealth curves per model per category">{% endif %}
+{% if wealth_drawdown_plot %}<img src="{{ wealth_drawdown_plot }}" alt="wealth drawdown per model per category">{% endif %}
+{% if wealth_attribution %}
+<h3>M4 attribution snapshot (today's pool, linear log-odds)</h3>
+<table>
+<tr><th>model</th><th>category</th><th>mean contribution</th><th>n markets</th></tr>
+{% for r in wealth_attribution %}
+<tr><td>{{ r.model_id }}</td><td>{{ r.category }}</td>
+<td>{{ "%.4f"|format(r.mean_contribution) }}</td><td>{{ r.n_markets }}</td></tr>
+{% endfor %}
+</table>
+{% endif %}
+{% else %}
+<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no resolved forecasts scored into the wealth ledger yet.</p>
+{% endif %}
+
 <h2>Lessons digest (trailing quarter)</h2>
 {% if lessons.n %}
 <p class="note">{{ lessons.n }} post-mortems in the last {{ lessons.window_days }} days.
@@ -246,6 +277,24 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
                 clv_rows.append({"model_id": model_id, "horizon": horizon,
                                  "n": stats["n"], "drift": stats["mean_signed_drift"]})
 
+    from lab.eval.wealth_plots import (
+        m4_attribution_snapshot,
+        plot_wealth_curves,
+        plot_wealth_drawdown,
+        sleeping_expert_rankings,
+    )
+
+    wealth_rankings = sleeping_expert_rankings(conn)
+    wealth_curves_plot = None
+    wealth_drawdown_plot = None
+    wealth_attribution: list[dict] = []
+    if wealth_rankings:
+        curves_path = plot_wealth_curves(conn, config)
+        wealth_curves_plot = curves_path.name if curves_path else None
+        drawdown_path = plot_wealth_drawdown(conn, config)
+        wealth_drawdown_plot = drawdown_path.name if drawdown_path else None
+        wealth_attribution = m4_attribution_snapshot(conn, config)
+
     llm_total = conn.execute("SELECT COALESCE(SUM(cost_usd),0) AS t FROM llm_spend").fetchone()["t"]
     from lab.store.db import llm_spend_today
     from lab.store.snapshots import utc_date_str
@@ -262,6 +311,10 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         pooling_rows=pooling_rows,
         calibration_plot=calibration_plot,
         clv_rows=clv_rows,
+        wealth_rankings=wealth_rankings,
+        wealth_curves_plot=wealth_curves_plot,
+        wealth_drawdown_plot=wealth_drawdown_plot,
+        wealth_attribution=wealth_attribution,
         llm_total=llm_total,
         llm_today=llm_today,
         llm_cap=config["llm"]["daily_cost_cap_usd"],

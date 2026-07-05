@@ -125,11 +125,27 @@ A short field guide to the estimators this repo actually computes — see
   effective source count (`n_eff = n / (1 + (n−1)·ρ̄)`) before it's ever
   applied — a duplicated or near-duplicate source buys no extra confidence.
   [`learn/pooling.py`](src/lab/learn/pooling.py).
+- **Virtual prediction economy (Phase 14).** Kelly log-optimal betting and
+  log-score are formally dual (Kelly 1956; Cover 1991): staking a fixed,
+  capped Kelly fraction of a model's edge against the market price on every
+  resolved forecast compounds wealth at the model's own log-score advantage —
+  a second, betting-theoretic readout of the same skill number the lab
+  already computes rigorously, not a new signal. Every model's coverage
+  differs (M5 only covers weather/macro, M7 only matched cross-venue markets),
+  so models are always compared by `cum_log_wealth / n_forecasts`
+  (sleeping-expert normalization), never the raw cumulative total — a
+  low-coverage sharp model shouldn't lose to a high-coverage mediocre one
+  just because it forecast less. [`economy/wealth.py`](src/lab/economy/wealth.py),
+  [`eval/wealth_plots.py`](src/lab/eval/wealth_plots.py).
 
 All of the above are fit or computed monthly inside `lab learn`, dry-run by
 default, walk-forward validated, bounded-step, and CI-gated on promotion —
 never in response to a single outcome (guardrails 14/15 in
-[`CLAUDE.md`](CLAUDE.md)).
+[`CLAUDE.md`](CLAUDE.md)). The wealth ledger is the one exception worth
+noting explicitly: it's arithmetic over already-resolved forecasts wired
+into the nightly `lab eval` step (not the monthly `lab learn` cycle), because
+it's a scoring/selection layer, not a model parameter — it never writes a
+forecast of its own.
 
 ## Project status
 
@@ -152,9 +168,9 @@ strings ever land in `src/`):
 - [x] Phase 11 — measurement upgrade: event-level cluster bootstrap, anytime-valid confidence sequence (the actual promotion/rollback gate), precision-weighted stratified estimator, venue × category report matrix
 - [x] Phase 12 — hierarchical recalibration (`m1_hier`): ridge-shrunk per-venue offsets on a shared global horizon curve, fit across Polymarket/Kalshi/Metaculus
 - [x] Phase 13 — extremized, correlation-aware pooling: per-category extremization exponent on M4's and M7's pools, discounted by the correlation-adjusted effective source count
+- [x] Phase 14 — virtual prediction economy: `wealth_ledger`, Kelly log-wealth accounting per (model, category) wired into the nightly `lab eval` step, sleeping-expert-normalized comparison (`cum_log_wealth / n_forecasts`), equity-curve/drawdown/attribution report section and a dedicated dashboard mode
 
 **Planned, not yet built:**
-- Phase 14 — virtual prediction economy: `wealth_ledger`, Kelly log-wealth accounting per (model, category), sleeping-expert-normalized comparison (`cum_log_wealth / n_forecasts`), equity-curve/drawdown report and dashboard views.
 - Phase 14.1 — shadow MWU ensemble weighting: a wealth-derived, regret-bounded (Hedge/MWU) challenger to M4's category weights, probationary and CI-gated through the same registry as any other challenger.
 
 The collector runs continuously against live Polymarket data. Calibration
@@ -242,8 +258,11 @@ order-book snapshots cannot be re-downloaded later.
 
 ## Dashboard (optional)
 
-A read-only Streamlit dashboard over the same SQLite/Parquet: live universe,
-latest forecasts vs market, calibration, shadow book.
+A read-only Streamlit dashboard over the same SQLite/Parquet, organized into modes via a
+sidebar selector: **Overview** (health + universe), **Forecasts vs Market**, **Calibration &
+Skill**, **Wealth Economy** (Phase 14: equity curves, drawdown, sleeping-expert rankings, M4
+attribution — reusing the same plot functions the static report renders), and **Shadow
+Portfolio** (SIMULATION).
 
 ```bash
 uv sync --group dashboard
