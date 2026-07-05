@@ -104,6 +104,39 @@ def test_unmanaged_duplicate_dashboard_stops_older():
     assert stale_or_redundant(entries, self_pid=-1, current_version="v1") == [50]
 
 
+def test_launcher_worker_pair_treated_as_one_instance(monkeypatch):
+    # pid 70 = launcher stub, pid 71 = its real worker child (Windows venv
+    # quirk, see _ancestor_pids). Neither registers -- streamlit never calls
+    # register_self -- so both show up unmanaged with code_version=None.
+    # Without ancestry-awareness this used to retire the launcher every single
+    # guard cycle (hourly), killing a healthy pair along with its child.
+    def fake_ancestors(pid, max_depth=4):
+        return {70} if pid == 71 else set()
+
+    monkeypatch.setattr(process_guard, "_ancestor_pids", fake_ancestors)
+    entries = [
+        _entry(70, "dashboard", None, 1000.0),
+        _entry(71, "dashboard", None, 1000.001),
+    ]
+    assert stale_or_redundant(entries, self_pid=-1, current_version="v1") == []
+
+
+def test_separate_launcher_worker_pairs_dedup_by_whole_cluster(monkeypatch):
+    # Two genuinely separate launcher+worker pairs (e.g. a stale cycle not yet
+    # cleaned up alongside a fresh one) -- the older pair retires as a whole,
+    # never split so that only its launcher or only its worker survives.
+    ancestry = {80: set(), 81: {80}, 90: set(), 91: {90}}
+    monkeypatch.setattr(process_guard, "_ancestor_pids", lambda pid, max_depth=4: ancestry.get(pid, set()))
+    entries = [
+        _entry(80, "dashboard", None, 1000.0),
+        _entry(81, "dashboard", None, 1000.001),
+        _entry(90, "dashboard", None, 2000.0),
+        _entry(91, "dashboard", None, 2000.001),
+    ]
+    result = stale_or_redundant(entries, self_pid=-1, current_version="v1")
+    assert sorted(result) == [80, 81]
+
+
 def test_gather_merges_managed_and_unmanaged(tmp_path, monkeypatch):
     config = {"storage": {"db_path": str(tmp_path / "lab.db")}}
     process_guard.register_self(config, "orchestrator")

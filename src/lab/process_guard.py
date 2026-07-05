@@ -198,6 +198,47 @@ def _ancestor_pids(pid: int, max_depth: int = 4) -> set[int]:
     return pids
 
 
+def _cluster_launcher_pairs(entries: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Group entries whose pid is an ancestor of another entry's pid in the same
+    list into one cluster.
+
+    The launcher-spawns-worker quirk `_ancestor_pids` documents means a single
+    logical instance can show up as two live PIDs with the same role (neither
+    of which registers itself, e.g. the dashboard: streamlit never calls
+    `register_self`). Without this, `stale_or_redundant`'s per-role dedup below
+    sees two "duplicates" and retires the launcher every time it runs -- which
+    is every watchdog cycle, hourly -- killing a perfectly healthy instance and
+    its child with it. Real duplicate instances (unrelated PIDs) still end up
+    in separate singleton clusters and are compared exactly as before.
+    """
+    pids = [e.get("pid") for e in entries if isinstance(e.get("pid"), int)]
+    ancestors = {pid: _ancestor_pids(pid) for pid in pids}
+    parent = {pid: pid for pid in pids}
+
+    def find(p: int) -> int:
+        while parent[p] != p:
+            parent[p] = parent[parent[p]]
+            p = parent[p]
+        return p
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for pid in pids:
+        for other in pids:
+            if other != pid and other in ancestors.get(pid, ()):
+                union(pid, other)
+
+    groups: dict[int, list[dict[str, Any]]] = {}
+    for e in entries:
+        pid = e.get("pid")
+        key = find(pid) if isinstance(pid, int) and pid in parent else id(e)
+        groups.setdefault(key, []).append(e)
+    return list(groups.values())
+
+
 def find_unmanaged(config: dict[str, Any]) -> list[dict[str, Any]]:
     """Live lab-looking processes that never registered (e.g. legacy instances)."""
     known = {e.get("pid") for e in _load_registry(config)}
@@ -295,18 +336,28 @@ def stale_or_redundant(entries: list[dict[str, Any]], self_pid: int,
                 if e.get("pid") != self_pid:
                     to_stop.add(e.get("pid"))
             continue
-        if len(group) > 1:
-            survivors = sorted(group, key=lambda e: e.get("start_ts") or 0.0, reverse=True)
-            kept = None
-            for e in survivors:
-                if e.get("pid") == self_pid or e.get("code_version") == current_version:
-                    kept = e
-                    break
-            if kept is None:
-                kept = survivors[0]
-            for e in group:
-                if e.get("pid") not in (kept.get("pid"), self_pid):
-                    to_stop.add(e.get("pid"))
+        if len(group) <= 1:
+            continue
+        clusters = _cluster_launcher_pairs(group)
+        if len(clusters) <= 1:
+            continue
+        cluster_start = lambda cl: min((e.get("start_ts") or 0.0) for e in cl)  # noqa: E731
+        cluster_pids = lambda cl: {e.get("pid") for e in cl}  # noqa: E731
+        survivors = sorted(clusters, key=cluster_start, reverse=True)
+        kept = None
+        for cl in survivors:
+            if self_pid in cluster_pids(cl) or any(e.get("code_version") == current_version for e in cl):
+                kept = cl
+                break
+        if kept is None:
+            kept = survivors[0]
+        for cl in clusters:
+            if cl is kept:
+                continue
+            for e in cl:
+                pid = e.get("pid")
+                if pid != self_pid and isinstance(pid, int):
+                    to_stop.add(pid)
 
     to_stop.discard(self_pid)
     return sorted(p for p in to_stop if isinstance(p, int))
