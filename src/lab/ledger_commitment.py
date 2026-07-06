@@ -129,12 +129,21 @@ def commit_pending_days(conn: sqlite3.Connection, ledger_path: Path) -> list[dic
 def verify_commitment(conn: sqlite3.Connection, record: dict[str, Any]) -> bool:
     """Recompute a commitment's hash from the DB and compare.
 
-    Anchored to the record's own `first_id`/`last_id` range (not a live
-    re-query by date), so this proves exactly what was committed at the time,
-    regardless of what may have been appended for that date since.
+    Non-zero commitments are anchored to the record's own `first_id`/`last_id`
+    range (not a live re-query by date), so this proves exactly what was
+    committed at the time, regardless of what may have been appended for that
+    date since. A zero-row commitment has no id range to anchor to -- it
+    asserts "this date had no forecasts as of commit time," so verifying it
+    means re-checking that the date is STILL empty; under normal operation no
+    code path ever backdates a forecast's `ts` into an already-closed past
+    date, so any row appearing there now is itself the tamper signal.
     """
     if record["row_count"] == 0:
-        return record["sha256"] == _hash_rows([])
+        if record["first_id"] is not None or record["last_id"] is not None:
+            return False
+        return len(_query_day(conn, record["date"])) == 0 and record["sha256"] == _hash_rows([])
+    if record["first_id"] is None or record["last_id"] is None:
+        return False
     rows = _query_id_range(conn, record["first_id"], record["last_id"])
     if len(rows) != record["row_count"]:
         return False
@@ -145,12 +154,31 @@ def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
 
 
+def _revert_ledger_append(path: Path, n: int) -> None:
+    """Undo the last `n` JSONL lines appended to `path`.
+
+    Used when the git add/commit step fails after the file was already
+    appended to: without this, the next run's idempotency check
+    (`commit_pending_days` reading dates already present in the file) would
+    treat those dates as committed forever, even though no git commit for
+    them actually exists -- silently orphaning them past retry.
+    """
+    if n <= 0:
+        return
+    lines = path.read_text(encoding="utf-8").splitlines()
+    remaining = lines[: len(lines) - n]
+    text = "\n".join(remaining)
+    path.write_text(text + ("\n" if text else ""), encoding="utf-8")
+
+
 def commit_and_push(config: dict[str, Any], conn: sqlite3.Connection) -> dict[str, Any]:
     """Compute pending commitments and push them to THIS repo (`PROJECT_ROOT`).
 
     Distinct from `publish.py`'s `publish_results`, which targets a separate
     private results checkout -- ledger commitments belong in the public repo
-    itself, since that's what makes them independently verifiable.
+    itself, since that's what makes them independently verifiable. Reverts its
+    own file append if the git add/commit step fails, so a retry recomputes
+    and retries the same dates rather than silently treating them as done.
     """
     ledger_cfg = config.get("ledger", {})
     ledger_path = PROJECT_ROOT / ledger_cfg.get("commitments_path", "docs/ledger_commitments.jsonl")
@@ -159,20 +187,34 @@ def commit_and_push(config: dict[str, Any], conn: sqlite3.Connection) -> dict[st
     if not new_records:
         return {"committed": False, "reason": "no_new_days"}
 
-    rel_path = ledger_path.relative_to(PROJECT_ROOT)
-    add = _run_git(["add", str(rel_path)], PROJECT_ROOT)
-    if add.returncode != 0:
-        return {"error": "git_add_failed", "stderr": add.stderr}
-
     dates = [r["date"] for r in new_records]
-    commit = _run_git(["commit", "-m", f"Ledger commitment: {', '.join(dates)}"], PROJECT_ROOT)
-    if commit.returncode != 0:
-        return {"error": "git_commit_failed", "stderr": commit.stderr}
+    try:
+        rel_path = ledger_path.relative_to(PROJECT_ROOT)
+        add = _run_git(["add", str(rel_path)], PROJECT_ROOT)
+        if add.returncode != 0:
+            _revert_ledger_append(ledger_path, len(new_records))
+            return {"error": "git_add_failed", "stderr": add.stderr}
+
+        commit = _run_git(["commit", "-m", f"Ledger commitment: {', '.join(dates)}"], PROJECT_ROOT)
+        if commit.returncode != 0:
+            _revert_ledger_append(ledger_path, len(new_records))
+            return {"error": "git_commit_failed", "stderr": commit.stderr}
+    except Exception as exc:
+        _revert_ledger_append(ledger_path, len(new_records))
+        log.exception("ledger commitment git step failed")
+        return {"error": "git_step_exception", "detail": str(exc)}
 
     result: dict[str, Any] = {"committed": True, "dates": dates}
     if ledger_cfg.get("push", True):
-        pushed = _run_git(["push"], PROJECT_ROOT)
-        result["pushed"] = pushed.returncode == 0
-        if not result["pushed"]:
-            result["push_stderr"] = pushed.stderr
+        try:
+            pushed = _run_git(["push"], PROJECT_ROOT)
+            result["pushed"] = pushed.returncode == 0
+            if not result["pushed"]:
+                result["push_stderr"] = pushed.stderr
+        except Exception as exc:
+            # The local commit already succeeded and is safely idempotent --
+            # only the push failed, so no revert; the next run (or a manual
+            # `git push`) picks up what's already committed locally.
+            result["pushed"] = False
+            result["push_error"] = str(exc)
     return result

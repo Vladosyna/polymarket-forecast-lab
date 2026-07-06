@@ -92,10 +92,14 @@ This is the part most prone to being gotten wrong, so it is stated precisely:
   beat the market on forecasts made **after this document's commitment date (2026-07-06)**.
   Forecasts made and resolved before that date, using the same model versions, are exploratory —
   useful for monitoring, not for the claim.
-- H3 (`m7_crossvenue`) and any LLM-based model (M3/M3b) are stricter still: guardrail 15 forbids
-  ever backtesting an LLM model on pre-cutoff history, so their skill accrues *only* from forecasts
-  made after each specific model version's own `registered_ts` — never retroactively, regardless of
-  this document's date.
+- H3 (`m7_crossvenue`) follows the same rule as H1/H2 above — confirmatory only for forecasts made
+  after 2026-07-06 — with one simplification in its favor: M7 is deterministic at forecast time (no
+  LLM call, `CLAUDE.md` §6) and was never fit on the historical bootstrap the way M1/M2/M5 were, so
+  there is no separate "already-fit" caveat to track for it.
+- LLM-based models (M3/M3b) carry no primary hypothesis in §2, but the same confirmatory logic
+  applies to them with an extra, stricter rule: guardrail 15 forbids ever backtesting an LLM model
+  on pre-cutoff history, so their skill accrues *only* from forecasts made after each specific model
+  version's own `registered_ts` — never retroactively, regardless of this document's date.
 - A challenger version registered after 2026-07-06 (any `model_id@vN` promoted via the champion/
   challenger machinery, `CLAUDE.md` §6/§7.1) inherits this same confirmatory-window logic relative
   to its own `registered_ts`, not this document's date — each model version's track record starts

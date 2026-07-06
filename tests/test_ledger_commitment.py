@@ -74,6 +74,18 @@ def _raw_tamper(tmp_path, row_id, p_yes):
     raw.close()
 
 
+def _install_failing_precommit_hook(repo):
+    """A pre-commit hook that always rejects -- reliably forces `git commit`
+    to fail regardless of the environment's own global git config (unsetting
+    user.name/email would silently fall back to a real global identity on a
+    dev machine and not actually reproduce the failure)."""
+    hooks_dir = repo / ".git" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook = hooks_dir / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+
+
 def _init_git_repo(path):
     for args in (
         ["git", "init"],
@@ -219,6 +231,31 @@ def test_verify_commitment_fails_after_row_tampered(conn, tmp_path):
     assert lc.verify_commitment(conn, records[0]) is False
 
 
+def test_verify_commitment_detects_added_row_on_previously_zero_day(conn, tmp_path):
+    ledger_path = tmp_path / "ledger_commitments.jsonl"
+    records = lc.commit_pending_days(conn, ledger_path)  # commits TODAY-1 with 0 rows
+    assert records[0]["row_count"] == 0
+    assert lc.verify_commitment(conn, records[0]) is True
+
+    # A forecast later appears for that already-committed (zero-row) date.
+    # Under normal operation this never happens -- ts is always "now" at
+    # write time -- so its mere presence is itself the tamper signal; a
+    # verifier anchored only to a (nonexistent) id range would miss this.
+    _seed(conn, _iso(TODAY - timedelta(days=1)))
+    conn.commit()
+    assert lc.verify_commitment(conn, records[0]) is False
+
+
+def test_verify_commitment_detects_inconsistent_zero_metadata(conn):
+    # A hand-edited or corrupted ledger line claiming zero rows but carrying
+    # a stale id range must not pass verification.
+    bad_record = {
+        "date": "2026-01-01", "row_count": 0, "first_id": 5, "last_id": 5,
+        "sha256": hashlib.sha256(b"").hexdigest(), "committed_ts": "x", "prospective": True,
+    }
+    assert lc.verify_commitment(conn, bad_record) is False
+
+
 # --- git orchestration -----------------------------------------------------
 
 def test_job_creates_real_git_commit(conn, tmp_path, monkeypatch):
@@ -249,6 +286,33 @@ def test_commit_and_push_returns_error_on_git_failure(conn, tmp_path, monkeypatc
     cfg = {"ledger": {"enabled": True, "commitments_path": "docs/ledger_commitments.jsonl", "push": False}}
     result = lc.commit_and_push(cfg, conn)
     assert "error" in result
+
+
+def test_commit_and_push_reverts_append_on_commit_failure(conn, tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _install_failing_precommit_hook(repo)
+    monkeypatch.setattr(lc, "PROJECT_ROOT", repo)
+
+    _seed(conn, _iso(TODAY - timedelta(days=1)))
+    conn.commit()
+
+    cfg = {"ledger": {"enabled": True, "commitments_path": "docs/ledger_commitments.jsonl", "push": False}}
+    ledger_path = repo / "docs" / "ledger_commitments.jsonl"
+
+    result = lc.commit_and_push(cfg, conn)
+    assert "error" in result
+    # The append must be rolled back -- otherwise a retry would see this date
+    # as already "committed" in the file with no matching git commit to show
+    # for it, permanently orphaning it.
+    assert lc._read_ledger(ledger_path) == []
+
+    # Remove the hook and retry: the SAME date must be retried, not skipped.
+    (repo / ".git" / "hooks" / "pre-commit").unlink()
+    retry = lc.commit_and_push(cfg, conn)
+    assert retry["committed"] is True
+    assert retry["dates"] == [(TODAY - timedelta(days=1)).isoformat()]
 
 
 def test_job_never_raises_when_commit_and_push_raises(config, monkeypatch):
