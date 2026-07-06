@@ -279,6 +279,17 @@ publish:
   enabled: true
   results_dir: ../Polymarket-results   # sibling checkout of the private results repo
 
+# Phase 15 (v2.3): nightly cryptographic pre-registration -- sha256 over each
+# closed UTC day's appended forecasts rows, committed to commitments_path in
+# THIS repo (not the results mirror above) so a reviewer can later recompute
+# the same hash from the DB and confirm the ledger wasn't edited after the
+# fact. push:false is a local-testing-only escape hatch -- production always
+# pushes, since an unpushed commitment on a public repo verifies nothing.
+ledger:
+  enabled: true
+  commitments_path: docs/ledger_commitments.jsonl
+  push: true
+
 # --- Storage -------------------------------------------------------------
 storage:
   db_path: data/lab.db

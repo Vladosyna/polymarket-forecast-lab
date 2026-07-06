@@ -1,6 +1,6 @@
 # Polymarket Forecast Lab — Implementation Brief for Claude Code
 
-**v2.2** — audit pass for the same class of bug as the v2.1 fix (rules that sound rigorous but don't hold up or silently conflict). Found and fixed: the wealth-ledger/anytime-valid-CS "same object" claim was an overreach — they're related but distinct computations, now specified as such; guardrail 14's absolute wording didn't account for a model's first activation with no incumbent to challenge (new guardrail 18); guardrail 8's rate-limiting rule was still Polymarket-only wording after multi-venue collection shipped; the MWU challenger had floor/ceiling weight protection the incumbent M4 fit didn't (added for parity). Plus three minor completeness notes: small-group hierarchical variance caveat, Phase 14.1's full dependency list, guardrail 12's structural-vs-editorial scope clarification.
+**v2.3** — publication instrumentation (Phase 15): cryptographic ledger commitments (verifiable live pre-registration), dated pre-analysis plan, microstructure and crowd-size covariates joined at forecast time, net-of-cost accounting, universe exclusion log, optional seeded M3 boundary randomization for causal LLM attribution, replication export. Guardrail 12 amended: pre-specified randomization counts as a deterministic rule.
 
 **Read this entire document before writing any code.** It is the single source of truth for this project. Work through the phases in order. Each phase has acceptance criteria — do not move to the next phase until they pass.
 
@@ -157,6 +157,15 @@ CREATE TABLE meta (
 );
 
 -- v1.9 multi-venue migration (Phase 10). Applied via ALTER/CREATE migrations on the live DB, never by recreating tables.
+-- Phase 15 (v2.3): every market considered and excluded from the universe, with a reason —
+-- answers "why isn't X in the ledger" and defends against selection-bias claims in review.
+CREATE TABLE universe_log (
+  id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL,
+  venue TEXT NOT NULL, venue_native_id TEXT NOT NULL,
+  reason_code TEXT NOT NULL   -- 'crypto_price_target','ambiguous_resolution','tail_price','low_liquidity','manual', ...
+);
+
 CREATE TABLE venues (
   venue TEXT PRIMARY KEY,            -- 'polymarket','kalshi','metaculus','manifold'
   trust_tier TEXT CHECK(trust_tier IN ('money','reputation','play')),
@@ -210,7 +219,11 @@ CREATE TABLE forecasts (
   spread_at_ts REAL,
   inputs_hash TEXT,                -- sha256 over: model code version, curve/artifact versions, config hash, input snapshot ids
   evidence_run_id INTEGER,         -- FK for m3
-  cost_usd REAL DEFAULT 0
+  cost_usd REAL DEFAULT 0,
+  -- Phase 15 (v2.3), all nullable — populated going forward, never backfilled by reconstruction:
+  -- spread_at_ts above already covers the spread covariate; only depth/volume/timing are new here.
+  depth_covariate REAL, volume_24h REAL, trades_24h INTEGER, hour_utc INTEGER,
+  m3_randomized INTEGER DEFAULT 0, m3_random_seed TEXT   -- boundary-randomization experiment, guardrail 12
 );
 
 CREATE TABLE evidence_runs (
@@ -417,7 +430,7 @@ Domain-specific guardrails:
 9. **Fail soft, log loud.** Network failures degrade to skip-and-retry; the process never crashes on a single bad market. Structured logging (`logging` + JSON lines to `data/logs/`).
 10. **LLM budget.** Hard daily USD cap enforced in code before each call; spend persisted; the report shows cumulative cost.
 11. **No look-ahead.** Every M3 evidence item must satisfy `published_ts ≤ forecast ts`; the dossier stores both timestamps. LLM models are never scored on pre-cutoff history (§7).
-12. **No selection bias.** Cheap models (M0/M1/M2/M6, and M5 where its adapters apply) forecast the ENTIRE eligible universe daily. Any subsetting (M3 cost cap) follows the deterministic rule in §6 — never editorial judgment about which markets look "forecastable". M1.x and M7 are naturally scoped to the venues or matched-questions they structurally cover — a structural boundary, not an editorial one — same category as M5's carve-out, not a new exception to track.
+12. **No selection bias.** Cheap models (M0/M1/M2/M6, and M5 where its adapters apply) forecast the ENTIRE eligible universe daily. Any subsetting (M3 cost cap) follows the deterministic rule in §6 — never editorial judgment about which markets look "forecastable". M1.x and M7 are naturally scoped to the venues or matched-questions they structurally cover — a structural boundary, not an editorial one — same category as M5's carve-out, not a new exception to track. Pre-specified, seeded randomization (Phase 15's M3 boundary experiment) counts as a deterministic rule for this guardrail's purposes: the prohibition targets editorial judgment, and a logged coin flip contains none.
 13. **Price freshness.** A forecast row requires `p_market_at_ts` from a snapshot no older than 15 min (liquid tier) / 90 min (tail). If the latest snapshot is stale, skip the forecast and log it — a forecast paired against a stale price corrupts the skill comparison silently, which is the worst failure class in this system.
 14. **Self-modification is scheduled and versioned.** Parameters and prompts change only via `lab learn` on its monthly schedule, only when min-n thresholds are met, only via walk-forward fitting, and only as challenger versions measured against the incumbent (§6). No code path may adjust any model in response to an individual outcome.
 15. **Learning never re-invokes the LLM on resolved history.** Refits touching M3 are arithmetic over evidence already frozen in `evidence_runs`; new prompts/extraction logic earn skill only from forecasts made after their own `registered_ts`. Full safeguard list (bounded step, CI-gated promotion, automatic rollback, dry-run default) lives in §6 — this rule is the one that may never be relaxed for convenience.
@@ -499,6 +512,19 @@ Tasks: `wealth_ledger` table (§5); `economy/wealth.py` computing the Kelly log-
 Depends on Phase 14, Phase 7.1 (registry/promotion machinery), and Phase 11 (anytime-valid CS used for promotion). Experimental and probationary by design — read §6's wealth-ledger paragraph and guardrail 17 (§9) before starting.
 Tasks: `economy/mwu.py` implementing the Hedge/MWU update with the `η_t = √(8 ln N / t)` schedule, 2%/60% floor/ceiling, and the existing n_eff correlation discount (§6 M4 paragraph) applied before normalization; register `m4_ensemble@mwu` as a challenger via the existing registry (§7.1) with `registered_ts`; compute its shadow weights nightly inside the existing `lab eval` step — no new CLI command, and this is the one process in the codebase permitted to update between `lab learn` cycles, solely because it touches ensemble weights and never model internals (guardrail 17); wire its promotion through the standard anytime-valid CI gate and rollback circuit breaker, with a minimum 90-day / n≥200-per-category probation (§7's honesty tier) before it is even eligible for promotion consideration.
 **Accept when:** on a synthetic fixture, the MWU weights provably respect the floor/ceiling under an adversarial win/loss sequence; duplicating a high-wealth model (ρ̄→1) does not let the pair jointly exceed the ceiling; the challenger is invisible to production forecasts until promoted; a promoted MWU weighting that subsequently underperforms triggers the same automatic rollback as any other challenger; `test_learning_safety.py` gains a case for this challenger; `test_scope.py` still green.
+
+### Phase 15 — Publication instrumentation (collect now, write later)
+Purpose: make the lab's data paper-grade from today — live pre-registered evidence cannot be added retroactively. Target literature: prediction-market efficiency and forecast aggregation (International Journal of Forecasting class). None of this changes any model's behavior except the optional randomization item.
+Tasks:
+- **Ledger commitment:** a nightly job computes sha256 over the day's appended `forecasts` rows and commits (hash, row count, date) to a `ledger_commitments` file in the public GitHub repo — cryptographically verifiable pre-registration. Optionally also anchor the hash via OpenTimestamps.
+- **Pre-analysis plan:** `docs/pre_analysis_plan.md`, dated and committed BEFORE the confirmatory window opens: primary hypotheses (long-horizon underconfidence on Polymarket; recalibration skill net of costs in P1/P2; cross-venue lead-lag), primary outcome (paired Brier skill with event-clustered anytime-valid CS), exclusion rules.
+- **Microstructure covariates in the ledger:** at forecast ts, persist spread, top-of-book depth, 24h volume, 24h trade count, and hour-of-day UTC into forecast rows (new nullable columns) so heterogeneity analysis needs no ex-post reconstruction.
+- **Net-of-cost accounting:** a versioned fee-schedule file per venue (fees change — record when); shadow portfolio logs effective spread paid per simulated fill; the report gains a net-of-cost skill line.
+- **Universe exclusion log:** `universe_log` table — every excluded market with a reason code and date; daily inclusion/exclusion counts in the report.
+- **Crowd-size covariates:** Metaculus forecaster counts, Polymarket holder counts (Data API), Kalshi open interest — stored with snapshots.
+- **M3 boundary randomization (optional, high value):** markets ranked K−10..K+10 by the deterministic liquidity rule are randomly assigned to M3 coverage with a logged seed — a built-in experiment identifying the LLM pipeline's marginal contribution causally (guardrail 12, as amended, applies).
+- **Replication export:** `lab export --paper` — anonymized resolved-forecast dataset + code version hash + schema documentation.
+**Accept when:** a nightly commitment appears in the repo and re-verifies against the DB; the PAP is committed with a date; covariate columns populate on live forecasts; the exclusion log fills on a real universe sync; the randomization assignment is exactly reproducible from its logged seed; the `--paper` export round-trips through a validation script; `test_scope.py` still green.
 
 ---
 

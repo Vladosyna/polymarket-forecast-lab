@@ -316,6 +316,10 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
         # must not gate the forecast/eval/report age bookkeeping above -- a stalled
         # git push should not re-trigger (and re-bill) the whole bundle hourly.
         await asyncio.to_thread(analytics.run_publish_job, config)
+        # Same reasoning: a stalled ledger-commitment push targets a different
+        # repo (this one, not the results mirror) but must equally never gate
+        # or re-trigger the bundle above (Phase 15).
+        await asyncio.to_thread(analytics.run_ledger_commitment_job, config)
 
     async def run_shadow_service() -> None:
         await _run("shadow", lambda: asyncio.to_thread(analytics.run_shadow_job, config))

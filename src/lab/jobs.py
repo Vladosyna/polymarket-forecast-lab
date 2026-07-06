@@ -174,6 +174,31 @@ def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def run_ledger_commitment_job(config: dict[str, Any]) -> dict[str, Any]:
+    """Phase 15: nightly cryptographic pre-registration commitment.
+
+    Commits (and pushes) a sha256 over each closed UTC day's appended
+    forecasts rows to THIS repo's docs/ledger_commitments.jsonl -- not the
+    private results mirror publish.py targets. Never raises: a failed git
+    step here must not block or re-trigger the forecast/eval/report bundle
+    it follows, same contract as run_publish_job.
+    """
+    from lab.ledger_commitment import commit_and_push
+
+    if not config.get("ledger", {}).get("enabled", True):
+        return {"skipped": "disabled"}
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        result = commit_and_push(config, conn)
+    except Exception:
+        log.exception("ledger commitment job failed")
+        return {"error": "ledger_commitment_failed"}
+    finally:
+        conn.close()
+    log.info("ledger commitment job complete", extra={"ctx": result})
+    return result
+
+
 def run_rollback_job(config: dict[str, Any], model_id: str,
                      to_version_tag: str | None = None) -> dict[str, Any]:
     """Manually revert a model's active version to a prior one (outside the cycle)."""
