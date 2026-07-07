@@ -156,20 +156,52 @@ def run_map_propose_job(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _db_push_due(conn, interval_days: int) -> bool:
+    """True if data/lab.db hasn't been pushed to the results repo in at least
+    `interval_days` -- lab.db is a single ever-growing binary blob with no
+    LFS delta compression, so pushing it as often as the (cheap, incremental)
+    snapshots would burn a GitHub LFS free-tier month's bandwidth in days."""
+    from datetime import datetime
+
+    from lab.util import now_utc
+
+    last = db.get_meta(conn, "last_raw_db_push_ts")
+    if not last:
+        return True
+    last_dt = datetime.fromisoformat(last)
+    return (now_utc() - last_dt).total_seconds() >= interval_days * 86400
+
+
 def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
     """Mirror reports/exports/model artifacts to the private results repo and
-    push. Curated results only -- never the raw db/snapshots; that bulk copy
-    is a manual, user-run step (scripts/publish_results.py --raw-data), not
-    something this automatic nightly job does on its own. Never raises: a
-    publish failure (e.g. no network) must not block or re-trigger the
-    forecast/eval/report bundle it follows."""
+    push -- always. Snapshots (new/changed parquet partitions) push every
+    night too when publish.raw_data.snapshots_enabled is set: they're small
+    and incremental (brief section 11: "the historical order-book snapshots
+    cannot be re-downloaded later" is exactly the crown-jewel data this is
+    for). data/lab.db additionally pushes only every
+    publish.raw_data.db_interval_days when publish.raw_data.db_enabled is
+    set, tracked via a `last_raw_db_push_ts` meta key -- both raw-data knobs
+    default OFF, so an operator who wants only the curated nightly mirror
+    (the pre-Phase-16 behavior) gets exactly that with no config changes.
+    Never raises: a publish failure (e.g. no network) must not block or
+    re-trigger the forecast/eval/report bundle it follows."""
     from lab.publish import publish_results
+    from lab.util import now_utc_iso
 
     if not config.get("publish", {}).get("enabled", False):
         return {"skipped": "disabled"}
+    raw_cfg = config.get("publish", {}).get("raw_data", {})
+    include_snapshots = bool(raw_cfg.get("snapshots_enabled", False))
     conn = db.connect(config["storage"]["db_path"])
     try:
-        result = publish_results(config, conn, include_raw_data=False)
+        include_db = bool(raw_cfg.get("db_enabled", False)) and _db_push_due(
+            conn, int(raw_cfg.get("db_interval_days", 3))
+        )
+        result = publish_results(
+            config, conn, include_snapshots=include_snapshots, include_db=include_db,
+        )
+        if include_db and result.get("committed"):
+            db.set_meta(conn, "last_raw_db_push_ts", now_utc_iso())
     except Exception:
         log.exception("publish job failed")
         return {"error": "publish_failed"}

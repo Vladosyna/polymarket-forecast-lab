@@ -312,6 +312,23 @@ venues:
 publish:
   enabled: true
   results_dir: ../Polymarket-results   # sibling checkout of the private results repo
+  # Raw-data backup to the private results repo (brief section 11: "the
+  # historical order-book snapshots cannot be re-downloaded later"). Both
+  # default OFF -- an operator who wants only the curated nightly mirror
+  # (reports/exports/models) gets exactly the pre-existing behavior with no
+  # config change. Split into two independent knobs because they have very
+  # different LFS-bandwidth costs: snapshots are small/incremental (only
+  # new/changed parquet partitions copy) so they can push every night for
+  # free; data/lab.db is a single ever-growing binary blob with no LFS delta
+  # compression -- every push transfers its full current size, so pushing it
+  # nightly would burn a GitHub LFS free-tier month's bandwidth (1GB) in
+  # days once it passes a few hundred MB. db_interval_days spaces those
+  # pushes out to fit a free-tier LFS plan; raise results_dir's LFS plan (or
+  # this interval) if the db grows enough to need it more often.
+  raw_data:
+    snapshots_enabled: true
+    db_enabled: true
+    db_interval_days: 3
 
 # Phase 15 (v2.3): nightly cryptographic pre-registration -- sha256 over each
 # closed UTC day's appended forecasts rows, committed to commitments_path in

@@ -56,14 +56,24 @@ def sync_export(results_dir: Path, conn: sqlite3.Connection) -> None:
 
 def sync_db(results_dir: Path, db_path: Path) -> None:
     """Consistent copy via SQLite's backup API -- safe against a concurrently
-    writing WAL connection, unlike a raw file copy."""
+    writing WAL connection, unlike a raw file copy.
+
+    Always starts from a fresh destination file: a stale results-repo
+    checkout can leave an unsmudged Git LFS pointer stub in place of the real
+    binary (e.g. `git lfs pull` was never run there) -- sqlite3.backup()
+    raises "file is not a database" trying to write into that, since it
+    isn't a valid SQLite header. Removing any existing destination first
+    means the backup always starts from nothing, regardless of what was
+    there before."""
     if not db_path.exists():
         return
     dst_dir = results_dir / "data"
     dst_dir.mkdir(parents=True, exist_ok=True)
+    dst_path = dst_dir / "lab.db"
+    dst_path.unlink(missing_ok=True)
     src_conn = sqlite3.connect(str(db_path))
     try:
-        dst_conn = sqlite3.connect(str(dst_dir / "lab.db"))
+        dst_conn = sqlite3.connect(str(dst_path))
         try:
             src_conn.backup(dst_conn)
         finally:
@@ -98,8 +108,20 @@ def publish_results(
     conn: sqlite3.Connection,
     results_dir: Path | None = None,
     push: bool = True,
-    include_raw_data: bool = False,
+    include_snapshots: bool = False,
+    include_db: bool = False,
 ) -> dict[str, Any]:
+    """Snapshots and the db are independent knobs, not one combined
+    "raw data" flag: snapshots are cheap and incremental (only new/changed
+    partitions copy, §Sec 11's "cannot be re-downloaded later" data), so they
+    can run every night for free-tier LFS bandwidth. lab.db is a single ever-
+    growing binary blob -- LFS has no delta compression for it, so every push
+    transfers the FULL current size. Pushing it as often as snapshots would
+    burn a GitHub LFS free-tier month's bandwidth (1GB) in days once the db
+    passes a few hundred MB. run_publish_job gates `include_db` on an
+    interval (publish.raw_data.db_interval_days) using a last-push timestamp
+    in `meta` -- this function itself just does what it's told for either
+    flag, independently."""
     pub_cfg = config.get("publish", {})
     results_dir = results_dir or (PROJECT_ROOT.parent / pub_cfg.get("results_dir", "../Polymarket-results"))
     results_dir = Path(results_dir).resolve()
@@ -112,9 +134,10 @@ def publish_results(
     sync_model_artifacts(results_dir, PROJECT_ROOT / storage["models_dir"])
     sync_export(results_dir, conn)
     n_snapshots = 0
-    if include_raw_data:
-        sync_db(results_dir, PROJECT_ROOT / storage["db_path"])
+    if include_snapshots:
         n_snapshots = sync_snapshots(results_dir, PROJECT_ROOT / storage["snapshots_dir"])
+    if include_db:
+        sync_db(results_dir, PROJECT_ROOT / storage["db_path"])
 
     _run_git(["add", "-A"], results_dir)
     diff = _run_git(["diff", "--cached", "--quiet"], results_dir)
@@ -126,7 +149,7 @@ def publish_results(
     if commit.returncode != 0:
         return {"committed": False, "reason": "commit_failed", "stderr": commit.stderr}
 
-    result = {"committed": True, "ts": ts, "snapshot_files_copied": n_snapshots}
+    result = {"committed": True, "ts": ts, "snapshot_files_copied": n_snapshots, "db_included": include_db}
     if push:
         pushed = _run_git(["push"], results_dir)
         result["pushed"] = pushed.returncode == 0

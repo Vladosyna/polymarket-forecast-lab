@@ -1,12 +1,12 @@
 """Manual entry point for lab.publish.publish_results.
 
-By default mirrors curated results only (reports/exports/model artifacts) --
-the same thing the orchestrator does automatically every night. Pass
---raw-data to ALSO back up data/lab.db + data/snapshots/ to the private
-results repo: this is an intentionally manual, user-run step (never done
-automatically) since it bulk-copies and pushes the full collected dataset.
+By default mirrors curated results only (reports/exports/model artifacts).
+The automated nightly job (jobs.py::run_publish_job) can now also push
+snapshots daily and the db every N days on its own (publish.raw_data.* in
+config.yaml) -- this script's --raw-data / --snapshots-only / --db-only
+flags remain for an immediate, on-demand push outside that schedule.
 
-Usage: uv run python scripts/publish_results.py [--no-push] [--raw-data]
+Usage: uv run python scripts/publish_results.py [--no-push] [--raw-data | --snapshots-only | --db-only]
 """
 
 from __future__ import annotations
@@ -26,14 +26,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-push", action="store_true")
     parser.add_argument("--raw-data", action="store_true",
-                        help="ALSO back up data/lab.db and data/snapshots/ (manual opt-in only)")
+                        help="ALSO back up both data/lab.db and data/snapshots/")
+    parser.add_argument("--snapshots-only", action="store_true",
+                        help="ALSO back up data/snapshots/ (not the db)")
+    parser.add_argument("--db-only", action="store_true",
+                        help="ALSO back up data/lab.db (not snapshots)")
     args = parser.parse_args()
+
+    include_snapshots = args.raw_data or args.snapshots_only
+    include_db = args.raw_data or args.db_only
 
     config = load_config()
     conn = db.connect(config["storage"]["db_path"])
     try:
         result = publish_results(
-            config, conn, push=not args.no_push, include_raw_data=args.raw_data,
+            config, conn, push=not args.no_push,
+            include_snapshots=include_snapshots, include_db=include_db,
         )
     finally:
         conn.close()

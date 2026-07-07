@@ -21,17 +21,6 @@ confirmed:
   external_id: KXGOVCA-26-XBEC
   external_question: Who will win the governorship in California?
   confirmed_ts: '2026-07-07T13:18:30+00:00'
-proposed:
-- condition_id: '0x8d62f20324e9e7f1a3c663ab6aac9a2f6e7adb96c6a69ac2cea7e08a71a7f2ef'
-  question: Will Tom Steyer win the California Governor Election in 2026?
-  venue: kalshi
-  external_id: KXGOVCA-26-SHIL
-  external_question: Who will win the governorship in California?
-  rationale: 'Same as above: both ask about the winner of the 2026 California governor
-    election. KXGOVCA-26-SHIL is another market for ''Who will win the governorship
-    in California?'', matching the Polymarket question.'
-  confidence: 0.95
-  proposed_ts: '2026-07-07T12:51:36+00:00'
 - condition_id: '0x2716a89ac0adb404b1651b2f8c153261ea28fddcc2523f6664638a5aeb0a77cb'
   question: "No change in Bank of Japan\u2019s interest rates after the July 2026\
     \ meeting?"
@@ -39,12 +28,7 @@ proposed:
   external_id: KXCBDECISIONJAPAN-26JUL30-HOLD
   external_question: Will the Bank of Japan Maintain current rate at the July 2026
     Monetary Policy Meeting?
-  rationale: 'This Kalshi market directly asks about the same event: the Bank of Japan''s
-    interest rate decision at the July 2026 Monetary Policy Meeting, specifically
-    whether it will maintain the current rate (i.e., no change). The Polymarket question
-    asks if there will be no change in interest rates after the July 2026 meeting.'
-  confidence: 0.95
-  proposed_ts: '2026-07-07T12:55:50+00:00'
+  confirmed_ts: '2026-07-07T13:32:15+00:00'
 - condition_id: '0x6f78fd69fd6dafb695a8f4074dac11971b1da612bd150aa0c837efbd86417292'
   question: Will Genter Drummond win the 2026 Oklahoma Governor Republican primary
     election?
@@ -52,8 +36,5 @@ proposed:
   external_id: KXGOVOKNOMR-26-GDRU
   external_question: Will Genter Drummond be the Republican nominee for Governor in
     Oklahoma?
-  rationale: Both ask whether Genter Drummond will win the Republican nomination for
-    Governor in Oklahoma in 2026, which is effectively the same as winning the Republican
-    primary election.
-  confidence: 1.0
-  proposed_ts: '2026-07-07T12:57:03+00:00'
+  confirmed_ts: '2026-07-07T13:32:25+00:00'
+proposed: []
