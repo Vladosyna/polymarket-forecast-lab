@@ -236,6 +236,13 @@ cross_venue:
                              # automatically. It only ever appends to `proposed`; a human still
                              # must run `lab map confirm` before a pair feeds M7 (propose-then-
                              # confirm is a hard requirement, not something automation may skip).
+  # Phase 17 item 3: confirmed pairs only (the human-curated, already-rate-
+  # limit-aware markets_map.yaml set) get a much tighter cadence than the
+  # tier-wide 5/60-min loops -- the lead-lag hypothesis (PAP H3) is
+  # underpowered on a 5-min grid, and finer history can't be captured
+  # retroactively. Bounded fan-out: this only ever touches the small,
+  # human-confirmed pair set, never the wider universe.
+  hf_snapshot_interval_minutes: 1
 
 # --- Multi-venue collectors (Phase 10, v1.9) -------------------------------
 # Each venue gets its OWN TokenBucket instance (per-host rate limiters, brief

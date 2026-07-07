@@ -134,15 +134,25 @@ def tracked_kalshi_markets(conn) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore, config: dict[str, Any]) -> int:
-    """Single-tier snapshot round for Kalshi markets. Returns rows written (post-dedup)."""
-    markets = tracked_kalshi_markets(conn)
-    if not markets:
-        log.info("kalshi snapshot round: no markets", extra={"ctx": {}})
-        return 0
-    bucket_minutes = config["venues"]["kalshi"]["snapshot_interval_minutes"]
-    ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
+def tracked_kalshi_markets_by_ids(conn, condition_ids: list[str]) -> list[dict]:
+    """Phase 17 item 3: an explicit, small set of Kalshi markets (confirmed
+    cross-venue pairs) rather than every open Kalshi market."""
+    if not condition_ids:
+        return []
+    placeholders = ",".join("?" * len(condition_ids))
+    rows = conn.execute(
+        f"SELECT condition_id, venue_native_id FROM markets "
+        f"WHERE venue = 'kalshi' AND condition_id IN ({placeholders})",
+        tuple(condition_ids),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
+
+async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
+                                 markets: list[dict], ts_bucket: str) -> int:
+    """Snapshot an explicit set of Kalshi markets. Shared by snapshot_kalshi
+    (every open Kalshi market) and Phase 17 item 3's per-confirmed-pair
+    high-frequency job (a small, explicit condition_id list)."""
     rows: list[dict] = []
     for row in markets:
         ticker = row["venue_native_id"]
@@ -172,7 +182,19 @@ async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore, conf
             "asks_json": None,
             "venue": "kalshi",
         })
-    written = store.append(rows)
+    return store.append(rows)
+
+
+async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore, config: dict[str, Any]) -> int:
+    """Single-tier snapshot round for Kalshi markets. Returns rows written (post-dedup)."""
+    markets = tracked_kalshi_markets(conn)
+    if not markets:
+        log.info("kalshi snapshot round: no markets", extra={"ctx": {}})
+        return 0
+    bucket_minutes = config["venues"]["kalshi"]["snapshot_interval_minutes"]
+    ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
+
+    written = await snapshot_kalshi_markets(kalshi, store, markets, ts_bucket)
     log.info("kalshi snapshot round done",
              extra={"ctx": {"markets": len(markets), "written": written}})
     return written

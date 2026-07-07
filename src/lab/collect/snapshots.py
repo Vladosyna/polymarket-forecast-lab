@@ -31,18 +31,25 @@ def tracked_markets(conn, tier: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-async def snapshot_tier(
-    clob: ClobClient, conn, store: SnapshotStore, tier: str, config: dict[str, Any]
-) -> int:
-    """One snapshot round for a tier. Returns rows written (post-dedup)."""
-    markets = tracked_markets(conn, tier)
-    if not markets:
-        log.info("snapshot round: no markets", extra={"ctx": {"tier": tier}})
-        return 0
-    bucket_minutes = config["collect"]["snapshot_interval_minutes"][tier]
-    ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
-    depth_levels = config["collect"].get("book_depth_levels", 10)
+def tracked_markets_by_ids(conn, condition_ids: list[str]) -> list[dict]:
+    """Phase 17 item 3: an explicit, small set of markets (confirmed
+    cross-venue pairs) rather than a whole tier."""
+    if not condition_ids:
+        return []
+    placeholders = ",".join("?" * len(condition_ids))
+    rows = conn.execute(
+        f"SELECT condition_id, token_id_yes FROM markets "
+        f"WHERE condition_id IN ({placeholders}) AND token_id_yes IS NOT NULL",
+        tuple(condition_ids),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
+
+async def snapshot_markets(clob: ClobClient, store: SnapshotStore, markets: list[dict],
+                          ts_bucket: str, depth_levels: int) -> int:
+    """Snapshot an explicit set of markets. Shared by snapshot_tier (a whole
+    tier) and Phase 17 item 3's per-confirmed-pair high-frequency job (a
+    small, explicit condition_id list) -- one book-fetch loop, not two."""
     rows: list[dict] = []
     for m in markets:
         try:
@@ -68,7 +75,22 @@ async def snapshot_tier(
             "bids_json": json.dumps(book.top_levels("bid", depth_levels)),
             "asks_json": json.dumps(book.top_levels("ask", depth_levels)),
         })
-    written = store.append(rows)
+    return store.append(rows)
+
+
+async def snapshot_tier(
+    clob: ClobClient, conn, store: SnapshotStore, tier: str, config: dict[str, Any]
+) -> int:
+    """One snapshot round for a tier. Returns rows written (post-dedup)."""
+    markets = tracked_markets(conn, tier)
+    if not markets:
+        log.info("snapshot round: no markets", extra={"ctx": {"tier": tier}})
+        return 0
+    bucket_minutes = config["collect"]["snapshot_interval_minutes"][tier]
+    ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
+    depth_levels = config["collect"].get("book_depth_levels", 10)
+
+    written = await snapshot_markets(clob, store, markets, ts_bucket, depth_levels)
     log.info("snapshot round done",
              extra={"ctx": {"tier": tier, "markets": len(markets), "written": written}})
     return written

@@ -32,17 +32,19 @@ from lab.api.manifold import ManifoldClient
 from lab.api.metaculus import MetaculusClient
 from lab.collect.kalshi_collector import (
     snapshot_kalshi,
+    snapshot_kalshi_markets,
     sync_kalshi_universe,
+    tracked_kalshi_markets_by_ids,
     watch_kalshi_resolutions,
 )
 from lab.collect.manifold_collector import sync_manifold_markets
 from lab.collect.metaculus_collector import snapshot_metaculus, watch_metaculus_resolutions
 from lab.collect.resolutions import watch_resolutions
-from lab.collect.snapshots import snapshot_tier
+from lab.collect.snapshots import snapshot_markets, snapshot_tier, tracked_markets_by_ids
 from lab.collect.universe import sync_universe
 from lab.store import db
-from lab.store.snapshots import SnapshotStore
-from lab.util import PROJECT_ROOT, now_utc_iso
+from lab.store.snapshots import SnapshotStore, floor_ts_bucket
+from lab.util import PROJECT_ROOT, now_utc, now_utc_iso
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +84,51 @@ def is_paused(config: dict[str, Any]) -> bool:
         log.warning("PAUSE file present -- skipping cycle")
         return True
     return False
+
+
+async def snapshot_matched_pairs(clob: ClobClient, kalshi: KalshiClient, conn, store: SnapshotStore,
+                                config: dict[str, Any], markets_map_data: dict[str, Any] | None = None,
+                                ) -> dict[str, int]:
+    """Phase 17 item 3: confirmed cross-venue pairs only, at a much tighter
+    cadence than the tier-wide loops -- the lead-lag hypothesis (PAP H3) is
+    underpowered on a 5-min grid, and finer history can't be captured
+    retroactively. Metaculus pairs get Polymarket-side HF only -- its
+    community-prediction poll isn't an order-book snapshot and has no
+    per-market fetch to reuse here. `markets_map_data` lets callers (tests)
+    inject a fixture map directly instead of reading data/markets_map.yaml.
+    """
+    from lab.models.m7_crossvenue import load_markets_map
+
+    data = markets_map_data if markets_map_data is not None else load_markets_map()
+    confirmed = data.get("confirmed", [])
+    counts = {"poly_written": 0, "kalshi_written": 0}
+    if not confirmed:
+        return counts
+
+    poly_ids = sorted({e["condition_id"] for e in confirmed})
+    kalshi_ids = sorted({
+        db.venue_condition_id("kalshi", e["external_id"])
+        for e in confirmed if e.get("venue") == "kalshi"
+    })
+
+    bucket_minutes = config["cross_venue"]["hf_snapshot_interval_minutes"]
+    ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
+    depth_levels = config["collect"].get("book_depth_levels", 10)
+
+    poly_markets = tracked_markets_by_ids(conn, poly_ids)
+    if poly_markets:
+        counts["poly_written"] = await snapshot_markets(clob, store, poly_markets, ts_bucket, depth_levels)
+
+    if kalshi_ids:
+        kalshi_markets = tracked_kalshi_markets_by_ids(conn, kalshi_ids)
+        if kalshi_markets:
+            counts["kalshi_written"] = await snapshot_kalshi_markets(kalshi, store, kalshi_markets, ts_bucket)
+
+    log.info("matched-pair HF snapshot done", extra={"ctx": {
+        "pairs": len(confirmed), "poly_markets": len(poly_markets) if poly_ids else 0,
+        **counts,
+    }})
+    return counts
 
 
 @dataclass
@@ -184,6 +231,10 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
         if not is_paused(config):
             await sync_manifold_markets(manifold, conn, config)
 
+    async def job_snap_matched() -> None:
+        if not is_paused(config):
+            await snapshot_matched_pairs(clob, kalshi, conn, store, config)
+
     scheduler.add_job(job_kalshi_sync, "interval",
                       minutes=venues_cfg["kalshi"]["sync_interval_minutes"])
     scheduler.add_job(job_kalshi_snapshot, "interval",
@@ -196,6 +247,9 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
                       minutes=venues_cfg["metaculus"]["resolution_poll_minutes"])
     scheduler.add_job(job_manifold_sync, "interval",
                       minutes=venues_cfg["manifold"]["sync_interval_minutes"])
+    scheduler.add_job(job_snap_matched, "interval",
+                      minutes=config["cross_venue"]["hf_snapshot_interval_minutes"],
+                      max_instances=1, coalesce=True)
 
     return CollectContext(
         gamma=gamma, clob=clob, conn=conn, store=store,
@@ -211,6 +265,7 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
             "metaculus_snapshot": job_metaculus_snapshot,
             "metaculus_resolutions": job_metaculus_resolutions,
             "manifold_sync": job_manifold_sync,
+            "snap_matched": job_snap_matched,
         },
     )
 
@@ -225,7 +280,8 @@ async def _startup_collection_cycle(ctx: CollectContext) -> None:
     # inside its own collector module -- one venue's outage never blocks
     # another's startup pass.
     for name in ("kalshi_sync", "kalshi_snapshot", "kalshi_resolutions",
-                 "metaculus_snapshot", "metaculus_resolutions", "manifold_sync"):
+                 "metaculus_snapshot", "metaculus_resolutions", "manifold_sync",
+                 "snap_matched"):
         try:
             await ctx.jobs[name]()
         except Exception:
