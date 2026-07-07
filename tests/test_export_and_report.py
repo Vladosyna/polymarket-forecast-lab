@@ -223,3 +223,48 @@ def test_report_renders_wealth_null_control_band_alongside_real_curves(config):
     assert "wealth_curves.png" in html
     assert ">politics<" in html and ">sports<" in html  # real category + null control both rendered
     conn.close()
+
+
+def _seed_bucket_event_for_report(conn, event_id, model_id, ts, category="economics", true_idx=1):
+    """One resolved 3-leg negRisk-style bucketed event (Phase 16)."""
+    for i, order in enumerate([3.0, 3.5, 4.0]):
+        cid = f"{event_id}_{i}"
+        db.upsert_market(conn, {
+            "condition_id": cid, "venue": "polymarket", "venue_native_id": cid,
+            "slug": None, "question": f"Will CPI be {order}%?", "category": category,
+            "description": "d", "end_date_iso": "2026-12-31T00:00:00+00:00",
+            "token_id_yes": None, "token_id_no": None, "neg_risk": 1,
+            "active": 0, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
+            "tier": "liquid", "event_id": event_id,
+        })
+        payout = 1.0 if i == true_idx else 0.0
+        db.append_forecast(conn, {
+            "ts": ts, "condition_id": cid, "model_id": model_id,
+            "p_yes": 0.6 if i == true_idx else 0.2, "p_market_at_ts": 0.33,
+        })
+        db.record_resolution(conn, cid, ts, payout, False, "gamma")
+
+
+def test_report_renders_distributional_rps_section_only_once_threshold_cleared(config):
+    """Phase 16 acceptance: the RPS section shows INSUFFICIENT DATA below
+    config's min_bucketed_events (20) and a real table once it's cleared."""
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    ts = now_utc().isoformat(timespec="seconds")
+
+    for i in range(19):
+        _seed_bucket_event_for_report(conn, f"rpsevt{i}", "m_rps", ts)
+    conn.commit()
+    run_eval(conn, config)
+    path = render_report(conn, store, config)
+    html = path.read_text(encoding="utf-8")
+    assert "Distributional skill (RPS, secondary)" in html
+    assert "rps model" not in html  # table header absent below threshold
+
+    _seed_bucket_event_for_report(conn, "rpsevt19", "m_rps", ts)  # 20th crosses the threshold
+    conn.commit()
+    run_eval(conn, config)
+    path = render_report(conn, store, config)
+    html = path.read_text(encoding="utf-8")
+    assert "rps model" in html  # table header present once >= 20
+    conn.close()

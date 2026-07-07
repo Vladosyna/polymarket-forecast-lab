@@ -66,3 +66,57 @@ def test_run_eval_produces_rows_per_venue_and_category(config):
     assert poly_econ["n_event_clusters"] == 1
     assert poly_econ["cs_lo"] is not None and poly_econ["cs_hi"] is not None
     conn.close()
+
+
+def _seed_bucket_event(conn, event_id, model_id, ts, category="economics", true_idx=1):
+    """One resolved 3-leg negRisk-style bucketed event, bucket-orderable via
+    each question's numeric value (Phase 16). Legs are also ordinary resolved
+    forecast rows, so they double as `evaluate_model`'s binary paired input."""
+    for i, order in enumerate([3.0, 3.5, 4.0]):
+        cid = f"{event_id}_{i}"
+        db.upsert_market(conn, {
+            "condition_id": cid, "venue": "polymarket", "venue_native_id": cid,
+            "slug": None, "question": f"Will CPI be {order}%?", "category": category,
+            "description": "d", "end_date_iso": "2026-12-31T00:00:00Z",
+            "token_id_yes": None, "token_id_no": None, "neg_risk": 1,
+            "active": 0, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
+            "tier": "liquid", "event_id": event_id,
+        })
+        payout = 1.0 if i == true_idx else 0.0
+        db.append_forecast(conn, {
+            "ts": ts, "condition_id": cid, "model_id": model_id,
+            "p_yes": 0.6 if i == true_idx else 0.2, "p_market_at_ts": 0.33,
+        })
+        db.record_resolution(conn, cid, ts, payout, False, "gamma")
+
+
+def test_eval_runs_rps_columns_populate_only_with_enough_bucketed_events(config):
+    """Phase 16 wiring: rps/rps_market on an eval_runs row stay NULL below
+    config's min_bucketed_events (20), and populate once that many bucketed
+    events exist for that model/venue/category/window."""
+    conn = db.connect(config["storage"]["db_path"])
+    ts = now_utc().isoformat(timespec="seconds")
+    for i in range(19):
+        _seed_bucket_event(conn, f"evt{i}", "m0_market", ts)
+    conn.commit()
+
+    run_eval(conn, config)
+    row = conn.execute(
+        "SELECT rps, rps_market FROM eval_runs WHERE model_id='m0_market' "
+        "AND window_label='all_time' AND venue='polymarket' AND category='economics' "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row["rps"] is None
+    assert row["rps_market"] is None
+
+    _seed_bucket_event(conn, "evt19", "m0_market", ts)  # 20th event crosses the threshold
+    conn.commit()
+    run_eval(conn, config)
+    row = conn.execute(
+        "SELECT rps, rps_market FROM eval_runs WHERE model_id='m0_market' "
+        "AND window_label='all_time' AND venue='polymarket' AND category='economics' "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row["rps"] is not None
+    assert row["rps_market"] is not None
+    conn.close()

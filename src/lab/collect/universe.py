@@ -113,6 +113,24 @@ def market_row(m: GammaMarket, tier: str, category: str | None = None) -> dict[s
     }
 
 
+def _link_negrisk_legs(conn, condition_ids: list[str], title: str | None) -> None:
+    """Phase 16: chain-link a negRisk event's legs into one shared event_id
+    via the same mechanism the cross-venue matcher uses (`db.link_event`),
+    just applied at sync time to same-venue legs instead of at human-confirm
+    time. `link_event` already reuses an existing event_id from either side
+    of a pair, so calling it pairwise (leg[0]-leg[1], leg[0]-leg[2], ...)
+    correctly propagates ONE shared id across all N legs -- no new N-ary
+    linking primitive needed. This is what lets Phase 16's RPS scoring find
+    "which legs belong to one bucketed numeric question" on RESOLVED
+    forecasts later -- Gamma's own event grouping is live-only (gone once a
+    market closes), so it must be persisted here, not reconstructed after
+    the fact. Idempotent: re-sync of an already-linked event is a no-op.
+    """
+    first = condition_ids[0]
+    for other in condition_ids[1:]:
+        db.link_event(conn, first, other, title=title)
+
+
 def _depth_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> dict[str, float]:
     """condition_id -> most recent (bid_depth_usd + ask_depth_usd), Phase 17
     item 2. A market with no snapshot in the window is simply absent from the
@@ -144,6 +162,7 @@ async def sync_universe(gamma: GammaClient, conn, store: SnapshotStore,
         category = category_from_polymarket_tags(ev.tag_slugs, taxonomy)
         if category == "unknown" and ev.tag_slugs:
             log_unrecognized_tag(conn, "polymarket", ",".join(sorted(ev.tag_slugs)))
+        event_leg_ids: list[str] = []
         for m in ev.markets:
             if m.condition_id in seen_ids:
                 continue
@@ -160,6 +179,10 @@ async def sync_universe(gamma: GammaClient, conn, store: SnapshotStore,
             tier = assign_tier_with_category(effective, category, config, depth_usd=depth_usd)
             counts[tier] += 1
             db.upsert_market(conn, market_row(effective, tier, category))
+            if ev.neg_risk:
+                event_leg_ids.append(effective.condition_id)
+        if ev.neg_risk and len(event_leg_ids) >= 2:
+            _link_negrisk_legs(conn, event_leg_ids, title=ev.slug)
     conn.commit()
     log.info("universe sync complete", extra={"ctx": counts})
     return counts

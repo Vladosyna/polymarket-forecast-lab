@@ -101,6 +101,28 @@ the fitted a gets applied at forecast time.</p>
 <p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no extremization exponent fitted yet.</p>
 {% endif %}
 
+<h2>Distributional skill (RPS, secondary)</h2>
+<p class="note">Ranked Probability Score over same-venue negRisk bucketed events (Phase 16) --
+e.g. CPI ranges, temperature bands scored as one ordered distribution instead of independent
+binary legs. <b>Secondary to the binary Brier table above</b>, which stays the sole primary,
+pre-registered statistic (brief section 7's PAP is unaffected). A row appears here only once a
+model/venue/category/window has resolved at least {{ min_bucketed_events }} bucketed events --
+below that, rps stays NULL on the eval_runs row and nothing is shown for it.</p>
+{% if rps_rows %}
+<table>
+<tr><th>model</th><th>venue</th><th>category</th><th>window</th>
+<th>rps model</th><th>rps market</th><th>skill (rps)</th></tr>
+{% for r in rps_rows %}
+<tr><td>{{ r.model_id }}</td><td>{{ r.venue }}</td><td>{{ r.category }}</td><td>{{ r.window }}</td>
+<td>{{ "%.4f"|format(r.rps_model) }}</td><td>{{ "%.4f"|format(r.rps_market) }}</td>
+<td>{{ "%.4f"|format(r.skill_rps) }}</td></tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no model/venue/category/window has resolved
+{{ min_bucketed_events }} bucketed events yet.</p>
+{% endif %}
+
 <h2>Calibration</h2>
 {% if calibration_plot %}<img src="{{ calibration_plot }}" alt="reliability diagram">
 {% else %}<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no resolved forecasts to plot.</p>{% endif %}
@@ -273,6 +295,16 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
                 "n_members": n_members, "n_eff": effective_source_count(n_members, rho_bar),
             })
 
+    # Phase 16: RPS is only ever persisted on a row once evaluate_model saw
+    # >= min_bucketed_events bucketed events for it -- the gate is already
+    # baked into which rows have a non-NULL rps, nothing further to check.
+    rps_rows = [{
+        "model_id": r["model_id"], "venue": r["venue"] or "(legacy)",
+        "category": r["category"] or "(legacy)", "window": r["window_label"],
+        "rps_model": r["rps"], "rps_market": r["rps_market"],
+        "skill_rps": r["rps_market"] - r["rps"],
+    } for r in latest_eval_rows(conn) if r["rps"] is not None]
+
     calibration_plot = None
     if bins_by_model:
         plot_path = plot_reliability(bins_by_model, reports / "reliability.png")
@@ -341,6 +373,8 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         lessons=lessons_digest(conn),
         health=health,
         skill_rows=skill_rows,
+        rps_rows=rps_rows,
+        min_bucketed_events=config["eval"].get("min_bucketed_events", 20),
         pooling_rows=pooling_rows,
         calibration_plot=calibration_plot,
         clv_rows=clv_rows,

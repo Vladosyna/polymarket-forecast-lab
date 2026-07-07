@@ -143,6 +143,10 @@ eval:
   # scoring.cluster_bootstrap_ci) in case they're ever tuned independently.
   confidence_sequence:
     alpha: 0.05
+  # Phase 16 (v2.4): RPS is scored on an eval_runs row only once >= this many
+  # bucketed (negRisk, ordered-bucket) events have resolved for that
+  # model/venue/category/window -- the phase's own literal threshold.
+  min_bucketed_events: 20
 
 # --- Shadow portfolio (SIMULATION only) ----------------------------------
 shadow:

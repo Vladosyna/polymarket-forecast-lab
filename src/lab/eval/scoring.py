@@ -100,6 +100,58 @@ def paired_skill(
     )
 
 
+def rps(p_buckets: np.ndarray, y_bucket_idx: int) -> float:
+    """Ranked Probability Score (Phase 16/v2.4): `p_buckets` is a normalized
+    probability vector over K ORDERED buckets; `y_bucket_idx` is the index of
+    the bucket that actually resolved true.
+
+    For K=2 this is IDENTICAL to the Brier score of the first bucket: both
+    the forecast and observed step-function CDFs reach exactly 1 at the
+    final bucket by construction, so the last squared term is always
+    exactly 0 -- there is no separate "reduces to" approximation, it's the
+    same number (tested directly in test_distributional.py).
+    """
+    p_buckets = np.asarray(p_buckets, dtype=float)
+    k = len(p_buckets)
+    cdf_f = np.cumsum(p_buckets)
+    cdf_o = np.zeros(k)
+    cdf_o[y_bucket_idx:] = 1.0
+    return float(np.sum((cdf_f - cdf_o) ** 2) / (k - 1))
+
+
+@dataclass
+class RpsSkillResult:
+    n: int
+    rps_model: float
+    rps_market: float
+    skill_rps: float
+    skill_rps_ci_lo: float
+    skill_rps_ci_hi: float
+
+
+def paired_rps_skill(events: list[dict], iterations: int = 2000) -> RpsSkillResult:
+    """events: `eval/distributional.py::bucketed_resolved_events`'s output --
+    one row per bucketed event, each already its own independent cluster (no
+    separate event-clustering step needed here, unlike `paired_skill`'s
+    per-forecast rows which need clustering by event_id -- a bucketed event
+    IS the row)."""
+    from lab.eval.distributional import implied_cdf
+
+    rps_model = np.array([rps(implied_cdf(e["p_model"]), e["y_bucket_idx"]) for e in events])
+    rps_market = np.array([rps(implied_cdf(e["p_market"]), e["y_bucket_idx"]) for e in events])
+    diffs = rps_market - rps_model  # positive = model beats market
+    event_ids = np.array([e["event_id"] for e in events])
+    ci_lo, ci_hi = cluster_bootstrap_ci(diffs, event_ids, iterations=iterations)
+    return RpsSkillResult(
+        n=len(events),
+        rps_model=float(np.mean(rps_model)),
+        rps_market=float(np.mean(rps_market)),
+        skill_rps=float(np.mean(diffs)),
+        skill_rps_ci_lo=ci_lo,
+        skill_rps_ci_hi=ci_hi,
+    )
+
+
 def honesty_tier(n_markets: int, n_insufficient: int = 200, n_preliminary: int = 500) -> str:
     if n_markets < n_insufficient:
         return "INSUFFICIENT DATA"

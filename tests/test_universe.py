@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
-from lab.api.gamma import GammaMarket
-from lab.collect.universe import _depth_lookup, assign_tier, assign_tier_with_category, is_sub_24h_crypto
+from lab.api.gamma import GammaEvent, GammaMarket
+from lab.collect.universe import (
+    _depth_lookup,
+    assign_tier,
+    assign_tier_with_category,
+    is_sub_24h_crypto,
+    sync_universe,
+)
+from lab.store import db
 from lab.store.snapshots import SnapshotStore
 from lab.util import load_config
 
@@ -104,3 +112,57 @@ def test_sub_24h_crypto_pulse_detected():
     )
     assert is_sub_24h_crypto(pulse, NOW)
     assert not is_sub_24h_crypto(_market(), NOW)  # politics long-horizon
+
+
+# --- Phase 16: negRisk event_id linking -------------------------------------
+
+class FakeGammaClient:
+    def __init__(self, events: list[GammaEvent]):
+        self._events = events
+
+    async def iter_events(self, **filters) -> list[GammaEvent]:
+        return self._events
+
+
+def _leg(cid, **kwargs) -> GammaMarket:
+    return _market(conditionId=cid, **kwargs)
+
+
+def test_sync_universe_links_negrisk_legs_into_one_event_id(tmp_path):
+    legs = [_leg("0xa"), _leg("0xb"), _leg("0xc")]
+    event = GammaEvent.model_validate({
+        "slug": "cpi-range-event", "negRisk": True, "tags": [],
+        "markets": [m.model_dump(by_alias=True) for m in legs],
+    })
+    gamma = FakeGammaClient([event])
+    conn = db.connect(tmp_path / "lab.db")
+    store = SnapshotStore(tmp_path / "snapshots")
+
+    asyncio.run(sync_universe(gamma, conn, store, CONFIG))
+
+    rows = conn.execute(
+        "SELECT condition_id, event_id FROM markets WHERE condition_id IN ('0xa','0xb','0xc')"
+    ).fetchall()
+    event_ids = {r["event_id"] for r in rows}
+    assert len(event_ids) == 1
+    assert None not in event_ids
+    conn.close()
+
+
+def test_sync_universe_does_not_link_non_negrisk_event_legs(tmp_path):
+    legs = [_leg("0xd"), _leg("0xe")]
+    event = GammaEvent.model_validate({
+        "slug": "unrelated-event", "negRisk": False, "tags": [],
+        "markets": [m.model_dump(by_alias=True) for m in legs],
+    })
+    gamma = FakeGammaClient([event])
+    conn = db.connect(tmp_path / "lab.db")
+    store = SnapshotStore(tmp_path / "snapshots")
+
+    asyncio.run(sync_universe(gamma, conn, store, CONFIG))
+
+    rows = conn.execute(
+        "SELECT condition_id, event_id FROM markets WHERE condition_id IN ('0xd','0xe')"
+    ).fetchall()
+    assert all(r["event_id"] is None for r in rows)
+    conn.close()

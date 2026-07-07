@@ -19,7 +19,8 @@ import numpy as np
 
 from lab.eval.anytime import confidence_sequence
 from lab.eval.calibration import calibration_bins
-from lab.eval.scoring import brier, paired_skill
+from lab.eval.distributional import bucketed_resolved_events
+from lab.eval.scoring import brier, paired_rps_skill, paired_skill
 from lab.eval.stratified import precision_weighted_skill
 from lab.store import db as dbmod
 from lab.util import now_utc, now_utc_iso
@@ -112,7 +113,7 @@ def _per_cluster_diffs_in_resolution_order(
 
 def evaluate_model(
     conn, model_id: str, window_label: str, rows: list[dict], config: dict[str, Any],
-    venue: str | None = None, category: str | None = None,
+    venue: str | None = None, category: str | None = None, window_days: int | None = None,
 ) -> dict[str, Any] | None:
     if not rows:
         return None
@@ -138,24 +139,52 @@ def evaluate_model(
         diffs, p_market, cluster_ids, iterations=config["eval"]["bootstrap_iterations"]
     )
 
+    # Phase 16 (v2.4): RPS is a SECONDARY outcome on this same eval_runs row --
+    # binary Brier above stays the sole primary, pre-registered statistic.
+    # Bucketed events naturally only ever exist for the venue that carries
+    # negRisk groupings (Polymarket); a cross-venue confirmed pair's synthetic
+    # external-venue condition_id never accrues its own forecasts (M7 pools
+    # external prices as an INPUT to the Polymarket-side forecast, it never
+    # writes one for the external leg), so it can never satisfy the >=2-legs
+    # check below -- no explicit venue filter needed to keep the two event_id
+    # use-cases from colliding.
+    # ALL_CATEGORIES/null_control rows pool across every category (no single
+    # category to filter bucketed events to); null_control specifically
+    # doesn't further restrict to sports-only bucketed events here -- a
+    # stated simplification, since RPS is already a secondary metric and
+    # threading null-control condition_ids through this pipeline too would
+    # add real machinery for a case that will be rare (few sports events are
+    # themselves bucketed numeric questions).
+    bucketed_category = None if category == ALL_CATEGORIES else category
+    rps_result = None
+    n_bucketed = config["eval"].get("min_bucketed_events", 20)
+    events = bucketed_resolved_events(conn, model_id, category=bucketed_category,
+                                      window_days=window_days)
+    if len(events) >= n_bucketed:
+        rps_result = paired_rps_skill(events, iterations=config["eval"]["bootstrap_iterations"])
+
     conn.execute(
         """
         INSERT INTO eval_runs (ts, model_id, window_label, n, brier, brier_market,
                                skill, skill_ci_lo, skill_ci_hi, log_loss,
                                log_loss_market, calibration_json,
                                venue, category, skill_pw, skill_pw_ci_lo, skill_pw_ci_hi,
-                               n_strata_pw, cs_lo, cs_hi, cs_covers_zero, n_event_clusters)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               n_strata_pw, cs_lo, cs_hi, cs_covers_zero, n_event_clusters,
+                               rps, rps_market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (now_utc_iso(), model_id, window_label, result.n, result.brier_model,
          result.brier_market, result.skill, result.skill_ci_lo, result.skill_ci_hi,
          result.log_loss_model, result.log_loss_market, json.dumps(bins),
          venue, category, stratified.skill_pw, stratified.ci_lo, stratified.ci_hi,
-         stratified.n_strata, cs.lo, cs.hi, int(cs.covers_zero), result.n_markets),
+         stratified.n_strata, cs.lo, cs.hi, int(cs.covers_zero), result.n_markets,
+         rps_result.rps_model if rps_result else None,
+         rps_result.rps_market if rps_result else None),
     )
     return {
         "model_id": model_id, "window": window_label, "venue": venue, "category": category,
         "result": result, "bins": bins, "cs": cs, "stratified": stratified,
+        "rps_result": rps_result, "n_bucketed_events": len(events),
     }
 
 
@@ -187,7 +216,8 @@ def run_eval(conn, config: dict[str, Any]) -> list[dict[str, Any]]:
                         null_control_ids=nc_ids,
                     )
                     summary = evaluate_model(
-                        conn, model_id, label, rows, config, venue=venue, category=category
+                        conn, model_id, label, rows, config, venue=venue, category=category,
+                        window_days=days,
                     )
                     if summary:
                         out.append(summary)
@@ -199,19 +229,21 @@ def run_eval(conn, config: dict[str, Any]) -> list[dict[str, Any]]:
                     conn, model_id, days, venue=venue, null_control_ids=nc_ids,
                 )
                 summary = evaluate_model(
-                    conn, model_id, label, rows, config, venue=venue, category=ALL_CATEGORIES
+                    conn, model_id, label, rows, config, venue=venue, category=ALL_CATEGORIES,
+                    window_days=days,
                 )
                 if summary:
                     out.append(summary)
             # Null control scored separately, same math, shown side by side --
-            # one venue-scoped sample per forecastable venue.
+            # one venue-scoped sample per forecastable venue. window_days=None
+            # (all-time) since nc_rows above isn't window-scoped either.
             nc_rows = resolved_forecast_rows(
                 conn, model_id, None, venue=venue, null_control_ids=nc_ids,
                 invert_null_control=True,
             )
             nc_summary = evaluate_model(
                 conn, model_id, "null_control", nc_rows, config,
-                venue=venue, category=ALL_CATEGORIES,
+                venue=venue, category=ALL_CATEGORIES, window_days=None,
             )
             if nc_summary:
                 out.append(nc_summary)

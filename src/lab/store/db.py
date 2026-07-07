@@ -281,6 +281,26 @@ def migrate_eval_measurement_upgrade(conn: sqlite3.Connection) -> dict[str, bool
     return applied
 
 
+def migrate_distributional_scoring(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Idempotent v2.4 migration (Phase 16): ALTER `eval_runs` with nullable
+    RPS columns. RPS is a secondary outcome on the SAME row `evaluate_model`
+    already writes (venue/category/window) -- not a new table -- populated
+    only for (model, venue, category, window) combinations with enough
+    resolved bucketed events; NULL everywhere else, same convention as every
+    other optional metric column already in this table.
+    """
+    applied = {"rps_column": False, "rps_market_column": False}
+    for key, (column, sql_type) in {
+        "rps_column": ("rps", "REAL"),
+        "rps_market_column": ("rps_market", "REAL"),
+    }.items():
+        if not _column_exists(conn, "eval_runs", column):
+            conn.execute(f"ALTER TABLE eval_runs ADD COLUMN {column} {sql_type}")
+            applied[key] = True
+    conn.commit()
+    return applied
+
+
 class ForecastLedgerViolation(RuntimeError):
     """Raised on any attempt to UPDATE or DELETE a forecast row."""
 
@@ -307,6 +327,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     migrate_multi_venue(conn)
     migrate_eval_measurement_upgrade(conn)
+    migrate_distributional_scoring(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )
