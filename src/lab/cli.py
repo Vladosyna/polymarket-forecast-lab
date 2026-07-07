@@ -68,6 +68,7 @@ def sync() -> None:
     from lab.api.http import TokenBucket
     from lab.collect.universe import sync_universe
     from lab.store import db
+    from lab.store.snapshots import SnapshotStore
 
     config = load_config()
 
@@ -78,8 +79,9 @@ def sync() -> None:
         )
         gamma = GammaClient(bucket)
         conn = db.connect(config["storage"]["db_path"])
+        store = SnapshotStore(config["storage"]["snapshots_dir"])
         try:
-            return await sync_universe(gamma, conn, config)
+            return await sync_universe(gamma, conn, store, config)
         finally:
             await gamma.aclose()
             conn.close()

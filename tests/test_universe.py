@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from lab.api.gamma import GammaMarket
-from lab.collect.universe import assign_tier, is_sub_24h_crypto
+from lab.collect.universe import _depth_lookup, assign_tier, assign_tier_with_category, is_sub_24h_crypto
+from lab.store.snapshots import SnapshotStore
 from lab.util import load_config
 
 CONFIG = load_config()
@@ -51,6 +52,47 @@ def test_no_live_book_is_ignored():
 def test_crypto_is_ignored():
     m = _market(category="Crypto", question="Will Bitcoin close above 200k?")
     assert assign_tier(m, CONFIG) == "ignored"
+
+
+def test_depth_based_tiering_overrides_liquidity_and_volume():
+    """Phase 17 item 2: once a snapshot exists, real order-book depth governs
+    tiering -- not Gamma's self-reported liquidity_num/volume_num."""
+    m = _market()  # liquidityNum/volumeNum say "liquid" via the fallback path
+    # Thin real depth: same market tiers down to 'tail' or 'ignored' on depth.
+    assert assign_tier_with_category(m, "politics", CONFIG, depth_usd=50.0) == "tail"
+    assert assign_tier_with_category(m, "politics", CONFIG, depth_usd=1.0) == "ignored"
+    assert assign_tier_with_category(m, "politics", CONFIG, depth_usd=300.0) == "liquid"
+
+    # The reverse: thin Gamma-reported liquidity/volume, but real depth is deep.
+    thin = _market(liquidityNum=10.0, volumeNum=10.0)
+    assert assign_tier_with_category(thin, "politics", CONFIG, depth_usd=500.0) == "liquid"
+
+
+def test_depth_none_falls_back_to_liquidity_and_volume():
+    """No snapshot yet (brand-new market) -- depth_usd=None uses the
+    pre-Phase-17 liquidity/volume path unchanged."""
+    assert assign_tier_with_category(_market(), "politics", CONFIG, depth_usd=None) == "liquid"
+    assert assign_tier_with_category(
+        _market(liquidityNum=2000.0, volumeNum=8000.0), "politics", CONFIG, depth_usd=None
+    ) == "tail"
+    assert assign_tier_with_category(
+        _market(liquidityNum=10.0, volumeNum=10.0), "politics", CONFIG, depth_usd=None
+    ) == "ignored"
+
+
+def test_depth_lookup_uses_latest_snapshot_bid_plus_ask(tmp_path):
+    store = SnapshotStore(tmp_path / "snapshots")
+    ts_old = NOW.replace(hour=1).isoformat(timespec="seconds")
+    ts_new = NOW.replace(hour=11).isoformat(timespec="seconds")
+    store.append([
+        {"ts": ts_old, "condition_id": "0x1", "bid_depth_usd": 10.0, "ask_depth_usd": 10.0},
+        {"ts": ts_new, "condition_id": "0x1", "bid_depth_usd": 150.0, "ask_depth_usd": 200.0},
+        {"ts": ts_new, "condition_id": "0x2", "bid_depth_usd": None, "ask_depth_usd": 5.0},
+    ])
+    lookup = _depth_lookup(store, NOW + timedelta(hours=1))
+    assert lookup["0x1"] == 350.0  # latest snapshot wins, not the older one
+    assert lookup["0x2"] == 5.0    # null treated as 0, not dropped
+    assert "0x3" not in lookup     # no snapshot at all -> absent, not zero
 
 
 def test_sub_24h_crypto_pulse_detected():

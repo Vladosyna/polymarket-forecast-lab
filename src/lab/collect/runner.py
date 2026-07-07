@@ -121,7 +121,7 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
 
     async def job_sync() -> None:
         if not is_paused(config):
-            await sync_universe(gamma, conn, config)
+            await sync_universe(gamma, conn, store, config)
 
     async def job_snap_liquid() -> None:
         if not is_paused(config):

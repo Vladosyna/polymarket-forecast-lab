@@ -9,16 +9,29 @@ universe:
   binary_only: true
   # Skip sub-24h crypto "pulse" markets entirely (brief Phase 1).
   skip_sub_24h_crypto: true
-  # Tiering thresholds applied to Gamma liquidity/volume fields (USD).
-  # Liquid thresholds are set so the liquid tier stays ~400 markets: a 5-min
-  # snapshot round must finish well inside the cadence at 5 req/s.
+  # Tiering thresholds applied to Gamma liquidity/volume fields (USD). Used
+  # only as the bootstrap path for a market with no snapshot yet -- once one
+  # exists, min_depth_usd below governs (Phase 17 item 2). Liquid thresholds
+  # are set so the liquid tier stays ~400 markets: a 5-min snapshot round must
+  # finish well inside the cadence at 5 req/s.
   tiers:
     liquid:
       min_liquidity: 100000
       min_volume: 1000000
+      # Phase 17 item 2: our own collected order-book depth (bid_depth_usd +
+      # ask_depth_usd from the latest snapshot), not Gamma's self-reported
+      # liquidity_num -- and never volume_num, which is wash-trading-
+      # contaminated (concentrated in sports) and kept as a covariate only.
+      # Calibrated 2026-07-07 from the live snapshot depth distribution:
+      # currently-liquid markets had median depth ~$1982, p25 ~$381; this sits
+      # below p25 so the tier doesn't shrink sharply on cutover.
+      min_depth_usd: 250
     tail:
       min_liquidity: 1000
       min_volume: 5000
+      # Currently-tail markets had median depth ~$4, p75 ~$70; this sits
+      # comfortably above the tail median without reclassifying most of it.
+      min_depth_usd: 10
     # Anything below tail thresholds -> 'ignored'.
   # Priority categories for forecasting (brief section 3 universe policy).
   priority_categories:

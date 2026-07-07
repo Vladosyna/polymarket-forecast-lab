@@ -21,6 +21,7 @@ from lab.collect.categories import (
     log_unrecognized_tag,
 )
 from lab.store import db
+from lab.store.snapshots import SnapshotStore, utc_date_str
 from lab.util import now_utc
 
 log = logging.getLogger(__name__)
@@ -61,14 +62,29 @@ def assign_tier(m: GammaMarket, config: dict[str, Any]) -> str:
     return assign_tier_with_category(m, _category(m), config)
 
 
-def assign_tier_with_category(m: GammaMarket, category: str, config: dict[str, Any]) -> str:
+def assign_tier_with_category(m: GammaMarket, category: str, config: dict[str, Any],
+                              depth_usd: float | None = None) -> str:
+    """Phase 17 item 2: once we have our own collected order-book depth for a
+    market, tier on THAT (depth_usd = bid_depth_usd + ask_depth_usd from the
+    latest snapshot) instead of Gamma's self-reported liquidity_num/volume_num
+    -- volume in particular is wash-trading-contaminated (concentrated in
+    sports) and was never a sound tiering signal, just the only one available
+    pre-collection. A brand-new market has no snapshot yet (depth_usd is
+    None); it falls back to the liquidity/volume path below until one exists.
+    """
     if m.enable_order_book is False or m.accepting_orders is False:
         return "ignored"
     if category in set(config["universe"]["excluded_categories"]) or _looks_crypto(m):
         return "ignored"
+    tiers = config["universe"]["tiers"]
+    if depth_usd is not None:
+        if depth_usd >= tiers["liquid"]["min_depth_usd"]:
+            return "liquid"
+        if depth_usd >= tiers["tail"]["min_depth_usd"]:
+            return "tail"
+        return "ignored"
     liq = m.liquidity_num or 0.0
     vol = m.volume_num or 0.0
-    tiers = config["universe"]["tiers"]
     if liq >= tiers["liquid"]["min_liquidity"] and vol >= tiers["liquid"]["min_volume"]:
         return "liquid"
     if liq >= tiers["tail"]["min_liquidity"] and vol >= tiers["tail"]["min_volume"]:
@@ -90,12 +106,28 @@ def market_row(m: GammaMarket, tier: str, category: str | None = None) -> dict[s
         "active": int(bool(m.active)),
         "closed": int(bool(m.closed)),
         "liquidity_num": m.liquidity_num,
+        # Covariate only, not used for tiering (Phase 17 item 2): Gamma's
+        # volume_num is wash-trading-contaminated, concentrated in sports.
         "volume_num": m.volume_num,
         "tier": tier,
     }
 
 
-async def sync_universe(gamma: GammaClient, conn, config: dict[str, Any]) -> dict[str, int]:
+def _depth_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> dict[str, float]:
+    """condition_id -> most recent (bid_depth_usd + ask_depth_usd), Phase 17
+    item 2. A market with no snapshot in the window is simply absent from the
+    returned dict -- callers treat that as "no depth data yet" (falls back to
+    liquidity/volume tiering), not as zero depth."""
+    dates = [utc_date_str(now - timedelta(days=d)) for d in range(days_back + 1)]
+    df = store.latest_per_market(dates)
+    if df.is_empty():
+        return {}
+    depth = df["bid_depth_usd"].fill_null(0) + df["ask_depth_usd"].fill_null(0)
+    return dict(zip(df["condition_id"].to_list(), depth.to_list()))
+
+
+async def sync_universe(gamma: GammaClient, conn, store: SnapshotStore,
+                        config: dict[str, Any]) -> dict[str, int]:
     """Fetch active events (markets + tags) from Gamma, tier and upsert (idempotent).
 
     Events are the source of truth because market-level `category` is no
@@ -103,6 +135,7 @@ async def sync_universe(gamma: GammaClient, conn, config: dict[str, Any]) -> dic
     """
     now = now_utc()
     taxonomy = load_categories()
+    depth_by_market = _depth_lookup(store, now)
     events = await gamma.iter_events(active="true", closed="false")
     counts = {"events": len(events), "seen": 0, "binary": 0,
               "liquid": 0, "tail": 0, "ignored": 0, "skipped": 0}
@@ -123,7 +156,8 @@ async def sync_universe(gamma: GammaClient, conn, config: dict[str, Any]) -> dic
                 counts["skipped"] += 1
                 continue
             effective = m if not ev.neg_risk else m.model_copy(update={"neg_risk": True})
-            tier = assign_tier_with_category(effective, category, config)
+            depth_usd = depth_by_market.get(effective.condition_id)
+            tier = assign_tier_with_category(effective, category, config, depth_usd=depth_usd)
             counts[tier] += 1
             db.upsert_market(conn, market_row(effective, tier, category))
     conn.commit()
