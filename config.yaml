@@ -242,6 +242,11 @@ cross_venue:
   # few events further down each category's list. Doubling casts a wider net
   # per run at a small, LLM-budget-capped cost (guardrail 10).
   propose_top_k: 40        # candidate liquid-tier, priority-category markets per `lab map propose` run
+  # Deliberately its OWN budget, not venues.kalshi.max_series_per_sync --
+  # that one's tuned for the hourly universe-sync politeness budget; propose
+  # runs weekly (propose_cron below) and can afford to check more series per
+  # priority category each time.
+  propose_series_per_category: 40
   propose_cron: "0 5 * * 1" # weekly, Monday 05:00 UTC -- orchestrator runs `lab map propose`
                              # automatically. It only ever appends to `proposed`; a human still
                              # must run `lab map confirm` before a pair feeds M7 (propose-then-

@@ -278,8 +278,10 @@ def write_m7_forecasts(conn, store, results: dict[str, ForecastResult],
     return written
 
 
-async def kalshi_propose_candidates(kalshi, config: dict[str, Any]) -> list[Any]:
-    """Category-scoped Kalshi candidate pool for `lab map propose`.
+async def kalshi_propose_candidates(kalshi, config: dict[str, Any]) -> dict[str, list[Any]]:
+    """Category-scoped Kalshi candidate pools for `lab map propose`, keyed by
+    OUR internal category (economics/weather/politics/...), not returned as
+    one flat list.
 
     A bare `open_markets(limit=200)` (no filter) pulls whatever Kalshi
     considers "open" globally -- verified live to be dominated by garbled
@@ -288,27 +290,30 @@ async def kalshi_propose_candidates(kalshi, config: dict[str, Any]) -> list[Any]
     lists. Reuses the SAME series_by_category -> markets_for_series flow
     collect/kalshi_collector.py already uses for universe sync, scoped to
     only the Kalshi category names whose categories.yaml mapping lands in
-    our own priority_categories (brief section 3 P1-P3) -- everything else
-    (Sports, Entertainment, World) is out of scope for matching against our
-    economics/weather/politics priority markets and would just waste LLM
-    calls on irrelevant candidates.
+    our own priority_categories (brief section 3 P1-P4).
+
+    Returning a flat list (as this function originally did) meant
+    propose_matches showed EVERY Polymarket market the ENTIRE candidate pool
+    regardless of category -- a weather market got shown politics and
+    entertainment candidates too, diluting the prompt with obviously-
+    irrelevant options and wasting most of each call's tokens. Keying by our
+    own category lets propose_matches show each market only its own
+    category's candidates (see there).
+
+    Uses its own `propose_series_per_category` budget rather than
+    venues.kalshi.max_series_per_sync -- that config is tuned for the hourly
+    universe-sync's politeness budget; propose runs weekly (propose_cron)
+    and can afford to look at more series per category.
     """
     from lab.collect.categories import load_categories
 
     taxonomy = load_categories()
     priority = set(config["universe"]["priority_categories"])
-    kalshi_categories = [k for k, v in taxonomy.get("kalshi_series", {}).items() if v in priority]
-    max_series = config["venues"]["kalshi"].get("max_series_per_sync", 40)
-    # Per-category share, same fix as the Polymarket-side selection below:
-    # verified live that "Economics" alone has 601 series on Kalshi (vs 40
-    # for the whole pass) -- a single global counter across categories meant
-    # every prior live run in this session silently fetched ONLY Economics
-    # series and never reached Weather/Politics/Elections/World/Entertainment
-    # at all, despite the category filter itself working correctly.
-    per_cat_series = max(1, max_series // len(kalshi_categories)) if kalshi_categories else 0
+    kalshi_to_ours = {k: v for k, v in taxonomy.get("kalshi_series", {}).items() if v in priority}
+    per_cat_series = int(config["cross_venue"].get("propose_series_per_category", 40))
 
-    candidates: list[Any] = []
-    for kalshi_category in kalshi_categories:
+    candidates: dict[str, list[Any]] = {cat: [] for cat in priority}
+    for kalshi_category, our_category in kalshi_to_ours.items():
         try:
             series_list = await kalshi.series_by_category(kalshi_category)
         except Exception:
@@ -324,10 +329,12 @@ async def kalshi_propose_candidates(kalshi, config: dict[str, Any]) -> list[Any]
                 continue
             series_seen += 1
             try:
-                candidates.extend(await kalshi.markets_for_series(ticker, status="open"))
+                markets = await kalshi.markets_for_series(ticker, status="open")
             except Exception:
                 log.warning("m7 propose: markets fetch failed",
                            extra={"ctx": {"series_ticker": ticker}})
+                continue
+            candidates[our_category].extend(markets)
     return candidates
 
 
@@ -386,7 +393,7 @@ def propose_matches(conn, config: dict[str, Any], kalshi_candidates, llm,
     for cat in cats:
         raw = conn.execute(
             """
-            SELECT condition_id, question, event_id FROM markets
+            SELECT condition_id, question, event_id, category FROM markets
             WHERE tier = 'liquid' AND category = ? AND active = 1 AND closed = 0
             ORDER BY volume_num DESC LIMIT ?
             """,
@@ -406,7 +413,13 @@ def propose_matches(conn, config: dict[str, Any], kalshi_candidates, llm,
     for m in rows:
         if (m["condition_id"], "kalshi") in already or not m["question"]:
             continue
-        candidates = [{"external_id": k.ticker, "title": k.title or ""} for k in kalshi_candidates]
+        # Only THIS market's own category's Kalshi candidates -- showing a
+        # weather market politics/entertainment candidates too was diluting
+        # the LLM's judgment and burning tokens on obviously-irrelevant
+        # options (kalshi_candidates is keyed by our internal category, see
+        # kalshi_propose_candidates).
+        cat_candidates = kalshi_candidates.get(m["category"], [])
+        candidates = [{"external_id": k.ticker, "title": k.title or ""} for k in cat_candidates]
         if not candidates:
             continue
         text, _usage = llm.complete(

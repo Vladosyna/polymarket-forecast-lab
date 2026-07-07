@@ -399,11 +399,15 @@ def test_kalshi_propose_candidates_only_queries_priority_category_series(config)
     # politics, geopolitics, entertainment) -- Sports is the one Kalshi
     # category with no priority-category mapping (sports is the null
     # control, never a forecast target), so it's the one that must be
-    # excluded here.
-    tickers = {c.ticker for c in candidates}
-    assert tickers == {"FEDMAR", "PRES28", "TEMPNYC", "SENATE28", "UN1", "OSCAR"}
-    assert "KXMVE1" not in tickers  # the real garbled sports-combo ticker this fix excludes
+    # excluded here. Result is keyed by OUR internal category, not flat.
+    all_tickers = {c.ticker for cat_list in candidates.values() for c in cat_list}
+    assert all_tickers == {"FEDMAR", "PRES28", "TEMPNYC", "SENATE28", "UN1", "OSCAR"}
+    assert "KXMVE1" not in all_tickers  # the real garbled sports-combo ticker this fix excludes
     assert "Sports" not in kalshi.categories_queried
+    # Politics AND Elections both map to "politics" -- both contribute here.
+    assert {c.ticker for c in candidates["politics"]} == {"PRES28", "SENATE28"}
+    assert {c.ticker for c in candidates["economics"]} == {"FEDMAR"}
+    assert {c.ticker for c in candidates["weather"]} == {"TEMPNYC"}
 
 
 class RecordingFakeLlm:
@@ -448,7 +452,8 @@ def test_propose_matches_gives_every_priority_category_a_fair_share(config, tmp_
     save_markets_map({"confirmed": [], "proposed": []}, map_path)
 
     llm = RecordingFakeLlm()
-    candidates = [FakeKalshiCandidate("X", "irrelevant")]
+    candidates = {"politics": [FakeKalshiCandidate("X", "irrelevant")],
+                 "weather": [FakeKalshiCandidate("Y", "irrelevant")]}
     propose_matches(conn, config, candidates, llm, markets_map_path=map_path)
 
     assert len(llm.prompts) == 4  # 2 politics + 2 weather, not 4 politics
@@ -489,7 +494,7 @@ def test_propose_matches_dedupes_by_event_within_a_category(config, tmp_path):
     save_markets_map({"confirmed": [], "proposed": []}, map_path)
 
     llm = RecordingFakeLlm()
-    candidates = [FakeKalshiCandidate("X", "irrelevant")]
+    candidates = {"economics": [FakeKalshiCandidate("X", "irrelevant")]}
     propose_matches(conn, config, candidates, llm, markets_map_path=map_path)
 
     assert len(llm.prompts) == 2
@@ -501,14 +506,15 @@ def test_propose_matches_dedupes_by_event_within_a_category(config, tmp_path):
 def test_kalshi_propose_candidates_gives_every_category_a_series_share(config):
     """Real live bug found via the user's own question: a single global
     series_seen counter across ALL Kalshi categories meant one category with
-    many series (Economics has 601 on real Kalshi, vs max_series_per_sync=40
-    total) silently consumed the entire budget, so every prior live run in
-    this session only ever fetched Economics series -- Weather/Politics/
-    Elections/World/Entertainment got zero, despite the category filter
-    itself working. Each category must get its own guaranteed series share."""
+    many series (Economics has 601 on real Kalshi) silently consumed the
+    entire budget, so every prior live run in this session only ever fetched
+    Economics series -- Weather/Politics/Elections/World/Entertainment got
+    zero, despite the category filter itself working. Each Kalshi category
+    gets its own guaranteed series share (propose_series_per_category),
+    decoupled from the hourly universe-sync's max_series_per_sync."""
     kalshi = FakeKalshiCategoryClient(
         series_by_cat={
-            # Economics alone has more series than the entire max_series budget.
+            # Economics alone has more series than the whole per-category cap.
             "Economics": [{"ticker": f"ECON-{i}"} for i in range(20)],
             "Politics": [{"ticker": "POL-SERIES"}],
             "Climate and Weather": [{"ticker": "WX-SERIES"}],
@@ -520,17 +526,43 @@ def test_kalshi_propose_candidates_gives_every_category_a_series_share(config):
         },
     )
     config["universe"]["priority_categories"] = ["economics", "politics", "weather"]
-    # "Elections" also maps to politics in categories.yaml, so 4 real Kalshi
-    # categories are in scope here (Economics, Climate and Weather, Politics,
-    # Elections) -> max_series=8 gives an even 2-per-category share.
-    config["venues"]["kalshi"]["max_series_per_sync"] = 8
+    config["cross_venue"]["propose_series_per_category"] = 2
 
     candidates = asyncio.run(kalshi_propose_candidates(kalshi, config))
 
-    tickers = {c.ticker for c in candidates}
-    assert "PRES28" in tickers  # would be starved to zero before this fix
-    assert "TEMPNYC" in tickers  # would be starved to zero before this fix
-    assert sum(t.startswith("E") and t[1:].isdigit() for t in tickers) == 2  # Economics capped too
+    all_tickers = {c.ticker for cat_list in candidates.values() for c in cat_list}
+    assert "PRES28" in all_tickers  # would be starved to zero before this fix
+    assert "TEMPNYC" in all_tickers  # would be starved to zero before this fix
+    assert len(candidates["economics"]) == 2  # Economics capped too, not all 20
+
+
+def test_propose_matches_never_shows_a_market_another_categorys_candidates(config, tmp_path):
+    """The bug the user suspected: kalshi_candidates used to be one flat list
+    shown to EVERY Polymarket market regardless of category -- a weather
+    market got shown politics/entertainment candidates too, diluting the
+    LLM's judgment and burning tokens on options that can never be a real
+    match. Candidates must be scoped to each market's own category."""
+    conn = db.connect(config["storage"]["db_path"])
+    conn.execute(
+        """INSERT INTO markets (condition_id, slug, question, category, description,
+                                end_date_iso, token_id_yes, tier, active, closed,
+                                liquidity_num, volume_num)
+           VALUES ('0xwx', 'wx', 'Will it rain in NYC?', 'weather', 'd',
+                   '2026-12-31T00:00:00+00:00', 'tok', 'liquid', 1, 0, 200000, 5000000)"""
+    )
+    conn.commit()
+    config["universe"]["priority_categories"] = ["weather"]
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+
+    llm = RecordingFakeLlm()
+    # Politics candidates present, but NOT under "weather" -- must never
+    # reach the weather market's prompt.
+    candidates = {"politics": [FakeKalshiCandidate("PRES28", "2028 presidential race")]}
+    propose_matches(conn, config, candidates, llm, markets_map_path=map_path)
+
+    assert len(llm.prompts) == 0  # no weather candidates at all -> market skipped, LLM never called
+    conn.close()
 
 
 def test_propose_matches_appends_to_proposed_not_confirmed(config, tmp_path):
@@ -548,7 +580,7 @@ def test_propose_matches_appends_to_proposed_not_confirmed(config, tmp_path):
 
     llm = FakeLlm({"matches": [{"external_id": "FEDMAR", "confidence": 0.85,
                                "rationale": "same FOMC meeting"}]})
-    candidates = [FakeKalshiCandidate("FEDMAR", "Fed cuts rates in March FOMC meeting")]
+    candidates = {"economics": [FakeKalshiCandidate("FEDMAR", "Fed cuts rates in March FOMC meeting")]}
 
     proposals = propose_matches(conn, config, candidates, llm, markets_map_path=map_path)
     assert len(proposals) == 1
@@ -578,7 +610,7 @@ def test_propose_matches_skips_already_proposed_pair(config, tmp_path):
         map_path,
     )
     llm = FakeLlm({"matches": [{"external_id": "FEDMAR", "confidence": 0.85, "rationale": "x"}]})
-    candidates = [FakeKalshiCandidate("FEDMAR", "Fed cuts rates in March FOMC meeting")]
+    candidates = {"economics": [FakeKalshiCandidate("FEDMAR", "Fed cuts rates in March FOMC meeting")]}
 
     proposals = propose_matches(conn, config, candidates, llm, markets_map_path=map_path)
     assert proposals == []  # already proposed -- LLM not asked to re-propose it
