@@ -28,14 +28,29 @@ log = logging.getLogger(__name__)
 
 CRYPTO_HINTS = ("crypto", "bitcoin", "btc", "ethereum", "eth ", "solana", "dogecoin", "xrp")
 
+# Equity price-target markets are the same martingale-underlying problem as
+# crypto ones (brief section 3: "ALL crypto/equity price-target markets at
+# any horizon... the market price *is* the forecast") -- a company's current
+# valuation/market-cap IS the market's own forecast of it, so there's no edge
+# to measure. Keyword-based like CRYPTO_HINTS rather than category-based,
+# since these questions show up with category="unknown" on Gamma.
+EQUITY_PRICE_TARGET_HINTS = ("market cap", "valuation", "fdv", "fully diluted")
+
 
 def _category(m: GammaMarket) -> str:
     return (m.category or "unknown").strip().lower() or "unknown"
 
 
+def _market_text(m: GammaMarket) -> str:
+    return " ".join(filter(None, [_category(m), m.slug or "", m.question or ""])).lower()
+
+
 def _looks_crypto(m: GammaMarket) -> bool:
-    text = " ".join(filter(None, [_category(m), m.slug or "", (m.question or "").lower()])).lower()
-    return any(h in text for h in CRYPTO_HINTS)
+    return any(h in _market_text(m) for h in CRYPTO_HINTS)
+
+
+def _looks_equity_price_target(m: GammaMarket) -> bool:
+    return any(h in _market_text(m) for h in EQUITY_PRICE_TARGET_HINTS)
 
 
 def _parse_iso(ts: str | None) -> datetime | None:
@@ -74,7 +89,8 @@ def assign_tier_with_category(m: GammaMarket, category: str, config: dict[str, A
     """
     if m.enable_order_book is False or m.accepting_orders is False:
         return "ignored"
-    if category in set(config["universe"]["excluded_categories"]) or _looks_crypto(m):
+    if (category in set(config["universe"]["excluded_categories"]) or _looks_crypto(m)
+            or _looks_equity_price_target(m)):
         return "ignored"
     tiers = config["universe"]["tiers"]
     if depth_usd is not None:

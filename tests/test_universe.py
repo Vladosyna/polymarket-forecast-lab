@@ -62,6 +62,39 @@ def test_crypto_is_ignored():
     assert assign_tier(m, CONFIG) == "ignored"
 
 
+def test_equity_price_target_is_ignored():
+    """A real leak found live: category="unknown" price-target markets
+    (market cap / valuation / FDV thresholds) are equity-side martingale
+    underlyings, same as crypto price-target markets (brief section 3:
+    "ALL crypto/equity price-target markets") -- the current keyword filter
+    only caught the crypto half."""
+    cases = [
+        _market(category="unknown", question="Extended FDV above $800M one day after launch?"),
+        _market(category="unknown",
+                question="Will Anthropic's valuation hit (HIGH) $2.0T by December 31?"),
+        _market(category="unknown", question="OpenAI IPO closing market cap above $1T?"),
+        _market(category="unknown",
+                question="Will NVIDIA be the largest company in the world by market cap on December 31?"),
+        _market(category="unknown", question="Some token's fully diluted valuation exceeds $5B?"),
+    ]
+    for m in cases:
+        assert assign_tier(m, CONFIG) == "ignored", m.question
+
+
+def test_equity_event_markets_are_not_excluded():
+    """Corporate-event questions (acquisition speculation, IPO timing) are
+    NOT price-target markets -- the resolution isn't a price/valuation
+    threshold, so they stay forecastable and must not be caught by the new
+    equity-price-target heuristic."""
+    cases = [
+        _market(category="unknown", question="Will Nebius Group be acquired before 2027?"),
+        _market(category="unknown", question="Will OpenAI IPO by December 31 2026?"),
+        _market(category="unknown", question="Will GameStop acquire eBay?"),
+    ]
+    for m in cases:
+        assert assign_tier(m, CONFIG) != "ignored", m.question
+
+
 def test_depth_based_tiering_overrides_liquidity_and_volume():
     """Phase 17 item 2: once a snapshot exists, real order-book depth governs
     tiering -- not Gamma's self-reported liquidity_num/volume_num."""
