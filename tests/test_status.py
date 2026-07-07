@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import polars as pl
 
-from lab.collect.status import gather_status, snapshot_gaps
+from lab.collect.status import gap_windows, gather_status, snapshot_gaps
 from lab.store import db
 from lab.store.snapshots import SNAPSHOT_SCHEMA, SnapshotStore, floor_ts_bucket
 from lab.util import load_config
@@ -40,6 +40,24 @@ def test_full_coverage_has_no_gaps():
     end = start + timedelta(hours=1)
     df = _frame([floor_ts_bucket(start + timedelta(minutes=5 * i), 5) for i in range(12)])
     assert snapshot_gaps(df, ["a"], 5, start, end) == 0
+
+
+def test_gap_windows_returns_the_actual_missing_intervals():
+    """Phase 17 item 5: snapshot_gaps' count is now derived FROM gap_windows,
+    which callers like eval/clv.py's gap-aware drift need the actual
+    intervals from, not just a count."""
+    start = datetime(2026, 7, 2, 12, 0, tzinfo=timezone.utc)
+    end = start + timedelta(hours=1)  # 12 buckets at 5-min cadence
+    buckets = [start + timedelta(minutes=5 * i) for i in range(12)]
+    present = [b for i, b in enumerate(buckets) if i not in (5, 6)]
+    df = _frame([floor_ts_bucket(b, 5) for b in present])
+
+    windows = gap_windows(df, ["a"], 5, start, end)
+    assert windows == [
+        (start + timedelta(minutes=25), start + timedelta(minutes=30)),
+        (start + timedelta(minutes=30), start + timedelta(minutes=35)),
+    ]
+    assert snapshot_gaps(df, ["a"], 5, start, end) == len(windows) == 2
 
 
 def test_no_tracked_markets_reports_zero():

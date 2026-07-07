@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from jinja2 import Environment
 
+from lab.collect.status import gap_windows as compute_gap_windows
 from lab.collect.status import gather_status
 from lab.eval.calibration import plot_reliability
 from lab.eval.clv import clv_drift
 from lab.eval.scoring import honesty_tier
-from lab.util import PROJECT_ROOT, now_utc_iso
+from lab.store.snapshots import utc_date_str
+from lab.util import PROJECT_ROOT, now_utc, now_utc_iso
 
 log = logging.getLogger(__name__)
 
@@ -114,6 +117,10 @@ Positive = the model tends to be early. Needs no resolutions.</p>
 {% endfor %}
 </table>
 {% else %}<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no forecasts with t+24h snapshots yet.</p>{% endif %}
+{% if clv_dropped_for_gap %}
+<p class="note">excluded: {{ clv_dropped_for_gap }} window(s) overlapped a recorded collection gap
+(Phase 17 item 5) — dropped from the mean, not silently treated as ordinary missing data.</p>
+{% endif %}
 
 <h2>Virtual prediction economy — wealth ledger (SIMULATION-adjacent, no real stakes)</h2>
 <p class="note">Kelly log-wealth accounting per (model, category) -- a scoring/selection layer
@@ -266,13 +273,30 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         plot_path = plot_reliability(bins_by_model, reports / "reliability.png")
         calibration_plot = plot_path.name
 
+    # Phase 17 item 5: gap-aware CLV -- a drift window overlapping a recorded
+    # collection gap is excluded rather than silently folded into "no data".
+    now = now_utc()
+    clv_lookback_days = 30
+    gap_df = store.read_range([utc_date_str(now - timedelta(days=d)) for d in range(clv_lookback_days + 1)])
+    cadence = config["collect"]["snapshot_interval_minutes"]
+    clv_gap_windows: list[tuple] = []
+    for tier in ("liquid", "tail"):
+        tier_ids = [r["condition_id"] for r in conn.execute(
+            "SELECT condition_id FROM markets WHERE tier = ?", (tier,))]
+        clv_gap_windows.extend(compute_gap_windows(
+            gap_df, tier_ids, cadence[tier], now - timedelta(days=clv_lookback_days), now))
+
     clv_rows = []
+    clv_dropped_for_gap = 0
     model_ids = [r["model_id"] for r in conn.execute("SELECT DISTINCT model_id FROM forecasts")]
     for model_id in model_ids:
         forecasts = [dict(r) for r in conn.execute(
             "SELECT ts, condition_id, model_id, p_yes, p_market_at_ts FROM forecasts "
             "WHERE model_id = ? ORDER BY ts DESC LIMIT 2000", (model_id,))]
-        for horizon, stats in clv_drift(forecasts, store, config["eval"]["clv_horizons_hours"]).items():
+        clv_stats = clv_drift(forecasts, store, config["eval"]["clv_horizons_hours"],
+                              gap_windows=clv_gap_windows)
+        for horizon, stats in clv_stats.items():
+            clv_dropped_for_gap += stats.get("dropped_for_gap", 0)
             if stats["n"]:
                 clv_rows.append({"model_id": model_id, "horizon": horizon,
                                  "n": stats["n"], "drift": stats["mean_signed_drift"]})
@@ -297,8 +321,6 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
 
     llm_total = conn.execute("SELECT COALESCE(SUM(cost_usd),0) AS t FROM llm_spend").fetchone()["t"]
     from lab.store.db import llm_spend_today
-    from lab.store.snapshots import utc_date_str
-    from lab.util import now_utc
     llm_today = llm_spend_today(conn, utc_date_str(now_utc()))
 
     from lab.learn.postmortem import lessons_digest
@@ -311,6 +333,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         pooling_rows=pooling_rows,
         calibration_plot=calibration_plot,
         clv_rows=clv_rows,
+        clv_dropped_for_gap=clv_dropped_for_gap,
         wealth_rankings=wealth_rankings,
         wealth_curves_plot=wealth_curves_plot,
         wealth_drawdown_plot=wealth_drawdown_plot,

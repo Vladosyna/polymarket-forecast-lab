@@ -16,34 +16,45 @@ def _dates_back(now: datetime, days: int) -> list[str]:
     return [utc_date_str(now - timedelta(days=d)) for d in range(days + 1)]
 
 
-def snapshot_gaps(df: pl.DataFrame, tier_markets: list[str], cadence_minutes: int,
-                  window_start: datetime, window_end: datetime) -> int:
-    """Count cadence buckets in the window with zero snapshots for the tier.
-
-    A bucket counts as covered when at least one tracked market has a row --
-    per-market gap accounting would flag every market that IPOs mid-window.
+def gap_windows(df: pl.DataFrame, tier_markets: list[str], cadence_minutes: int,
+                window_start: datetime, window_end: datetime) -> list[tuple[datetime, datetime]]:
+    """Actual [bucket_start, bucket_end) intervals with zero snapshots for the
+    tier (Phase 17 item 5). A bucket counts as covered when at least one
+    tracked market has a row -- per-market gap accounting would flag every
+    market that IPOs mid-window. Returning the intervals themselves (not just
+    a count) lets callers -- e.g. eval/clv.py's gap-aware drift -- check
+    whether a SPECIFIC window overlaps a recorded gap.
     """
     if not tier_markets:
-        return 0
+        return []
     n_buckets = int((window_end - window_start).total_seconds() // (cadence_minutes * 60))
     if n_buckets <= 0:
-        return 0
+        return []
+    all_buckets = [
+        (window_start + timedelta(minutes=i * cadence_minutes),
+         window_start + timedelta(minutes=(i + 1) * cadence_minutes))
+        for i in range(n_buckets)
+    ]
     subset = df.filter(pl.col("condition_id").is_in(tier_markets))
     if subset.is_empty():
-        return n_buckets
+        return all_buckets
     seen = set(subset.get_column("ts").unique().to_list())
-    gaps = 0
-    for i in range(n_buckets):
-        bucket_start = window_start + timedelta(minutes=i * cadence_minutes)
+    gaps: list[tuple[datetime, datetime]] = []
+    for bucket_start, bucket_end in all_buckets:
         # Bucket timestamps are floored ISO strings; match by prefix window.
-        bucket_end = bucket_start + timedelta(minutes=cadence_minutes)
         covered = any(
             bucket_start.isoformat(timespec="seconds") <= ts < bucket_end.isoformat(timespec="seconds")
             for ts in seen
         )
         if not covered:
-            gaps += 1
+            gaps.append((bucket_start, bucket_end))
     return gaps
+
+
+def snapshot_gaps(df: pl.DataFrame, tier_markets: list[str], cadence_minutes: int,
+                  window_start: datetime, window_end: datetime) -> int:
+    """Count cadence buckets in the window with zero snapshots for the tier."""
+    return len(gap_windows(df, tier_markets, cadence_minutes, window_start, window_end))
 
 
 def gather_status(config: dict[str, Any]) -> dict[str, Any]:

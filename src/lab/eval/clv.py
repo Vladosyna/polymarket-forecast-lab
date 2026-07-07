@@ -35,11 +35,26 @@ def _mid_at(df: pl.DataFrame, condition_id: str, target_ts: datetime,
     return float(closest["mid"][0])
 
 
-def clv_drift(forecasts: list[dict], store: SnapshotStore,
-              horizons_hours: list[int]) -> dict[int, dict[str, float]]:
-    """forecasts: rows with ts, condition_id, model_id, p_yes, p_market_at_ts."""
+def _overlaps_gap(window_start: datetime, window_end: datetime,
+                  gaps: list[tuple[datetime, datetime]]) -> bool:
+    return any(window_start < g_end and g_start < window_end for g_start, g_end in gaps)
+
+
+def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[int],
+              gap_windows: list[tuple[datetime, datetime]] | None = None,
+              ) -> dict[int, dict[str, float]]:
+    """forecasts: rows with ts, condition_id, model_id, p_yes, p_market_at_ts.
+
+    `gap_windows` (Phase 17 item 5, `collect/status.py::gap_windows`): a
+    forecast's drift window [ts, ts+horizon] overlapping any recorded
+    collection gap is excluded from the mean and counted separately
+    (`dropped_for_gap`) rather than silently folded into "no data" -- a gap
+    is a known-missing measurement, not the same failure mode as no snapshot
+    existing near the target time at all.
+    """
     if not forecasts:
         return {}
+    gaps = gap_windows or []
     all_dates: set[str] = set()
     parsed = []
     for f in forecasts:
@@ -55,16 +70,22 @@ def clv_drift(forecasts: list[dict], store: SnapshotStore,
     out: dict[int, dict[str, float]] = {}
     for h in horizons_hours:
         drifts: list[float] = []
+        dropped_for_gap = 0
         for f, ts in parsed:
             disagreement = f["p_yes"] - f["p_market_at_ts"]
             if abs(disagreement) < 1e-9:
                 continue
-            later_mid = _mid_at(df, f["condition_id"], ts + timedelta(hours=h))
+            window_end = ts + timedelta(hours=h)
+            if gaps and _overlaps_gap(ts, window_end, gaps):
+                dropped_for_gap += 1
+                continue
+            later_mid = _mid_at(df, f["condition_id"], window_end)
             if later_mid is None:
                 continue
             drifts.append(float(np.sign(disagreement)) * (later_mid - f["p_market_at_ts"]))
         out[h] = {
             "n": len(drifts),
             "mean_signed_drift": float(np.mean(drifts)) if drifts else float("nan"),
+            "dropped_for_gap": dropped_for_gap,
         }
     return out
