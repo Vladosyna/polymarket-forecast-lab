@@ -36,6 +36,45 @@ def test_exclusions_win_over_broader_tags():
     assert category_from_polymarket_tags(["crypto", "economy"], TAXONOMY) == "crypto"
 
 
+def test_v2_equity_index_forex_commodity_tags_map_to_excluded_equities():
+    """Real drift-log tag combos (v2 taxonomy expansion): index/forex/
+    commodity/bank-stock price-target markets all resolve to 'equities',
+    which universe.excluded_categories already excludes wholesale."""
+    assert category_from_polymarket_tags(["finance", "spx", "hide-from-new"], TAXONOMY) == "equities"
+    assert category_from_polymarket_tags(
+        ["commodities", "finance", "finance-updown", "hit-price", "oil", "pyth-finance"], TAXONOMY
+    ) == "equities"
+    assert category_from_polymarket_tags(
+        ["banking", "banks", "finance", "goldman-sachs", "gs", "kpis"], TAXONOMY
+    ) == "equities"
+    assert category_from_polymarket_tags(["dollar", "forex", "fx"], TAXONOMY) == "equities"
+
+
+def test_v2_ipo_and_acquisition_tags_map_to_business_not_excluded():
+    """Real drift-log finding: 'ipo'/'ipos' tags appear on BOTH pure timing
+    questions and valuation-threshold questions -- the tag alone can't tell
+    them apart, so this category must NOT be excluded (the separate
+    _looks_equity_price_target() question-text check in universe.py handles
+    the valuation subset). Confirms tag-based categorization stays permissive
+    for corporate-event markets."""
+    assert category_from_polymarket_tags(["ai", "anthropic", "anthropic-ipo", "finance", "ipo", "ipos"], TAXONOMY) == "business"
+    assert category_from_polymarket_tags(["acquisitions", "finance"], TAXONOMY) == "business"
+    assert category_from_polymarket_tags(["business", "finance", "privates"], TAXONOMY) == "business"
+
+
+def test_v2_ai_tech_tags_map_to_tech_not_equities():
+    """AI/tech product-news tags stay forecastable under a distinct 'tech'
+    category rather than falling into 'unknown' or wrongly matching
+    'equities' via a shared 'finance' co-occurrence in a different market."""
+    assert category_from_polymarket_tags(["ai", "big-tech", "openai", "sam-altman", "gpt-5pt6"], TAXONOMY) == "tech"
+    assert category_from_polymarket_tags(["ai", "gemini", "google", "tech"], TAXONOMY) == "tech"
+
+
+def test_v2_health_and_weather_tags():
+    assert category_from_polymarket_tags(["disease", "pandemics"], TAXONOMY) == "health"
+    assert category_from_polymarket_tags(["climate-science", "natural-disasters", "tornadoes"], TAXONOMY) == "weather"
+
+
 def test_kalshi_series_mapping():
     assert category_for_kalshi_series("Economics", TAXONOMY) == "economics"
     assert category_for_kalshi_series("Climate and Weather", TAXONOMY) == "weather"

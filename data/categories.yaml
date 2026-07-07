@@ -5,11 +5,34 @@
 # longer hardcode tag->category maps in Python. Order matters within
 # `polymarket_tags`: first matching category wins (ordered by specificity),
 # mirroring the original TAG_CATEGORY_MAP this file replaces.
-version: 1
+#
+# v2: the v1 starter set only covered ~8 categories worth of tags and left
+# 3193 live markets (real Gamma tags, not missing ones -- see
+# category_drift_log) bucketed as "unknown". Added tags below are drawn
+# directly from a real drift-log capture (272 rows from one live sync), not
+# guessed. Two new categories -- equities keeps its ORIGINAL meaning
+# (financial-instrument price-target markets -- already fully excluded via
+# universe.excluded_categories, so extending its tag list here extends that
+# same exclusion to indices/forex/commodities/bank-stock price-target
+# markets, not just tickers); `business` is deliberately NOT excluded --
+# ipo/privates/acquisitions/finance tags cover both pure timing questions
+# ("will X IPO by date", "will X be acquired") which stay forecastable, and
+# valuation-threshold questions, which the separate keyword-based
+# _looks_equity_price_target() check in universe.py already excludes on the
+# question text regardless of category. Conflating the two into one
+# excluded category would have wrongly excluded the legitimate timing/
+# M&A-speculation markets -- confirmed by checking real tag co-occurrence
+# in the drift log before deciding (e.g. "ipo,ipos" tags appear on both
+# "OpenAI IPO by Dec 2026?" and "OpenAI IPO market cap above $1T?" alike --
+# the tag alone can't distinguish these, only the question text can).
+version: 2
 
 categories:
   - crypto
   - equities
+  - business
+  - tech
+  - health
   - weather
   - economics
   - sports
@@ -20,12 +43,39 @@ categories:
 
 polymarket_tags:
   crypto: [crypto, bitcoin, ethereum, solana, memecoins, defi]
-  equities: [stocks, equities, wall-street, big-tech-stocks]
-  weather: [weather, climate, temperature, hurricanes]
+  equities:
+    [
+      stocks, equities, wall-street, big-tech-stocks,
+      # v2: index/forex/commodity/bank-stock price-target tags -- confirmed
+      # via real drift-log co-occurrence to always appear alongside
+      # daily/monthly price-hit tags (finance-updown, hit-price, pyth-finance),
+      # i.e. genuine martingale-underlying markets, not policy/event markets.
+      finance-updown, pyth-finance, hit-price, up-or-down, daily-close, monthly-hit,
+      indicies, spx, sp-500, sp,
+      commodities, oil, gold, silver, natural-gas, comex-gold-features,
+      exchange-rate, foreign-exchange, forex, fx, fxx, dollar,
+      banks, banking,
+    ]
+  business:
+    # v2: corporate-event tags (IPO timing, M&A speculation, private-company
+    # news) -- NOT excluded, see version-note above.
+    [business, ipo, ipos, privates, acquisitions, finance]
+  tech:
+    # v2: AI/tech company product & model news -- confirmed via drift-log
+    # co-occurrence to be product/release context, not stock-price context
+    # (none of these co-occur with the equities tags above).
+    [
+      ai, tech, big-tech, llm, apple, space,
+      openai, anthropic, sam-altman, dario, dario-amodei,
+      gpt, gpt-5, gpt-5pt6, claude, claude-5,
+      google, gemini, chatgpt, grok, elon-musk,
+    ]
+  health: [disease, pandemics]
+  weather: [weather, climate, temperature, hurricanes, climate-science, natural-disasters, tornadoes]
   economics: [economy, economics, fed, fed-rates, inflation, macro, interest-rates, gdp, jobs-report, cpi]
-  sports: [sports, soccer, nba, nfl, mlb, nhl, tennis, golf, f1, ufc, boxing, cricket, esports, olympics, fifa-world-cup, college-football, college-basketball]
+  sports: [sports, soccer, nba, nfl, mlb, nhl, tennis, golf, f1, ufc, boxing, cricket, esports, olympics, fifa-world-cup, 2026-fifa-world-cup, college-football, college-basketball]
   entertainment: [entertainment, movies, awards, oscars, music, pop-culture, celebrities, tv, grammys]
-  geopolitics: [geopolitics, world, ukraine, israel, china, middle-east, war]
+  geopolitics: [geopolitics, world, ukraine, israel, china, middle-east, war, uk, united-nations]
   politics: [politics, elections, us-politics, trump, congress, us-election, supreme-court]
 
 kalshi_series:
