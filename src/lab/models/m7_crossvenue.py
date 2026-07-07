@@ -299,20 +299,25 @@ async def kalshi_propose_candidates(kalshi, config: dict[str, Any]) -> list[Any]
     priority = set(config["universe"]["priority_categories"])
     kalshi_categories = [k for k, v in taxonomy.get("kalshi_series", {}).items() if v in priority]
     max_series = config["venues"]["kalshi"].get("max_series_per_sync", 40)
+    # Per-category share, same fix as the Polymarket-side selection below:
+    # verified live that "Economics" alone has 601 series on Kalshi (vs 40
+    # for the whole pass) -- a single global counter across categories meant
+    # every prior live run in this session silently fetched ONLY Economics
+    # series and never reached Weather/Politics/Elections/World/Entertainment
+    # at all, despite the category filter itself working correctly.
+    per_cat_series = max(1, max_series // len(kalshi_categories)) if kalshi_categories else 0
 
     candidates: list[Any] = []
-    series_seen = 0
     for kalshi_category in kalshi_categories:
-        if series_seen >= max_series:
-            break
         try:
             series_list = await kalshi.series_by_category(kalshi_category)
         except Exception:
             log.warning("m7 propose: series fetch failed",
                        extra={"ctx": {"category": kalshi_category}})
             continue
+        series_seen = 0
         for s in series_list:
-            if series_seen >= max_series:
+            if series_seen >= per_cat_series:
                 break
             ticker = s.get("ticker")
             if not ticker:

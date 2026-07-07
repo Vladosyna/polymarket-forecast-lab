@@ -498,6 +498,41 @@ def test_propose_matches_dedupes_by_event_within_a_category(config, tmp_path):
     conn.close()
 
 
+def test_kalshi_propose_candidates_gives_every_category_a_series_share(config):
+    """Real live bug found via the user's own question: a single global
+    series_seen counter across ALL Kalshi categories meant one category with
+    many series (Economics has 601 on real Kalshi, vs max_series_per_sync=40
+    total) silently consumed the entire budget, so every prior live run in
+    this session only ever fetched Economics series -- Weather/Politics/
+    Elections/World/Entertainment got zero, despite the category filter
+    itself working. Each category must get its own guaranteed series share."""
+    kalshi = FakeKalshiCategoryClient(
+        series_by_cat={
+            # Economics alone has more series than the entire max_series budget.
+            "Economics": [{"ticker": f"ECON-{i}"} for i in range(20)],
+            "Politics": [{"ticker": "POL-SERIES"}],
+            "Climate and Weather": [{"ticker": "WX-SERIES"}],
+        },
+        markets_by_series={
+            **{f"ECON-{i}": [FakeKalshiCandidate(f"E{i}", f"econ market {i}")] for i in range(20)},
+            "POL-SERIES": [FakeKalshiCandidate("PRES28", "2028 presidential race")],
+            "WX-SERIES": [FakeKalshiCandidate("TEMPNYC", "NYC high temp Friday")],
+        },
+    )
+    config["universe"]["priority_categories"] = ["economics", "politics", "weather"]
+    # "Elections" also maps to politics in categories.yaml, so 4 real Kalshi
+    # categories are in scope here (Economics, Climate and Weather, Politics,
+    # Elections) -> max_series=8 gives an even 2-per-category share.
+    config["venues"]["kalshi"]["max_series_per_sync"] = 8
+
+    candidates = asyncio.run(kalshi_propose_candidates(kalshi, config))
+
+    tickers = {c.ticker for c in candidates}
+    assert "PRES28" in tickers  # would be starved to zero before this fix
+    assert "TEMPNYC" in tickers  # would be starved to zero before this fix
+    assert sum(t.startswith("E") and t[1:].isdigit() for t in tickers) == 2  # Economics capped too
+
+
 def test_propose_matches_appends_to_proposed_not_confirmed(config, tmp_path):
     conn = db.connect(config["storage"]["db_path"])
     conn.execute(
