@@ -19,6 +19,7 @@ from lab.models.m7_crossvenue import (
     load_markets_map,
     pool_log_odds,
     propose_matches,
+    reject_match,
     save_markets_map,
     scan_confirmed_pairs,
     write_m7_forecasts,
@@ -113,6 +114,42 @@ def test_confirm_match_returns_false_with_nothing_to_confirm():
     data = {"confirmed": [], "proposed": []}
     assert confirm_match(data, "0x1", "kalshi") is False
     assert data["confirmed"] == []
+
+
+def test_reject_match_removes_a_proposed_entry():
+    """The human's other verdict: a real observed case is the LLM proposing a
+    pair whose own rationale says the events don't match (different office,
+    different year) yet still returning confidence=1.0 -- reject removes it
+    from `proposed` without ever touching `confirmed`."""
+    data = {
+        "confirmed": [],
+        "proposed": [{"condition_id": "0x1", "venue": "kalshi", "external_id": "T1",
+                     "rationale": "different offices, do not match", "confidence": 1.0}],
+    }
+    assert reject_match(data, "0x1", "kalshi", "T1") is True
+    assert data["proposed"] == []
+    assert data["confirmed"] == []
+
+
+def test_reject_match_returns_false_when_nothing_to_reject():
+    data = {"confirmed": [], "proposed": []}
+    assert reject_match(data, "0x1", "kalshi", "T1") is False
+
+
+def test_reject_match_only_removes_the_matching_external_id():
+    """Two candidates proposed for the same condition_id/venue (e.g. the
+    Tom Steyer / two different CA governor tickers case) -- rejecting one
+    must not remove the other."""
+    data = {
+        "confirmed": [],
+        "proposed": [
+            {"condition_id": "0x1", "venue": "kalshi", "external_id": "T1"},
+            {"condition_id": "0x1", "venue": "kalshi", "external_id": "T2"},
+        ],
+    }
+    assert reject_match(data, "0x1", "kalshi", "T1") is True
+    assert len(data["proposed"]) == 1
+    assert data["proposed"][0]["external_id"] == "T2"
 
 
 def test_link_confirmed_event_creates_event_linking_both_markets(config):

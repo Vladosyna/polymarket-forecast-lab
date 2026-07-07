@@ -4,8 +4,8 @@
     {
       "name": "dashboard",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "streamlit", "run", "src/lab/dashboard.py", "--server.headless=true"],
-      "port": 8501
+      "runtimeArgs": ["run", "streamlit", "run", "src/lab/dashboard.py", "--server.headless=true", "--server.port=8502"],
+      "port": 8502
     }
   ]
 }

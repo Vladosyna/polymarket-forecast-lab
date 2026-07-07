@@ -1,13 +1,21 @@
-"""Phase 8 -- optional Streamlit dashboard (read-only view of the lab's data).
+"""Phase 8 -- optional Streamlit dashboard (mostly read-only view of the lab's
+data, with one narrow exception below).
 
 Run with:  uv run streamlit run src/lab/dashboard.py
-Reads the same SQLite/Parquet as the CLI; writes nothing.
+Reads the same SQLite/Parquet as the CLI.
 
 Phase 14 added a sidebar mode selector so the wealth-economy visuals sit
 alongside the existing sections as separate views instead of one long page
 (brief Phase 8: "as interactive views of what `lab report` already renders
 statically") -- the Wealth Economy mode reuses the SAME `eval/wealth_plots.py`
 functions the static report calls, rather than re-implementing charts here.
+
+"Cross-Venue Matching (M7)" is the one mode that writes: confirming/rejecting
+a proposed pair edits data/markets_map.yaml through the exact same
+confirm_match/reject_match functions `lab map confirm` uses -- the human-in-
+the-loop gate M7 requires (brief section 6/9: "a human confirms every pair
+before it's live") is the whole point of surfacing proposals here instead of
+only via the CLI.
 """
 
 from __future__ import annotations
@@ -49,7 +57,7 @@ st.caption(
 )
 
 MODES = ["Overview", "Forecasts vs Market", "Calibration & Skill", "Wealth Economy",
-        "Shadow Portfolio"]
+        "Shadow Portfolio", "Cross-Venue Matching (M7)"]
 mode = st.sidebar.radio("View", MODES)
 
 if mode == "Overview":
@@ -191,6 +199,95 @@ elif mode == "Shadow Portfolio":
         st.info("No simulated trades yet — run `lab shadow` after forecasts accumulate.")
     else:
         st.dataframe(trades.to_pandas(), use_container_width=True)
+
+elif mode == "Cross-Venue Matching (M7)":
+    st.header("Cross-venue matching (M7) — propose, review, confirm")
+    st.caption(
+        "Propose-then-confirm: nothing here is live for M7 until a human confirms it. "
+        "Read every rationale before confirming — the LLM occasionally proposes a pair "
+        "whose own rationale says the events don't actually match (different office, "
+        "different year) yet still returns high confidence. That's exactly why this "
+        "gate exists."
+    )
+    from lab.models.m7_crossvenue import (
+        confirm_match,
+        link_confirmed_event,
+        load_markets_map,
+        reject_match,
+        save_markets_map,
+    )
+
+    def _question_for(cid: str) -> str:
+        row = conn.execute("SELECT question FROM markets WHERE condition_id = ?", (cid,)).fetchone()
+        return row["question"] if row else cid
+
+    map_data = load_markets_map()
+
+    st.subheader(f"Confirmed ({len(map_data['confirmed'])})")
+    if map_data["confirmed"]:
+        conf_rows = [{
+            "question": _question_for(e["condition_id"]),
+            "venue": e["venue"], "external_id": e["external_id"],
+            "confirmed_ts": e.get("confirmed_ts", ""),
+        } for e in map_data["confirmed"]]
+        st.dataframe(pl.DataFrame(conf_rows).to_pandas(), use_container_width=True)
+    else:
+        st.info("No confirmed pairs yet.")
+
+    st.subheader(f"Proposed, awaiting review ({len(map_data['proposed'])})")
+    if not map_data["proposed"]:
+        st.info("No proposals waiting — run `lab map propose` (CLI) or the button below.")
+    else:
+        for e in map_data["proposed"]:
+            key = f"{e['condition_id']}:{e['venue']}:{e['external_id']}"
+            with st.container(border=True):
+                st.markdown(f"**Polymarket:** {_question_for(e['condition_id'])}")
+                st.markdown(f"**Kalshi ({e['external_id']}):** {e.get('external_question', '')}")
+                st.caption(f"confidence={e.get('confidence', 0):.2f} — {e.get('rationale', '')}")
+                c1, c2 = st.columns(2)
+                if c1.button("Confirm", key=f"confirm_{key}"):
+                    fresh = load_markets_map()
+                    if confirm_match(fresh, e["condition_id"], e["venue"], external_id=e["external_id"]):
+                        save_markets_map(fresh)
+                        entry = next(x for x in fresh["confirmed"]
+                                    if x["condition_id"] == e["condition_id"] and x["venue"] == e["venue"])
+                        event_id = link_confirmed_event(conn, e["condition_id"], e["venue"], entry["external_id"])
+                        st.success(f"Confirmed — event_id={event_id}")
+                        st.rerun()
+                if c2.button("Reject", key=f"reject_{key}"):
+                    fresh = load_markets_map()
+                    reject_match(fresh, e["condition_id"], e["venue"], e["external_id"])
+                    save_markets_map(fresh)
+                    st.rerun()
+
+    st.divider()
+    st.caption("Runs real Kalshi + LLM API calls (small $ cost, within the daily cap).")
+    if st.button("Run `lab map propose` now"):
+        import asyncio
+
+        from lab.api.http import TokenBucket
+        from lab.api.kalshi import KalshiClient
+        from lab.models.m7_crossvenue import kalshi_propose_candidates, propose_matches
+        from lab.news.extract import create_llm_client
+
+        async def _fetch_candidates():
+            bucket = TokenBucket(rate=config["collect"]["rate_limit"]["requests_per_second"],
+                                 burst=config["collect"]["rate_limit"]["burst"])
+            kalshi = KalshiClient(bucket)
+            try:
+                return await kalshi_propose_candidates(kalshi, config)
+            finally:
+                await kalshi.aclose()
+
+        llm = create_llm_client(conn, config)
+        if llm is None:
+            st.error("No LLM configured — see llm.api_key_env in config.yaml.")
+        else:
+            with st.spinner("Fetching Kalshi candidates and asking the LLM..."):
+                candidates = asyncio.run(_fetch_candidates())
+                new_proposals = propose_matches(conn, config, candidates, llm)
+            st.success(f"{len(new_proposals)} new candidate(s) added.")
+            st.rerun()
 
 st.caption(
     f"Snapshot store: {config['storage']['snapshots_dir']} — "

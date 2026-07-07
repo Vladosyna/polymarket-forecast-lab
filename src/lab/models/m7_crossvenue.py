@@ -96,6 +96,27 @@ def confirm_match(data: dict[str, Any], condition_id: str, venue: str,
     return True
 
 
+def reject_match(data: dict[str, Any], condition_id: str, venue: str, external_id: str) -> bool:
+    """Remove a proposed entry without confirming it -- the human's other
+    verdict besides confirm_match. A real, observed need: the LLM sometimes
+    proposes a pair whose OWN rationale says the events don't actually match
+    (e.g. two different offices/years) yet still returns it with high
+    confidence -- rejecting it here is exactly why every pair is confirmed by
+    a human rather than auto-promoted. Returns False if there's nothing to
+    remove (already rejected/confirmed, or never proposed)."""
+    proposed = data.get("proposed", [])
+    match_idx = next(
+        (i for i, e in enumerate(proposed)
+         if e["condition_id"] == condition_id and e["venue"] == venue
+         and e["external_id"] == external_id),
+        None,
+    )
+    if match_idx is None:
+        return False
+    proposed.pop(match_idx)
+    return True
+
+
 def link_confirmed_event(conn, condition_id: str, venue: str, external_id: str) -> str:
     """Mint (or reuse) the event_id linking a Polymarket market to a confirmed
     external venue-market (brief section 5/Phase 10: "a confirmed match
