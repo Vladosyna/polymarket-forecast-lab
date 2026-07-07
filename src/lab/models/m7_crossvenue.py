@@ -278,6 +278,54 @@ def write_m7_forecasts(conn, store, results: dict[str, ForecastResult],
     return written
 
 
+async def kalshi_propose_candidates(kalshi, config: dict[str, Any]) -> list[Any]:
+    """Category-scoped Kalshi candidate pool for `lab map propose`.
+
+    A bare `open_markets(limit=200)` (no filter) pulls whatever Kalshi
+    considers "open" globally -- verified live to be dominated by garbled
+    multi-leg sports/esports combo products (KXMVE... tickers), crowding out
+    the handful of real Economics/Politics/Weather markets Kalshi actually
+    lists. Reuses the SAME series_by_category -> markets_for_series flow
+    collect/kalshi_collector.py already uses for universe sync, scoped to
+    only the Kalshi category names whose categories.yaml mapping lands in
+    our own priority_categories (brief section 3 P1-P3) -- everything else
+    (Sports, Entertainment, World) is out of scope for matching against our
+    economics/weather/politics priority markets and would just waste LLM
+    calls on irrelevant candidates.
+    """
+    from lab.collect.categories import load_categories
+
+    taxonomy = load_categories()
+    priority = set(config["universe"]["priority_categories"])
+    kalshi_categories = [k for k, v in taxonomy.get("kalshi_series", {}).items() if v in priority]
+    max_series = config["venues"]["kalshi"].get("max_series_per_sync", 40)
+
+    candidates: list[Any] = []
+    series_seen = 0
+    for kalshi_category in kalshi_categories:
+        if series_seen >= max_series:
+            break
+        try:
+            series_list = await kalshi.series_by_category(kalshi_category)
+        except Exception:
+            log.warning("m7 propose: series fetch failed",
+                       extra={"ctx": {"category": kalshi_category}})
+            continue
+        for s in series_list:
+            if series_seen >= max_series:
+                break
+            ticker = s.get("ticker")
+            if not ticker:
+                continue
+            series_seen += 1
+            try:
+                candidates.extend(await kalshi.markets_for_series(ticker, status="open"))
+            except Exception:
+                log.warning("m7 propose: markets fetch failed",
+                           extra={"ctx": {"series_ticker": ticker}})
+    return candidates
+
+
 PROPOSE_SYSTEM = """You match prediction-market questions across venues for a research pipeline.
 Given ONE Polymarket question and a list of candidate Kalshi markets, identify
 which candidates (if any) ask about the SAME real-world event with the SAME
@@ -314,14 +362,40 @@ def propose_matches(conn, config: dict[str, Any], kalshi_candidates, llm,
 
     cats = config["universe"]["priority_categories"]
     top_k = int(config["cross_venue"]["propose_top_k"])
-    rows = conn.execute(
-        """
-        SELECT condition_id, question FROM markets
-        WHERE tier = 'liquid' AND category IN ({}) AND active = 1 AND closed = 0
-        ORDER BY volume_num DESC LIMIT ?
-        """.format(",".join("?" for _ in cats)),
-        (*cats, top_k),
-    ).fetchall()
+    # Per-category share, not one global ORDER BY volume_num DESC LIMIT top_k
+    # across all priority categories combined -- verified live that a single
+    # voluminous negRisk event (hundreds of "will [name] win 2028" legs) can
+    # swamp every slot in a global top-K, leaving weather/economics/
+    # geopolitics/entertainment zero representation regardless of how the
+    # legs are ranked. An even per-category share guarantees every priority
+    # category gets a fair shot at being proposed.
+    per_cat = max(1, top_k // len(cats))
+    # Distinct EVENTS, not raw rows: verified live that even within one
+    # category, one negRisk event's legs (e.g. 5 mutually exclusive "Fed
+    # hikes/cuts/holds after the July meeting" buckets) can fill the whole
+    # per-category share by themselves, so per_cat slots go to 5 variants of
+    # one question instead of covering distinct real-world topics. Oversample
+    # by volume, then dedupe by event_id (fallback condition_id) in order.
+    oversample = per_cat * 5
+    rows: list[Any] = []
+    for cat in cats:
+        raw = conn.execute(
+            """
+            SELECT condition_id, question, event_id FROM markets
+            WHERE tier = 'liquid' AND category = ? AND active = 1 AND closed = 0
+            ORDER BY volume_num DESC LIMIT ?
+            """,
+            (cat, oversample),
+        ).fetchall()
+        seen_events: set[str] = set()
+        for m in raw:
+            key = m["event_id"] or m["condition_id"]
+            if key in seen_events:
+                continue
+            seen_events.add(key)
+            rows.append(m)
+            if len(seen_events) >= per_cat:
+                break
 
     proposals: list[dict[str, Any]] = []
     for m in rows:

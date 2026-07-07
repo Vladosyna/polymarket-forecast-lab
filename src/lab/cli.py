@@ -338,7 +338,7 @@ def map_propose() -> None:
 
     from lab.api.http import TokenBucket
     from lab.api.kalshi import KalshiClient
-    from lab.models.m7_crossvenue import propose_matches
+    from lab.models.m7_crossvenue import kalshi_propose_candidates, propose_matches
     from lab.news.extract import create_llm_client
     from lab.store import db
 
@@ -355,7 +355,7 @@ def map_propose() -> None:
                              burst=config["collect"]["rate_limit"]["burst"])
         kalshi = KalshiClient(bucket)
         try:
-            candidates = await kalshi.open_markets(limit=200)
+            candidates = await kalshi_propose_candidates(kalshi, config)
             return propose_matches(conn, config, candidates, llm)
         finally:
             await kalshi.aclose()

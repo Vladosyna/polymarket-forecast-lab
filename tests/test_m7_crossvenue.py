@@ -14,6 +14,7 @@ from lab.models.base import ForecastResult
 from lab.models.m7_crossvenue import (
     confirm_match,
     confirmed_by_condition,
+    kalshi_propose_candidates,
     link_confirmed_event,
     load_markets_map,
     pool_log_odds,
@@ -344,6 +345,157 @@ class FakeLlm:
     def complete(self, system, prompt, purpose, max_tokens=2000):
         self.calls += 1
         return json.dumps(self.response), {"tokens_in": 100, "tokens_out": 50, "cost_usd": 0.001}
+
+
+class FakeKalshiCategoryClient:
+    """Real Kalshi category -> series -> markets fan-out, faked. Also serves
+    Sports/Entertainment/World series to prove they're correctly excluded --
+    a market cap/priority-category filter bug would silently include them."""
+
+    def __init__(self, series_by_cat: dict, markets_by_series: dict):
+        self.series_by_cat = series_by_cat
+        self.markets_by_series = markets_by_series
+        self.categories_queried: list[str] = []
+
+    async def series_by_category(self, category):
+        self.categories_queried.append(category)
+        return self.series_by_cat.get(category, [])
+
+    async def markets_for_series(self, series_ticker, status="open", **kwargs):
+        return self.markets_by_series.get(series_ticker, [])
+
+
+def test_kalshi_propose_candidates_only_queries_priority_category_series(config):
+    """The real live bug this fixes: a bare open_markets(limit=200) pulled
+    whatever Kalshi considers globally 'open' -- verified live to be
+    dominated by garbled multi-leg sports-combo products, crowding out the
+    handful of real Economics/Politics/Weather markets entirely (0 candidates
+    ever proposed). This must query ONLY the Kalshi category names whose
+    categories.yaml mapping lands in our priority_categories."""
+    kalshi = FakeKalshiCategoryClient(
+        series_by_cat={
+            "Economics": [{"ticker": "ECON-SERIES"}],
+            "Politics": [{"ticker": "POL-SERIES"}],
+            "Climate and Weather": [{"ticker": "WX-SERIES"}],
+            "Elections": [{"ticker": "ELEC-SERIES"}],
+            "Sports": [{"ticker": "SPORTS-SERIES"}],
+            "Entertainment": [{"ticker": "ENT-SERIES"}],
+            "World": [{"ticker": "WORLD-SERIES"}],
+        },
+        markets_by_series={
+            "ECON-SERIES": [FakeKalshiCandidate("FEDMAR", "Fed cuts rates in March")],
+            "POL-SERIES": [FakeKalshiCandidate("PRES28", "2028 presidential race")],
+            "WX-SERIES": [FakeKalshiCandidate("TEMPNYC", "NYC high temp Friday")],
+            "ELEC-SERIES": [FakeKalshiCandidate("SENATE28", "2028 Senate control")],
+            "SPORTS-SERIES": [FakeKalshiCandidate("KXMVE1", "yes Argentina advances,yes 7+ corners")],
+            "ENT-SERIES": [FakeKalshiCandidate("OSCAR", "Best Picture winner")],
+            "WORLD-SERIES": [FakeKalshiCandidate("UN1", "UN Security Council vote")],
+        },
+    )
+
+    candidates = asyncio.run(kalshi_propose_candidates(kalshi, config))
+
+    # config.yaml's priority_categories covers P1-P4 (economics, weather,
+    # politics, geopolitics, entertainment) -- Sports is the one Kalshi
+    # category with no priority-category mapping (sports is the null
+    # control, never a forecast target), so it's the one that must be
+    # excluded here.
+    tickers = {c.ticker for c in candidates}
+    assert tickers == {"FEDMAR", "PRES28", "TEMPNYC", "SENATE28", "UN1", "OSCAR"}
+    assert "KXMVE1" not in tickers  # the real garbled sports-combo ticker this fix excludes
+    assert "Sports" not in kalshi.categories_queried
+
+
+class RecordingFakeLlm:
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    def complete(self, system, prompt, purpose, max_tokens=2000):
+        self.prompts.append(prompt)
+        return json.dumps({"matches": []}), {"tokens_in": 10, "tokens_out": 5, "cost_usd": 0.0001}
+
+
+def test_propose_matches_gives_every_priority_category_a_fair_share(config, tmp_path):
+    """Real live bug this fixes: a single dominant negRisk event (many
+    high-volume legs in one category, e.g. "will [name] win 2028") must not
+    crowd out every propose slot via one global ORDER BY volume_num DESC --
+    each priority category gets its own even share of top_k regardless."""
+    conn = db.connect(config["storage"]["db_path"])
+    for i in range(10):  # 10 high-volume politics markets
+        conn.execute(
+            """INSERT INTO markets (condition_id, slug, question, category, description,
+                                    end_date_iso, token_id_yes, tier, active, closed,
+                                    liquidity_num, volume_num)
+               VALUES (?, ?, ?, 'politics', 'd', '2026-12-31T00:00:00+00:00', 'tok',
+                       'liquid', 1, 0, 200000, ?)""",
+            (f"0xpol{i}", f"pol{i}", f"Will person {i} win?", 50_000_000 - i),
+        )
+    for i in range(2):  # only 2, much lower-volume weather markets
+        conn.execute(
+            """INSERT INTO markets (condition_id, slug, question, category, description,
+                                    end_date_iso, token_id_yes, tier, active, closed,
+                                    liquidity_num, volume_num)
+               VALUES (?, ?, ?, 'weather', 'd', '2026-12-31T00:00:00+00:00', 'tok',
+                       'liquid', 1, 0, 200000, ?)""",
+            (f"0xwx{i}", f"wx{i}", f"Will it rain in city {i}?", 1000 - i),
+        )
+    conn.commit()
+
+    config["universe"]["priority_categories"] = ["politics", "weather"]
+    config["cross_venue"]["propose_top_k"] = 4  # -> 2 slots per category
+
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+
+    llm = RecordingFakeLlm()
+    candidates = [FakeKalshiCandidate("X", "irrelevant")]
+    propose_matches(conn, config, candidates, llm, markets_map_path=map_path)
+
+    assert len(llm.prompts) == 4  # 2 politics + 2 weather, not 4 politics
+    assert any("rain" in p for p in llm.prompts)  # weather got a slot at all
+    assert sum("person" in p for p in llm.prompts) == 2  # politics didn't take all 4
+    conn.close()
+
+
+def test_propose_matches_dedupes_by_event_within_a_category(config, tmp_path):
+    """Real live bug this fixes: one negRisk event's legs (e.g. 5 mutually
+    exclusive "Fed hikes/cuts/holds" buckets, all high-volume, all one
+    event_id) must not fill a whole category's per-category share by
+    themselves -- distinct topics should get a chance too."""
+    conn = db.connect(config["storage"]["db_path"])
+    for i in range(5):  # one negRisk event, 5 legs, all high volume
+        conn.execute(
+            """INSERT INTO markets (condition_id, slug, question, category, description,
+                                    end_date_iso, token_id_yes, tier, active, closed,
+                                    liquidity_num, volume_num, event_id)
+               VALUES (?, ?, ?, 'economics', 'd', '2026-12-31T00:00:00+00:00', 'tok',
+                       'liquid', 1, 0, 200000, ?, 'evt_fed_july')""",
+            (f"0xfed{i}", f"fed{i}", f"Will the Fed do thing {i} in July?", 10_000_000 - i),
+        )
+    # A distinct, lower-volume economics event that should still get a slot.
+    conn.execute(
+        """INSERT INTO markets (condition_id, slug, question, category, description,
+                                end_date_iso, token_id_yes, tier, active, closed,
+                                liquidity_num, volume_num, event_id)
+           VALUES ('0xcpi', 'cpi', 'Will CPI print above 3%?', 'economics', 'd',
+                   '2026-12-31T00:00:00+00:00', 'tok', 'liquid', 1, 0, 200000, 500, 'evt_cpi')"""
+    )
+    conn.commit()
+
+    config["universe"]["priority_categories"] = ["economics"]
+    config["cross_venue"]["propose_top_k"] = 2  # -> 2 slots, all in economics
+
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+
+    llm = RecordingFakeLlm()
+    candidates = [FakeKalshiCandidate("X", "irrelevant")]
+    propose_matches(conn, config, candidates, llm, markets_map_path=map_path)
+
+    assert len(llm.prompts) == 2
+    assert any("CPI" in p for p in llm.prompts)  # the distinct event got a slot
+    assert sum("Fed do thing" in p for p in llm.prompts) == 1  # only ONE Fed leg, not both slots
+    conn.close()
 
 
 def test_propose_matches_appends_to_proposed_not_confirmed(config, tmp_path):

@@ -235,7 +235,13 @@ watchdog:
 # 2026-07-03 (see api/metaculus.py), so a Metaculus pair must be hand-curated
 # via `lab map confirm --venue metaculus`.
 cross_venue:
-  propose_top_k: 20        # candidate liquid-tier, priority-category markets per `lab map propose` run
+  # 20 -> 40: live diagnosis found Kalshi's per-category economics/rate-decision
+  # series frequently have zero currently-open markets at any given moment
+  # (they open near the actual meeting date and close/resolve shortly after),
+  # so a narrow per-category share missed real overlap that existed just a
+  # few events further down each category's list. Doubling casts a wider net
+  # per run at a small, LLM-budget-capped cost (guardrail 10).
+  propose_top_k: 40        # candidate liquid-tier, priority-category markets per `lab map propose` run
   propose_cron: "0 5 * * 1" # weekly, Monday 05:00 UTC -- orchestrator runs `lab map propose`
                              # automatically. It only ever appends to `proposed`; a human still
                              # must run `lab map confirm` before a pair feeds M7 (propose-then-
