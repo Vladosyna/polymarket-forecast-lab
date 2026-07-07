@@ -132,6 +132,12 @@ eval:
   # Reporting windows: all-time and trailing-90-days only. No cherry-picking.
   windows: [all_time, trailing_90d]
   clv_horizons_hours: [24, 72]
+  # Phase 17 item 4: CLV validity diagnostic -- correlation of per-forecast
+  # signed drift with per-forecast realized paired-Brier skill on the sports
+  # null control. |correlation| > clv_null_control_max_corr with n at least
+  # clv_null_control_min_n flags the CLV metric untrusted lab-wide.
+  clv_null_control_min_n: 30
+  clv_null_control_max_corr: 0.15
   # Anytime-valid confidence sequence (brief section 7, Phase 11) -- kept
   # separate from the bootstrap's own implicit alpha (fixed at 0.05 in
   # scoring.cluster_bootstrap_ci) in case they're ever tuned independently.

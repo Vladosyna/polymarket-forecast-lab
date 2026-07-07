@@ -89,3 +89,86 @@ def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[
             "dropped_for_gap": dropped_for_gap,
         }
     return out
+
+
+def clv_validity_check(conn, config: dict[str, Any], store: SnapshotStore) -> dict[str, Any]:
+    """Phase 17 item 4: is the CLV signal itself trustworthy?
+
+    Correlates per-forecast signed drift against per-forecast realized
+    paired-Brier skill contribution (brier_market - brier_model) on the
+    sports null control -- a sample that should show ~zero real skill for
+    any model (brief section 3/7). If CLV drift correlates with realized
+    skill even here, the two are confounded by something other than genuine
+    predictive information (e.g. a shared stale-price artifact), and the CLV
+    metric must not be trusted lab-wide until investigated.
+    """
+    from lab.forecast import null_control_ids_by_venue
+
+    nc_ids_by_venue = null_control_ids_by_venue(conn, config)
+    all_nc_ids: set[str] = set()
+    for ids in nc_ids_by_venue.values():
+        all_nc_ids |= ids
+    if not all_nc_ids:
+        return {"trusted": True, "reason": "no_null_control_data", "n": 0}
+
+    horizon = config["eval"]["clv_horizons_hours"][0]
+    placeholders = ",".join("?" * len(all_nc_ids))
+    rows = conn.execute(
+        f"""
+        SELECT f.ts, f.condition_id, f.p_yes, f.p_market_at_ts, r.payout_yes
+        FROM forecasts f JOIN resolutions r ON r.condition_id = f.condition_id
+        WHERE f.condition_id IN ({placeholders})
+        """,
+        tuple(all_nc_ids),
+    ).fetchall()
+    if not rows:
+        return {"trusted": True, "reason": "no_resolved_null_control_forecasts", "n": 0}
+
+    all_dates: set[str] = set()
+    parsed = []
+    for row in rows:
+        ts = datetime.fromisoformat(row["ts"])
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        parsed.append((dict(row), ts))
+        all_dates.add(utc_date_str(ts + timedelta(hours=horizon)))
+        all_dates.add(utc_date_str(ts + timedelta(hours=horizon) - timedelta(days=1)))
+    df = store.read_range(sorted(all_dates))
+
+    drifts: list[float] = []
+    skills: list[float] = []
+    for f, ts in parsed:
+        disagreement = f["p_yes"] - f["p_market_at_ts"]
+        if abs(disagreement) < 1e-9:
+            continue
+        later_mid = _mid_at(df, f["condition_id"], ts + timedelta(hours=horizon))
+        if later_mid is None:
+            continue
+        y = f["payout_yes"]
+        drifts.append(float(np.sign(disagreement)) * (later_mid - f["p_market_at_ts"]))
+        skills.append((f["p_market_at_ts"] - y) ** 2 - (f["p_yes"] - y) ** 2)
+
+    min_n = config["eval"].get("clv_null_control_min_n", 30)
+    if len(drifts) < min_n:
+        return {"trusted": True, "reason": "insufficient_n", "n": len(drifts)}
+
+    with np.errstate(invalid="ignore"):
+        correlation = float(np.corrcoef(drifts, skills)[0, 1])
+    if np.isnan(correlation):  # zero variance in one series -- nothing to detect
+        return {"trusted": True, "reason": "zero_variance", "n": len(drifts)}
+
+    max_corr = config["eval"].get("clv_null_control_max_corr", 0.15)
+    return {"trusted": abs(correlation) <= max_corr, "correlation": correlation, "n": len(drifts)}
+
+
+def update_clv_trust_flag(conn, config: dict[str, Any], store: SnapshotStore) -> dict[str, Any]:
+    """Run the validity check and persist the result -- only when the check
+    actually ran with enough data (an abstention must not silently clear a
+    previously-raised untrusted flag, since it re-verified nothing)."""
+    from lab.store.db import set_meta
+
+    result = clv_validity_check(conn, config, store)
+    if "correlation" in result:
+        set_meta(conn, "clv_trusted", "1" if result["trusted"] else "0")
+        conn.commit()
+    return result

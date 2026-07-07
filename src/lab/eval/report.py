@@ -106,6 +106,11 @@ the fitted a gets applied at forecast time.</p>
 {% else %}<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no resolved forecasts to plot.</p>{% endif %}
 
 <h2>CLV-style early signal</h2>
+{% if not clv_trusted %}
+<p class="tier-INSUFFICIENT">CLV UNTRUSTED — see status: this metric correlated with realized skill on
+the sports null control (Phase 17 item 4), where any real correlation should be ~zero. Treat every
+number in this section as unreliable lab-wide until a later check clears this flag.</p>
+{% endif %}
 <p class="note">Mean signed market drift toward the model's view at t+24h / t+72h.
 Positive = the model tends to be early. Needs no resolutions.</p>
 {% if clv_rows %}
@@ -273,6 +278,12 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         plot_path = plot_reliability(bins_by_model, reports / "reliability.png")
         calibration_plot = plot_path.name
 
+    # Phase 17 item 4: sticky lab-wide distrust flag -- set by the nightly
+    # eval job's clv_validity_check(); persists across report renders until a
+    # later check (with enough data to actually re-verify) clears it.
+    from lab.store.db import get_meta
+    clv_trusted = get_meta(conn, "clv_trusted") != "0"
+
     # Phase 17 item 5: gap-aware CLV -- a drift window overlapping a recorded
     # collection gap is excluded rather than silently folded into "no data".
     now = now_utc()
@@ -334,6 +345,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         calibration_plot=calibration_plot,
         clv_rows=clv_rows,
         clv_dropped_for_gap=clv_dropped_for_gap,
+        clv_trusted=clv_trusted,
         wealth_rankings=wealth_rankings,
         wealth_curves_plot=wealth_curves_plot,
         wealth_drawdown_plot=wealth_drawdown_plot,

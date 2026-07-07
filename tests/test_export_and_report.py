@@ -87,6 +87,22 @@ def test_eval_and_report_on_fixtures(config):
     conn.close()
 
 
+def test_report_shows_clv_untrusted_banner_only_when_flagged(config):
+    """Phase 17 item 4: the report reads the sticky clv_trusted meta flag --
+    banner absent by default, present only once the flag is explicitly set."""
+    conn = db.connect(config["storage"]["db_path"])
+    _seed(conn)
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+
+    path = render_report(conn, store, config)
+    assert "CLV UNTRUSTED" not in path.read_text(encoding="utf-8")
+
+    db.set_meta(conn, "clv_trusted", "0")
+    path = render_report(conn, store, config)
+    assert "CLV UNTRUSTED" in path.read_text(encoding="utf-8")
+    conn.close()
+
+
 def _seed_multi_venue(conn):
     """>=2 venues x >=2 categories, enough rows per stratum for skill_pw to
     qualify (min_stratum_n=30, min_strata=3) -- one price bucket per market
