@@ -1,6 +1,7 @@
 # Data and generated artifacts (crown jewels live outside git; back them up separately)
 data/*
 !data/markets_map.yaml
+!data/categories.yaml
 reports/
 
 # Secrets

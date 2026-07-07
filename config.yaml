@@ -230,19 +230,12 @@ venues:
     rate_limit:
       requests_per_second: 8   # brief section 3: Kalshi tolerates ~10 req/s; stay under it
       burst: 16
-    # Kalshi's own /series category field (verified live 2026-07-04), mapped to
-    # our taxonomy so tiering/priority logic matches Polymarket's categories.
+    # Kalshi's own /series category -> our taxonomy mapping now lives in
+    # data/categories.yaml's `kalshi_series` key (Phase 17 item 1 -- a single
+    # versioned taxonomy file instead of one hand-maintained map per venue).
     # Crypto/Financials excluded outright -- same "structurally unforecastable"
     # rule as Polymarket (brief section 3 universe policy): these are 15-min
     # crypto price-target markets, the market price IS the forecast.
-    category_map:
-      Economics: economics
-      "Climate and Weather": weather
-      Politics: politics
-      Elections: politics
-      World: geopolitics
-      Entertainment: entertainment
-      Sports: sports
     excluded_series_categories: ["Crypto", "Financials"]
     max_series_per_sync: 40   # bounds per-cycle series fan-out (politeness + runtime)
     tiers:

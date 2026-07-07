@@ -167,6 +167,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_model_versions_active
   ON model_versions(model_id) WHERE is_active = 1;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wealth_ledger_forecast ON wealth_ledger(forecast_id);
 CREATE INDEX IF NOT EXISTS idx_wealth_ledger_model_category ON wealth_ledger(model_id, category);
+
+-- Phase 17 (v2.4) item 1: every venue-native tag/series that didn't match any
+-- entry in data/categories.yaml's taxonomy and fell back to 'unknown' -- makes
+-- taxonomy drift (a renamed Gamma tag, a new Kalshi series) visible instead of
+-- silently diluting the 'unknown' bucket.
+CREATE TABLE IF NOT EXISTS category_drift_log (
+  id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL,
+  venue TEXT NOT NULL,
+  raw_tag TEXT NOT NULL,
+  fallback_category TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_category_drift_venue ON category_drift_log(venue, raw_tag);
 """
 
 

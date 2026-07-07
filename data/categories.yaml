@@ -1,0 +1,38 @@
+# Phase 17 (v2.4) item 1: versioned internal category taxonomy -- the single
+# source of truth for venue-native tag/series -> internal category mapping.
+# Bump `version` and describe the change in a commit message whenever a
+# mapping changes; universe.py/kalshi_collector.py read this file, they no
+# longer hardcode tag->category maps in Python. Order matters within
+# `polymarket_tags`: first matching category wins (ordered by specificity),
+# mirroring the original TAG_CATEGORY_MAP this file replaces.
+version: 1
+
+categories:
+  - crypto
+  - equities
+  - weather
+  - economics
+  - sports
+  - entertainment
+  - geopolitics
+  - politics
+  - unknown
+
+polymarket_tags:
+  crypto: [crypto, bitcoin, ethereum, solana, memecoins, defi]
+  equities: [stocks, equities, wall-street, big-tech-stocks]
+  weather: [weather, climate, temperature, hurricanes]
+  economics: [economy, economics, fed, fed-rates, inflation, macro, interest-rates, gdp, jobs-report, cpi]
+  sports: [sports, soccer, nba, nfl, mlb, nhl, tennis, golf, f1, ufc, boxing, cricket, esports, olympics, fifa-world-cup, college-football, college-basketball]
+  entertainment: [entertainment, movies, awards, oscars, music, pop-culture, celebrities, tv, grammys]
+  geopolitics: [geopolitics, world, ukraine, israel, china, middle-east, war]
+  politics: [politics, elections, us-politics, trump, congress, us-election, supreme-court]
+
+kalshi_series:
+  Economics: economics
+  "Climate and Weather": weather
+  Politics: politics
+  Elections: politics
+  World: geopolitics
+  Entertainment: entertainment
+  Sports: sports

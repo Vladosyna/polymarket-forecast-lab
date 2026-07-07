@@ -33,6 +33,7 @@ import logging
 from typing import Any
 
 from lab.api.kalshi import KalshiClient, KalshiMarket
+from lab.collect.categories import load_categories
 from lab.store import db
 from lab.store.snapshots import SnapshotStore, floor_ts_bucket
 from lab.util import now_utc, now_utc_iso
@@ -81,7 +82,7 @@ async def sync_kalshi_universe(
     and upsert (idempotent). Returns a summary counts dict, mirroring
     sync_universe()'s shape/logging in collect/universe.py."""
     kalshi_cfg = config["venues"]["kalshi"]
-    category_map: dict[str, str] = kalshi_cfg["category_map"]
+    category_map: dict[str, str] = load_categories()["kalshi_series"]
     excluded = set(kalshi_cfg.get("excluded_series_categories", []))
     max_series = kalshi_cfg.get("max_series_per_sync", 40)
 

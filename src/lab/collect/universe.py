@@ -15,39 +15,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from lab.api.gamma import GammaClient, GammaMarket
+from lab.collect.categories import (
+    category_from_polymarket_tags,
+    load_categories,
+    log_unrecognized_tag,
+)
 from lab.store import db
 from lab.util import now_utc
 
 log = logging.getLogger(__name__)
 
 CRYPTO_HINTS = ("crypto", "bitcoin", "btc", "ethereum", "eth ", "solana", "dogecoin", "xrp")
-
-# Gamma stopped populating markets.category; tags on the parent event are the
-# live category signal. First matching group wins (ordered by specificity).
-TAG_CATEGORY_MAP: list[tuple[str, tuple[str, ...]]] = [
-    ("crypto", ("crypto", "bitcoin", "ethereum", "solana", "memecoins", "defi")),
-    ("equities", ("stocks", "equities", "wall-street", "big-tech-stocks")),
-    ("weather", ("weather", "climate", "temperature", "hurricanes")),
-    ("economics", ("economy", "economics", "fed", "fed-rates", "inflation",
-                    "macro", "interest-rates", "gdp", "jobs-report", "cpi")),
-    ("sports", ("sports", "soccer", "nba", "nfl", "mlb", "nhl", "tennis", "golf",
-                 "f1", "ufc", "boxing", "cricket", "esports", "olympics",
-                 "fifa-world-cup", "college-football", "college-basketball")),
-    ("entertainment", ("entertainment", "movies", "awards", "oscars", "music",
-                        "pop-culture", "celebrities", "tv", "grammys")),
-    ("geopolitics", ("geopolitics", "world", "ukraine", "israel", "china",
-                      "middle-east", "war")),
-    ("politics", ("politics", "elections", "us-politics", "trump", "congress",
-                   "us-election", "supreme-court")),
-]
-
-
-def category_from_tags(tag_slugs: list[str]) -> str:
-    slugs = set(tag_slugs)
-    for category, tags in TAG_CATEGORY_MAP:
-        if slugs & set(tags):
-            return category
-    return "unknown"
 
 
 def _category(m: GammaMarket) -> str:
@@ -124,12 +102,15 @@ async def sync_universe(gamma: GammaClient, conn, config: dict[str, Any]) -> dic
     longer populated -- categories come from event tags.
     """
     now = now_utc()
+    taxonomy = load_categories()
     events = await gamma.iter_events(active="true", closed="false")
     counts = {"events": len(events), "seen": 0, "binary": 0,
               "liquid": 0, "tail": 0, "ignored": 0, "skipped": 0}
     seen_ids: set[str] = set()
     for ev in events:
-        category = category_from_tags(ev.tag_slugs)
+        category = category_from_polymarket_tags(ev.tag_slugs, taxonomy)
+        if category == "unknown" and ev.tag_slugs:
+            log_unrecognized_tag(conn, "polymarket", ",".join(sorted(ev.tag_slugs)))
         for m in ev.markets:
             if m.condition_id in seen_ids:
                 continue
