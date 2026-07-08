@@ -348,6 +348,15 @@ publish:
     snapshots_enabled: true
     db_enabled: true
     db_interval_days: 3
+    # Backs up .env (every API key: DeepSeek/Anthropic, FRED, Metaculus,
+    # NewsAPI, HEARTBEAT_URL, PMXT_API_KEY) into the private results repo
+    # every night as .env.backup, so losing this laptop doesn't mean
+    # re-requesting every key from scratch. No interval gating -- the file
+    # is tiny. See publish.sync_env's docstring for the tradeoff: this puts
+    # every key ever set into that repo's git history permanently, even
+    # after rotation. Confirmed the results repo is a genuinely private
+    # GitHub repo before turning this on.
+    env_enabled: true
 
 # Phase 15 (v2.3): nightly cryptographic pre-registration -- sha256 over each
 # closed UTC day's appended forecasts rows, committed to commitments_path in

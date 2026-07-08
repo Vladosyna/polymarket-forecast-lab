@@ -215,11 +215,15 @@ def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
     cannot be re-downloaded later" is exactly the crown-jewel data this is
     for). data/lab.db additionally pushes only every
     publish.raw_data.db_interval_days when publish.raw_data.db_enabled is
-    set, tracked via a `last_raw_db_push_ts` meta key -- both raw-data knobs
-    default OFF, so an operator who wants only the curated nightly mirror
-    (the pre-Phase-16 behavior) gets exactly that with no config changes.
-    Never raises: a publish failure (e.g. no network) must not block or
-    re-trigger the forecast/eval/report bundle it follows."""
+    set, tracked via a `last_raw_db_push_ts` meta key. .env (every API
+    key/secret) pushes every night when publish.raw_data.env_enabled is set
+    -- no interval gating needed, it's tiny -- so the keys survive even if
+    this laptop is lost; see publish.sync_env's docstring for the git-history
+    tradeoff of backing up secrets at all. All three raw-data knobs default
+    OFF, so an operator who wants only the curated nightly mirror (the
+    pre-Phase-16 behavior) gets exactly that with no config changes. Never
+    raises: a publish failure (e.g. no network) must not block or re-trigger
+    the forecast/eval/report bundle it follows."""
     from lab.publish import publish_results
     from lab.util import now_utc_iso
 
@@ -227,6 +231,7 @@ def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
         return {"skipped": "disabled"}
     raw_cfg = config.get("publish", {}).get("raw_data", {})
     include_snapshots = bool(raw_cfg.get("snapshots_enabled", False))
+    include_env = bool(raw_cfg.get("env_enabled", False))
     conn = db.connect(config["storage"]["db_path"])
     try:
         include_db = bool(raw_cfg.get("db_enabled", False)) and _db_push_due(
@@ -234,6 +239,7 @@ def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
         )
         result = publish_results(
             config, conn, include_snapshots=include_snapshots, include_db=include_db,
+            include_env=include_env,
         )
         if include_db and result.get("committed"):
             db.set_meta(conn, "last_raw_db_push_ts", now_utc_iso())

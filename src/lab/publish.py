@@ -27,6 +27,26 @@ def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
 
 
+def sync_env(results_dir: Path, env_path: Path) -> None:
+    """Back up .env (every API key/secret this lab uses) into the private
+    results repo so a dead laptop doesn't mean re-requesting every key from
+    scratch. Named .env.backup, not .env -- nothing in the results repo's own
+    tooling could accidentally load it as active config.
+
+    Security tradeoff, not free: the results repo is confirmed private, but
+    committing here means every key value ever set lives in that repo's git
+    history permanently, including after rotation (rotating the key in the
+    provider's dashboard does not erase old commits). This is a deliberate,
+    explicit choice to prioritize "don't lose the keys" over "minimize where
+    secrets ever touched disk" -- acceptable for a solo-operator private repo,
+    worth reconsidering before ever adding a second collaborator to it.
+    """
+    if not env_path.exists():
+        return
+    dst = results_dir / ".env.backup"
+    shutil.copy2(env_path, dst)
+
+
 def sync_reports(results_dir: Path, reports_dir: Path) -> None:
     if not reports_dir.exists():
         return
@@ -110,6 +130,7 @@ def publish_results(
     push: bool = True,
     include_snapshots: bool = False,
     include_db: bool = False,
+    include_env: bool = False,
 ) -> dict[str, Any]:
     """Snapshots and the db are independent knobs, not one combined
     "raw data" flag: snapshots are cheap and incremental (only new/changed
@@ -121,7 +142,10 @@ def publish_results(
     passes a few hundred MB. run_publish_job gates `include_db` on an
     interval (publish.raw_data.db_interval_days) using a last-push timestamp
     in `meta` -- this function itself just does what it's told for either
-    flag, independently."""
+    flag, independently. `include_env` is a third, separate knob: .env is
+    tiny (no LFS bandwidth concern) so it needs no interval gating, but see
+    sync_env's own docstring for the security tradeoff of backing up secrets
+    into git history at all, even a private repo's."""
     pub_cfg = config.get("publish", {})
     results_dir = results_dir or (PROJECT_ROOT.parent / pub_cfg.get("results_dir", "../Polymarket-results"))
     results_dir = Path(results_dir).resolve()
@@ -138,6 +162,8 @@ def publish_results(
         n_snapshots = sync_snapshots(results_dir, PROJECT_ROOT / storage["snapshots_dir"])
     if include_db:
         sync_db(results_dir, PROJECT_ROOT / storage["db_path"])
+    if include_env:
+        sync_env(results_dir, PROJECT_ROOT / ".env")
 
     _run_git(["add", "-A"], results_dir)
     diff = _run_git(["diff", "--cached", "--quiet"], results_dir)
@@ -149,7 +175,8 @@ def publish_results(
     if commit.returncode != 0:
         return {"committed": False, "reason": "commit_failed", "stderr": commit.stderr}
 
-    result = {"committed": True, "ts": ts, "snapshot_files_copied": n_snapshots, "db_included": include_db}
+    result = {"committed": True, "ts": ts, "snapshot_files_copied": n_snapshots,
+             "db_included": include_db, "env_included": include_env}
     if push:
         pushed = _run_git(["push"], results_dir)
         result["pushed"] = pushed.returncode == 0

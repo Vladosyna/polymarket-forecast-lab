@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from lab.jobs import _db_push_due, run_publish_job
-from lab.publish import publish_results, sync_db
+from lab.publish import publish_results, sync_db, sync_env
 from lab.store import db
 from lab.store.snapshots import SnapshotStore
 from lab.util import load_config, now_utc, now_utc_iso
@@ -194,3 +194,51 @@ def test_sync_db_overwrites_a_stale_unsmudged_lfs_pointer_stub(config, tmp_path)
     conn = sqlite3.connect(str(dst_dir / "lab.db"))
     conn.execute("SELECT name FROM sqlite_master LIMIT 1")  # raises if still not a valid db
     conn.close()
+
+
+def test_sync_env_copies_dotenv_to_results_dir(tmp_path):
+    results_dir = tmp_path / "results_repo"
+    _init_git_repo(results_dir)
+    env_path = tmp_path / ".env"
+    env_path.write_text("DEEPSEEK_API_KEY=fake-key-123\n", encoding="utf-8")
+
+    sync_env(results_dir, env_path)
+
+    dst = results_dir / ".env.backup"
+    assert dst.exists()
+    assert dst.read_text(encoding="utf-8") == "DEEPSEEK_API_KEY=fake-key-123\n"
+
+
+def test_sync_env_noop_when_dotenv_missing(tmp_path):
+    results_dir = tmp_path / "results_repo"
+    _init_git_repo(results_dir)
+
+    sync_env(results_dir, tmp_path / "does_not_exist.env")
+
+    assert not (results_dir / ".env.backup").exists()
+
+
+def test_run_publish_job_calls_sync_env_only_when_env_enabled(config, monkeypatch):
+    """publish_results/run_publish_job wire include_env through to sync_env --
+    monkeypatched rather than exercised against the real project .env (which
+    holds real secrets and has no configurable path), same precedent as the
+    heartbeat test above."""
+    import lab.publish
+
+    calls = []
+
+    def fake_sync_env(results_dir, env_path):
+        calls.append(env_path)
+        # Write something so the second call has a real git diff to commit --
+        # otherwise "no_changes" short-circuits before env_included is set.
+        (Path(results_dir) / ".env.backup").write_text("fake", encoding="utf-8")
+
+    monkeypatch.setattr(lab.publish, "sync_env", fake_sync_env)
+
+    run_publish_job(config)  # env_enabled unset -> defaults off
+    assert calls == []
+
+    config["publish"]["raw_data"]["env_enabled"] = True
+    result = run_publish_job(config)
+    assert result.get("env_included") is True
+    assert len(calls) == 1

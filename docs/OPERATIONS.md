@@ -246,8 +246,17 @@ procedure was last actually executed, by whom, and with what result.
 
 ## Key inventory and rotation
 
-All keys live **only** in `.env`, which is gitignored and present in neither git remote
-(confirmed by inspecting the private results repo directly — it has no `.env` file).
+All keys live in `.env`, which is gitignored in **this** repo and never touches the
+public remote. As of `publish.raw_data.env_enabled: true` (default on), `.env` is
+additionally backed up as `.env.backup` into the private results repo
+(`forecast-lab-results`, confirmed a genuinely private GitHub repo) every night via
+`run_publish_job` — so losing this laptop doesn't mean re-requesting every key from
+scratch. This is a deliberate tradeoff, not a free lunch: every key value ever set now
+lives permanently in that private repo's git history, including after rotation
+(rotating a key at the provider only replaces the value in the live `.env`; old commits
+still hold the old value). Acceptable for a solo-operator private repo; reconsider before
+ever adding a second collaborator to `forecast-lab-results`, or before making it public.
+Set `env_enabled: false` in `config.yaml` to opt back out.
 
 | Key | Used for | Rotate at | Notes |
 |---|---|---|---|
