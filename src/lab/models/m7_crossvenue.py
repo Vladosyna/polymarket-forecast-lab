@@ -16,6 +16,7 @@ m6_consistency.py's scan_universe()/write_m6_forecasts() split.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ from lab.util import PROJECT_ROOT, now_utc_iso
 log = logging.getLogger(__name__)
 
 DEFAULT_MAP_PATH = PROJECT_ROOT / "data" / "markets_map.yaml"
+DEFAULT_PMXT_CANDIDATES_PATH = PROJECT_ROOT / "data" / "pmxt_candidates.json"
 
 
 def load_markets_map(path: Path | None = None) -> dict[str, Any]:
@@ -466,4 +468,112 @@ def propose_matches(conn, config: dict[str, Any], kalshi_candidates, llm,
             })
     data.setdefault("proposed", []).extend(proposals)
     save_markets_map(data, markets_map_path)
+    return proposals
+
+
+PMXT_VERIFY_SYSTEM = """You verify a SUGGESTED cross-venue prediction-market match for a
+research pipeline. A third-party matching tool has proposed that ONE Polymarket question
+and ONE Kalshi market describe the same real-world event with the same resolution
+criteria. Judge independently -- the third-party tool's own confidence score is context,
+not ground truth; it is sometimes wrong. Respond ONLY with a JSON object:
+{"match": bool, "confidence": float 0.0-1.0, "rationale": str}
+Be conservative: a wrong match is worse than a missed one."""
+
+
+def _pmxt_verify_prompt(poly_question: str, poly_description: str | None, kalshi_title: str,
+                        relation_type: str, pmxt_confidence: float) -> str:
+    return "\n".join([
+        f"POLYMARKET QUESTION: {poly_question}",
+        f"POLYMARKET RESOLUTION CRITERIA: {poly_description or '(none on file)'}",
+        "",
+        f"SUGGESTED KALSHI MATCH: {kalshi_title}",
+        "",
+        f"THIRD-PARTY TOOL'S OWN VERDICT: relation_type={relation_type}, confidence={pmxt_confidence}",
+    ])
+
+
+def load_pmxt_candidates(path: Path | None = None) -> list[dict[str, Any]]:
+    """Raw candidate pairs from scripts/pmxt_router_scan.py's own scheduled
+    task -- an out-of-band process, never called from inside this codebase
+    (see that script's docstring for why). A missing or unreadable file just
+    means nothing to verify yet, not an error."""
+    p = path or DEFAULT_PMXT_CANDIDATES_PATH
+    if not p.exists():
+        return []
+    try:
+        loaded = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        log.warning("m7: pmxt candidates file unreadable", extra={"ctx": {"path": str(p)}})
+        return []
+    return loaded if isinstance(loaded, list) else []
+
+
+def verify_pmxt_candidates(conn, config: dict[str, Any], llm,
+                          candidates_path: Path | None = None,
+                          markets_map_path: Path | None = None,
+                          ) -> list[dict[str, Any]]:
+    """Second, independent check on pmxt's out-of-band Router suggestions.
+    pmxt is a THIRD-PARTY tool proposing candidates the same way the LLM does
+    in propose_matches -- it earns no special trust just because a different
+    tool produced it, and a human still confirms every pair in
+    markets_map.yaml before M7 ever reads it (unchanged propose-then-confirm
+    contract).
+
+    Consumes (clears) the candidates file every run regardless of outcome --
+    the next scheduled pmxt scan repopulates it fresh, and re-verifying the
+    same stale candidates forever would just burn LLM budget on pairs already
+    accepted, rejected, or since resolved/delisted.
+    """
+    candidates = load_pmxt_candidates(candidates_path)
+    if not candidates:
+        return []
+
+    data = load_markets_map(markets_map_path)
+    already = {(e["condition_id"], e["venue"]) for e in data.get("confirmed", []) + data.get("proposed", [])}
+
+    proposals: list[dict[str, Any]] = []
+    for c in candidates:
+        condition_id = c.get("poly_condition_id")
+        kalshi_ticker = c.get("kalshi_ticker")
+        if not condition_id or not kalshi_ticker or (condition_id, "kalshi") in already:
+            continue
+        row = conn.execute(
+            "SELECT question, description FROM markets WHERE condition_id = ?", (condition_id,)
+        ).fetchone()
+        question = (row["question"] if row else None) or c.get("poly_question")
+        if not question:
+            continue
+        description = row["description"] if row else None
+
+        text, _usage = llm.complete(
+            PMXT_VERIFY_SYSTEM,
+            _pmxt_verify_prompt(question, description, c.get("kalshi_title", ""),
+                                c.get("relation_type", "unknown"), float(c.get("confidence", 0.0))),
+            purpose="m7_pmxt_verify",
+        )
+        try:
+            parsed = json.loads(text.strip().strip("`").removeprefix("json"))
+        except (json.JSONDecodeError, AttributeError):
+            log.warning("m7: invalid pmxt-verify JSON", extra={"ctx": {"condition_id": condition_id}})
+            continue
+        if not parsed.get("match"):
+            continue
+        proposals.append({
+            "condition_id": condition_id, "question": question,
+            "venue": "kalshi", "external_id": kalshi_ticker,
+            "external_question": c.get("kalshi_title", ""),
+            "rationale": parsed.get("rationale", ""),
+            "confidence": float(parsed.get("confidence", 0.0)),
+            "proposed_ts": now_utc_iso(),
+            "source": "pmxt",
+            "source_meta": {"relation_type": c.get("relation_type"),
+                           "pmxt_confidence": c.get("confidence")},
+        })
+        already.add((condition_id, "kalshi"))
+
+    if proposals:
+        data.setdefault("proposed", []).extend(proposals)
+        save_markets_map(data, markets_map_path)
+
+    (candidates_path or DEFAULT_PMXT_CANDIDATES_PATH).write_text("[]", encoding="utf-8")
     return proposals

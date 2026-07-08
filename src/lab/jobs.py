@@ -129,7 +129,7 @@ def run_map_propose_job(config: dict[str, Any]) -> dict[str, Any]:
     would for M3."""
     from lab.api.http import TokenBucket
     from lab.api.kalshi import KalshiClient
-    from lab.models.m7_crossvenue import propose_matches
+    from lab.models.m7_crossvenue import kalshi_propose_candidates, propose_matches
     from lab.news.extract import create_llm_client
 
     conn = db.connect(config["storage"]["db_path"])
@@ -138,12 +138,20 @@ def run_map_propose_job(config: dict[str, Any]) -> dict[str, Any]:
         if llm is None:
             log.info("map propose job: no LLM configured, skipping")
             return {"skipped": "no_llm"}
-        async def _fetch_candidates() -> list[Any]:
+        async def _fetch_candidates() -> dict[str, list[Any]]:
             bucket = TokenBucket(rate=config["collect"]["rate_limit"]["requests_per_second"],
                                  burst=config["collect"]["rate_limit"]["burst"])
             kalshi = KalshiClient(bucket)
             try:
-                return await kalshi.open_markets(limit=200)
+                # Category-scoped, not a bare open_markets(limit=200) -- that
+                # pulled whatever Kalshi considers globally "open" (verified
+                # live to be dominated by garbled multi-leg sports-combo
+                # products), crowding out real Economics/Politics/Weather
+                # candidates entirely. cli.py's `lab map propose` and the
+                # dashboard button were already fixed to use this; this
+                # scheduled path was the one call site still on the old,
+                # buggy fetch.
+                return await kalshi_propose_candidates(kalshi, config)
             finally:
                 await kalshi.aclose()
 
@@ -153,6 +161,33 @@ def run_map_propose_job(config: dict[str, Any]) -> dict[str, Any]:
         conn.close()
     result = {"new_proposals": len(proposals)}
     log.info("map propose job complete", extra={"ctx": result})
+    return result
+
+
+def run_pmxt_verify_job(config: dict[str, Any]) -> dict[str, Any]:
+    """Twice-daily companion to the weekly LLM-based `run_map_propose_job`:
+    verifies candidate pairs an out-of-band pmxt Router scan
+    (scripts/pmxt_router_scan.py, its own separate Windows Scheduled Task --
+    never called from this process, see that script's docstring) wrote to
+    data/pmxt_candidates.json, and appends the ones our own LLM check agrees
+    with into markets_map.yaml's `proposed` list. Same propose-then-confirm
+    contract as run_map_propose_job -- a human still runs `lab map confirm`
+    before a pair is ever live. Skips cleanly if no LLM is configured or no
+    candidates file exists yet."""
+    from lab.models.m7_crossvenue import verify_pmxt_candidates
+    from lab.news.extract import create_llm_client
+
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        llm = create_llm_client(conn, config)
+        if llm is None:
+            log.info("pmxt verify job: no LLM configured, skipping")
+            return {"skipped": "no_llm"}
+        proposals = verify_pmxt_candidates(conn, config, llm)
+    finally:
+        conn.close()
+    result = {"new_proposals": len(proposals)}
+    log.info("pmxt verify job complete", extra={"ctx": result})
     return result
 
 

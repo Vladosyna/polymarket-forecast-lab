@@ -69,6 +69,36 @@ a substitute for the other.
 
 Both scheduled tasks, the venv, and all scripts live under `D:\Polymarket`.
 
+**Third scheduled task — pmxt Router scan (M7, out-of-band, separate from everything
+above).** `PolymarketForecastLabPmxtScan`, twice daily (05:00 and 17:00 local), runs
+`uv run --with pmxt python scripts\pmxt_router_scan.py`. This is deliberately its own
+task, not part of the orchestrator or the watchdog: pmxt is a third-party unified
+prediction-market **trading** SDK (Claude.md tech-stack row / §12) — its hosted API key
+(`PMXT_API_KEY` in `.env`) can also authorize live trading, so per Claude.md's own rule it
+must never be imported into `src/lab` or run by any automated process this repo owns.
+`uv run --with pmxt` installs it into an ephemeral environment for just that one
+invocation — `pyproject.toml` is never touched, so pmxt never becomes this project's own
+dependency.
+
+The scan writes `data\pmxt_candidates.json` (raw pairs pmxt's Router thinks might be the
+same event across Polymarket and Kalshi). A **second, independent** step —
+`verify_pmxt_candidates`, wired into the orchestrator's own scheduler at
+`cross_venue.pmxt_verify_cron` (twice daily, default 06:00/18:00 **UTC** — deliberately
+~1h behind the scan's local-time triggers so fresh candidates are usually ready) — reads
+that file, runs our own LLM check on each pair (pmxt's own confidence score is treated as
+context, not ground truth), and only THEN appends anything it agrees with into
+`data\markets_map.yaml`'s `proposed` list. A human still runs `lab map confirm` (CLI or
+the dashboard's Cross-Venue Matching mode) before any pair is ever live — nothing pmxt
+surfaces is ever auto-confirmed.
+
+Install: `powershell -ExecutionPolicy Bypass -File scripts\install-pmxt-scan-task.ps1`.
+Remove: `scripts\uninstall-pmxt-scan-task.ps1`. **First-run caveat:** pmxt's exact Router
+response field names were assembled from partial public docs and could not be live-tested
+in advance (the same "never run from inside the lab's own process" rule that this task
+exists to satisfy also meant it couldn't be dry-run from the assistant session that wrote
+it). Run it once by hand after installing and watch for a line starting `pmxt schema
+mismatch` — if you see one, the printed raw object dump is enough to get a quick fix.
+
 ---
 
 ## Cold-start restart procedure
@@ -226,6 +256,7 @@ All keys live **only** in `.env`, which is gitignored and present in neither git
 | `METACULUS_API_KEY` | M7 cross-venue signal input, M1.x recalibration | Requires a real Metaculus account (anonymous access removed as of 2026-07-03) | |
 | `NEWSAPI_KEY` | Optional M3 retrieval augmentation | `newsapi.org` | Google News RSS works without it — this key is optional |
 | `HEARTBEAT_URL` | Phase 18 dead-man heartbeat | Any healthchecks.io-class free monitoring service, no card required | Absent = feature silently off: no error, no forecast-quality impact, just no external monitoring |
+| `PMXT_API_KEY` | M7 out-of-band pmxt Router scan (`scripts\pmxt_router_scan.py`, its own separate scheduled task — see above) | `pmxt.dev` dashboard | **Trading-capable key** — the same hosted key also authorizes live order placement/escrow custody on pmxt's other endpoints, even though this repo only ever calls its read-only Router search. Never used by `src/lab` or any process this repo schedules directly — only by the standalone scan script, on its own task. Rotate immediately if this key is ever suspected leaked, same urgency as a trading credential, not a read-only data key. |
 
 **`HEARTBEAT_URL` setup notes:** prefer a "Cron" check type over a "Simple" check type
 if the monitoring service offers one. Both the collector loop (every

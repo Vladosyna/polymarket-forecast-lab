@@ -102,8 +102,9 @@ def test_orchestrator_job_registration(tmp_path):
         _register_health_check(scheduler, config, ctx, actx)
 
         job_ids = {job.id for job in scheduler.get_jobs()}
-        assert job_ids >= {"nightly", "weekly", "monthly", "health_check", "heartbeat_ping"}
-        assert len(job_ids) >= 9  # 4 collector + heartbeat_ping + 3 analytics + health_check
+        assert job_ids >= {"nightly", "weekly", "monthly", "health_check", "heartbeat_ping",
+                           "map_propose_weekly", "pmxt_verify_twice_daily"}
+        assert len(job_ids) >= 10  # 4 collector + heartbeat_ping + 4 analytics + health_check
 
         health = scheduler.get_job("health_check")
         assert health is not None

@@ -17,11 +17,13 @@ from lab.models.m7_crossvenue import (
     kalshi_propose_candidates,
     link_confirmed_event,
     load_markets_map,
+    load_pmxt_candidates,
     pool_log_odds,
     propose_matches,
     reject_match,
     save_markets_map,
     scan_confirmed_pairs,
+    verify_pmxt_candidates,
     write_m7_forecasts,
 )
 from lab.store import db
@@ -651,5 +653,140 @@ def test_propose_matches_skips_already_proposed_pair(config, tmp_path):
 
     proposals = propose_matches(conn, config, candidates, llm, markets_map_path=map_path)
     assert proposals == []  # already proposed -- LLM not asked to re-propose it
+    assert llm.calls == 0
+    conn.close()
+
+
+def test_load_pmxt_candidates_missing_file_returns_empty(tmp_path):
+    assert load_pmxt_candidates(tmp_path / "does_not_exist.json") == []
+
+
+def test_load_pmxt_candidates_malformed_json_returns_empty(tmp_path):
+    path = tmp_path / "pmxt_candidates.json"
+    path.write_text("{not valid json", encoding="utf-8")
+    assert load_pmxt_candidates(path) == []
+
+
+def _insert_market(conn, condition_id="0x1", question="Will the Fed cut rates in March?",
+                   description="FOMC statement decides"):
+    conn.execute(
+        """INSERT INTO markets (condition_id, slug, question, category, description,
+                                end_date_iso, token_id_yes, tier, active, closed,
+                                liquidity_num, volume_num)
+           VALUES (?, 's', ?, 'economics', ?, '2026-12-31T00:00:00+00:00', 'tok',
+                   'liquid', 1, 0, 200000, 5000000)""",
+        (condition_id, question, description),
+    )
+    conn.commit()
+
+
+def test_verify_pmxt_candidates_no_file_returns_empty_without_calling_llm(config, tmp_path):
+    conn = db.connect(config["storage"]["db_path"])
+    llm = FakeLlm({"match": True, "confidence": 0.9, "rationale": "x"})
+    proposals = verify_pmxt_candidates(conn, config, llm,
+                                       candidates_path=tmp_path / "missing.json",
+                                       markets_map_path=tmp_path / "markets_map.yaml")
+    assert proposals == []
+    assert llm.calls == 0
+    conn.close()
+
+
+def test_verify_pmxt_candidates_appends_matched_pair_with_pmxt_source(config, tmp_path):
+    conn = db.connect(config["storage"]["db_path"])
+    _insert_market(conn)
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+    cand_path = tmp_path / "pmxt_candidates.json"
+    cand_path.write_text(json.dumps([{
+        "poly_condition_id": "0x1", "poly_question": "Will the Fed cut rates in March?",
+        "kalshi_ticker": "FEDMAR", "kalshi_title": "Fed cuts rates in March FOMC meeting",
+        "relation_type": "identity", "confidence": 0.77, "scanned_ts": "2026-07-08T00:00:00+00:00",
+    }]), encoding="utf-8")
+
+    llm = FakeLlm({"match": True, "confidence": 0.9, "rationale": "same FOMC decision"})
+    proposals = verify_pmxt_candidates(conn, config, llm, candidates_path=cand_path,
+                                       markets_map_path=map_path)
+
+    assert len(proposals) == 1
+    p = proposals[0]
+    assert p["condition_id"] == "0x1" and p["venue"] == "kalshi" and p["external_id"] == "FEDMAR"
+    assert p["source"] == "pmxt"
+    assert p["source_meta"] == {"relation_type": "identity", "pmxt_confidence": 0.77}
+    assert llm.calls == 1
+
+    data = load_markets_map(map_path)
+    assert data["confirmed"] == []  # never auto-confirms
+    assert len(data["proposed"]) == 1
+
+    # File consumed so a stale scan isn't re-verified forever.
+    assert json.loads(cand_path.read_text(encoding="utf-8")) == []
+    conn.close()
+
+
+def test_verify_pmxt_candidates_skips_llm_rejected_pair(config, tmp_path):
+    conn = db.connect(config["storage"]["db_path"])
+    _insert_market(conn)
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+    cand_path = tmp_path / "pmxt_candidates.json"
+    cand_path.write_text(json.dumps([{
+        "poly_condition_id": "0x1", "poly_question": "Will the Fed cut rates in March?",
+        "kalshi_ticker": "FEDMAR", "kalshi_title": "totally unrelated market",
+        "relation_type": "loose", "confidence": 0.4, "scanned_ts": "2026-07-08T00:00:00+00:00",
+    }]), encoding="utf-8")
+
+    llm = FakeLlm({"match": False, "confidence": 0.1, "rationale": "different events"})
+    proposals = verify_pmxt_candidates(conn, config, llm, candidates_path=cand_path,
+                                       markets_map_path=map_path)
+
+    assert proposals == []
+    assert load_markets_map(map_path)["proposed"] == []
+    # Still consumed even when rejected -- a stale rejected pair shouldn't be
+    # re-asked forever either.
+    assert json.loads(cand_path.read_text(encoding="utf-8")) == []
+    conn.close()
+
+
+def test_verify_pmxt_candidates_skips_already_confirmed_or_proposed_pair(config, tmp_path):
+    conn = db.connect(config["storage"]["db_path"])
+    _insert_market(conn)
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map(
+        {"confirmed": [{"condition_id": "0x1", "venue": "kalshi", "external_id": "FEDMAR"}],
+         "proposed": []},
+        map_path,
+    )
+    cand_path = tmp_path / "pmxt_candidates.json"
+    cand_path.write_text(json.dumps([{
+        "poly_condition_id": "0x1", "poly_question": "Will the Fed cut rates in March?",
+        "kalshi_ticker": "FEDMAR", "kalshi_title": "Fed cuts rates in March FOMC meeting",
+        "relation_type": "identity", "confidence": 0.9, "scanned_ts": "2026-07-08T00:00:00+00:00",
+    }]), encoding="utf-8")
+
+    llm = FakeLlm({"match": True, "confidence": 0.9, "rationale": "x"})
+    proposals = verify_pmxt_candidates(conn, config, llm, candidates_path=cand_path,
+                                       markets_map_path=map_path)
+
+    assert proposals == []
+    assert llm.calls == 0  # already confirmed -- never re-asked
+    conn.close()
+
+
+def test_verify_pmxt_candidates_skips_malformed_entry_missing_fields(config, tmp_path):
+    conn = db.connect(config["storage"]["db_path"])
+    _insert_market(conn)
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+    cand_path = tmp_path / "pmxt_candidates.json"
+    cand_path.write_text(json.dumps([
+        {"poly_question": "missing poly_condition_id", "kalshi_ticker": "X"},
+        {"poly_condition_id": "0x1", "poly_question": "missing kalshi_ticker"},
+    ]), encoding="utf-8")
+
+    llm = FakeLlm({"match": True, "confidence": 0.9, "rationale": "x"})
+    proposals = verify_pmxt_candidates(conn, config, llm, candidates_path=cand_path,
+                                       markets_map_path=map_path)
+
+    assert proposals == []
     assert llm.calls == 0
     conn.close()

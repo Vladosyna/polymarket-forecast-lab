@@ -247,6 +247,10 @@ elif mode == "Cross-Venue Matching (M7)":
                 st.markdown(f"**Polymarket:** {_question_for(e['condition_id'])}")
                 st.markdown(f"**Kalshi ({e['external_id']}):** {e.get('external_question', '')}")
                 st.caption(f"confidence={e.get('confidence', 0):.2f} — {e.get('rationale', '')}")
+                if e.get("source") == "pmxt":
+                    meta = e.get("source_meta", {}) or {}
+                    st.caption(f"source: pmxt Router (relation_type={meta.get('relation_type')}, "
+                              f"pmxt_confidence={meta.get('pmxt_confidence')}) — verified by our own LLM check")
                 c1, c2 = st.columns(2)
                 if c1.button("Confirm", key=f"confirm_{key}"):
                     fresh = load_markets_map()

@@ -215,6 +215,7 @@ schedule:
     forecast_max_age_hours: 24     # nightly bundle should run at least daily
     shadow_max_age_hours: 168      # weekly -> 7 days
     learn_max_age_hours: 720       # monthly -> 30 days
+    pmxt_verify_max_age_hours: 18  # twice-daily -> catch-up if a ~12h cycle is missed
   # Hourly health/liveness check: re-runs overdue analytics services and forces
   # a collection cycle if the collector has stalled (liquid snapshots too old).
   health_check_interval_minutes: 60
@@ -269,6 +270,13 @@ cross_venue:
   # retroactively. Bounded fan-out: this only ever touches the small,
   # human-confirmed pair set, never the wider universe.
   hf_snapshot_interval_minutes: 1
+  # pmxt Router candidates (Claude.md tech-stack row / §12): a THIRD-PARTY
+  # tool proposes raw pairs entirely out-of-band via its own separate Windows
+  # Scheduled Task (scripts/pmxt_router_scan.py + install-pmxt-scan-task.ps1)
+  # -- never imported into src/lab or called from this process. This job only
+  # reads the plain data/pmxt_candidates.json that scan writes and runs our
+  # own independent LLM check on each pair before it ever reaches `proposed`.
+  pmxt_verify_cron: "0 6,18 * * *"  # twice daily, 06:00 and 18:00 UTC
 
 # --- Multi-venue collectors (Phase 10, v1.9) -------------------------------
 # Each venue gets its OWN TokenBucket instance (per-host rate limiters, brief

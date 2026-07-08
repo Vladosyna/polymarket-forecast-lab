@@ -327,7 +327,7 @@ async def run_collect(config: dict[str, Any]) -> None:
         log.info("collector stopped")
 
 
-SERVICE_NAMES = ("forecast", "shadow", "learn", "map_propose")
+SERVICE_NAMES = ("forecast", "shadow", "learn", "map_propose", "pmxt_verify")
 
 
 @dataclass
@@ -345,6 +345,7 @@ def _control_max_ages(config: dict[str, Any]) -> dict[str, float]:
         "shadow": control.get("shadow_max_age_hours", 168),
         "learn": control.get("learn_max_age_hours", 720),
         "map_propose": control.get("map_propose_max_age_hours", 168),
+        "pmxt_verify": control.get("pmxt_verify_max_age_hours", 18),
     }
 
 
@@ -399,11 +400,15 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
     async def run_map_propose_service() -> None:
         await _run("map_propose", lambda: asyncio.to_thread(analytics.run_map_propose_job, config))
 
+    async def run_pmxt_verify_service() -> None:
+        await _run("pmxt_verify", lambda: asyncio.to_thread(analytics.run_pmxt_verify_job, config))
+
     return {
         "forecast": run_forecast_service,
         "shadow": run_shadow_service,
         "learn": run_learn_service,
         "map_propose": run_map_propose_service,
+        "pmxt_verify": run_pmxt_verify_service,
     }
 
 
@@ -441,6 +446,8 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
     learn_cron = sched.get("learn_cron", "0 4 1 * *")         # monthly 1st 04:00
     map_propose_cron = config.get("cross_venue", {}).get(
         "propose_cron", "0 5 * * 1")                          # weekly Mon 05:00
+    pmxt_verify_cron = config.get("cross_venue", {}).get(
+        "pmxt_verify_cron", "0 6,18 * * *")                    # twice daily 06:00/18:00
 
     services = _build_analytics_services(config)
     actx = AnalyticsContext(services=services, max_age_hours=_control_max_ages(config))
@@ -455,9 +462,16 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
     # has to run `lab map confirm` before a pair goes live (brief section 6/9).
     scheduler.add_job(services["map_propose"], CronTrigger.from_crontab(map_propose_cron, timezone="UTC"),
                       id="map_propose_weekly", max_instances=1, coalesce=True)
+    # M7: verifies pmxt's out-of-band Router suggestions (data/pmxt_candidates.json,
+    # written by scripts/pmxt_router_scan.py's own separate scheduled task --
+    # never called from this process). Same propose-only, never-auto-confirm
+    # contract as map_propose above.
+    scheduler.add_job(services["pmxt_verify"], CronTrigger.from_crontab(pmxt_verify_cron, timezone="UTC"),
+                      id="pmxt_verify_twice_daily", max_instances=1, coalesce=True)
     log.info("analytics scheduled",
              extra={"ctx": {"nightly": forecast_cron, "weekly": shadow_cron,
                             "monthly": learn_cron, "map_propose": map_propose_cron,
+                            "pmxt_verify": pmxt_verify_cron,
                             "control": actx.max_age_hours}})
     return actx
 
