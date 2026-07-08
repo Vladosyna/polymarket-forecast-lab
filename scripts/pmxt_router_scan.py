@@ -56,10 +56,21 @@ OUTPUT_PATH = REPO_ROOT / "data" / "pmxt_candidates.json"
 
 
 def _attr(obj, *names, default=None):
-    """First present attribute across possible pmxt schema spellings."""
+    """First NON-NONE attribute across possible pmxt schema spellings.
+
+    Confirmed live: pmxt's UnifiedMarket is a pydantic-style model where every
+    declared field always "exists" (hasattr is True) even when the venue
+    didn't populate it -- e.g. contract_address is a real declared attribute
+    on a Kalshi-origin object, just set to None. An earlier hasattr-based
+    version of this helper stopped at the first candidate name that merely
+    EXISTED, never falling through to a later name when the value was
+    present-but-None -- which is exactly why kalshi_ticker kept resolving to
+    None instead of falling through to a working field.
+    """
     for name in names:
-        if hasattr(obj, name):
-            return getattr(obj, name)
+        val = getattr(obj, name, None)
+        if val is not None:
+            return val
     return default
 
 
@@ -87,6 +98,17 @@ def _query_terms(config: dict) -> list[str]:
     return queries
 
 
+def _dump(obj) -> str:
+    """Best-effort raw repr for diagnosing an unknown pmxt object shape."""
+    if hasattr(obj, "__dict__"):
+        return repr(vars(obj))
+    if hasattr(obj, "_asdict"):
+        return repr(obj._asdict())
+    if hasattr(obj, "model_dump"):  # pydantic v2
+        return repr(obj.model_dump())
+    return repr(obj)
+
+
 def main() -> None:
     api_key = os.environ.get("PMXT_API_KEY", "").strip()
     if not api_key:
@@ -102,56 +124,91 @@ def main() -> None:
     seen_pairs: set[tuple[str, str]] = set()
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+    # Diagnostics -- printed regardless of outcome so a 0-candidate run is
+    # distinguishable from "the schema guesses are all wrong and everything
+    # got silently filtered out before ever reaching a schema-mismatch check".
+    total_clusters = 0
+    dumped_cluster_sample = False
+    dumped_poly_kalshi_pair = False
+
     for query in _query_terms(config):
         try:
-            markets = router.fetch_markets(query=query, limit=10)
+            # Per docs.pmxt.dev/api-reference/getV0Matched-market-clusters:
+            # fetch_matched_market_clusters takes its OWN query/venues/
+            # relation/min_confidence filters directly -- no need for a
+            # separate fetch_markets() call first. relation="identity"
+            # (same resolution criteria) is actually the endpoint's own
+            # default, passed explicitly here for clarity. venues= restricts
+            # server-side to just the two venues M7 cares about.
+            clusters = router.fetch_matched_market_clusters(
+                query=query, relation="identity", venues="polymarket,kalshi",
+                min_confidence=0.5, limit=20,
+            )
         except Exception as exc:  # noqa: BLE001 -- log and keep scanning other queries
-            print(f"fetch_markets(query={query!r}) failed: {exc}")
+            print(f"fetch_matched_market_clusters(query={query!r}) failed: {exc}")
             continue
 
-        for m in markets:
-            venue = (_attr(m, "venue", "exchange", "source") or "").lower()
-            if venue != "polymarket":
-                continue
-            poly_id = _attr(m, "market_id", "id", "condition_id")
-            poly_question = _attr(m, "question", "title", "name")
-            if poly_id is None or poly_question is None:
-                print(f"pmxt schema mismatch on a Polymarket market object: {vars(m) if hasattr(m, '__dict__') else m!r}")
+        print(f"query={query!r}: {len(clusters)} cluster(s) returned")
+        total_clusters += len(clusters)
+
+        for cluster in clusters:
+            if not dumped_cluster_sample:
+                print(f"sample cluster object (first one seen): {_dump(cluster)}")
+                dumped_cluster_sample = True
+            confidence = _attr(cluster, "confidence", "score", default=0.0)
+            cluster_markets = _attr(cluster, "markets", default=[]) or []
+
+            poly = next((mkt for mkt in cluster_markets
+                        if (_attr(mkt, "source_exchange", "venue", default="") or "").lower() == "polymarket"),
+                       None)
+            kalshi = next((mkt for mkt in cluster_markets
+                          if (_attr(mkt, "source_exchange", "venue", default="") or "").lower() == "kalshi"),
+                         None)
+            if poly is None or kalshi is None:
+                continue  # cluster matched, but not a Polymarket<->Kalshi pair
+
+            if not dumped_poly_kalshi_pair:
+                # Print unconditionally, not just on a None-mismatch: contract_address
+                # is CONFIRMED as Polymarket's conditionId, but NOT confirmed as
+                # Kalshi's ticker -- the MarketOutcome schema separately documents
+                # "Market Ticker for Kalshi" living on outcome_id, one level down,
+                # which may mean the market-level ticker is elsewhere entirely
+                # (slug? source_metadata?). Seeing the real values side by side is
+                # the only way to resolve this rather than guessing again.
+                print(f"first Polymarket<->Kalshi pair found -- poly={_dump(poly)}")
+                print(f"                                          kalshi={_dump(kalshi)}")
+                dumped_poly_kalshi_pair = True
+
+            # Both confirmed from a real run's raw dump: contract_address is
+            # Polymarket's conditionId (e.g. '0xe017...'); Kalshi objects
+            # leave contract_address None entirely, but populate `slug` with
+            # the real venue ticker (e.g. 'KXPRESPERSON-28-NHAL') -- Polymarket's
+            # own `slug` is a URL slug, not useful, so this priority order is
+            # deliberately different per venue rather than one shared list.
+            poly_condition_id = _attr(poly, "contract_address", "market_id")
+            poly_question = _attr(poly, "title", "question", "name")
+            kalshi_ticker = _attr(kalshi, "slug", "contract_address", "market_id")
+            kalshi_title = _attr(kalshi, "title", "question", "name", default="")
+            if poly_condition_id is None or poly_question is None or kalshi_ticker is None:
+                print(f"pmxt schema mismatch on a cluster market object: "
+                     f"poly={_dump(poly)} kalshi={_dump(kalshi)}")
                 continue
 
-            try:
-                clusters = router.fetch_matched_market_clusters(m)
-            except Exception as exc:  # noqa: BLE001
-                print(f"fetch_matched_market_clusters failed for {poly_id}: {exc}")
+            key = (str(poly_condition_id), str(kalshi_ticker))
+            if key in seen_pairs:
                 continue
+            seen_pairs.add(key)
+            candidates.append({
+                "poly_condition_id": str(poly_condition_id),
+                "poly_question": poly_question,
+                "kalshi_ticker": str(kalshi_ticker),
+                "kalshi_title": kalshi_title,
+                "relation_type": "identity",
+                "confidence": float(confidence),
+                "scanned_ts": now_iso,
+            })
 
-            for cluster in clusters:
-                relation_type = _attr(cluster, "relation_type", "relation", default="unknown")
-                confidence = _attr(cluster, "confidence", "score", default=0.0)
-                cluster_markets = _attr(cluster, "markets", default=[]) or []
-                for matched in cluster_markets:
-                    matched_venue = (_attr(matched, "venue", "exchange", "source") or "").lower()
-                    if matched_venue != "kalshi":
-                        continue
-                    kalshi_ticker = _attr(matched, "market_id", "id", "ticker")
-                    kalshi_title = _attr(matched, "question", "title", "name", default="")
-                    if kalshi_ticker is None:
-                        print(f"pmxt schema mismatch on a Kalshi cluster member: "
-                             f"{vars(matched) if hasattr(matched, '__dict__') else matched!r}")
-                        continue
-                    key = (str(poly_id), str(kalshi_ticker))
-                    if key in seen_pairs:
-                        continue
-                    seen_pairs.add(key)
-                    candidates.append({
-                        "poly_condition_id": str(poly_id),
-                        "poly_question": poly_question,
-                        "kalshi_ticker": str(kalshi_ticker),
-                        "kalshi_title": kalshi_title,
-                        "relation_type": relation_type,
-                        "confidence": float(confidence),
-                        "scanned_ts": now_iso,
-                    })
+    print(f"diagnostics: total_clusters_seen={total_clusters}")
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(candidates, indent=2), encoding="utf-8")

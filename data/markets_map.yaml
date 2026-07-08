@@ -37,4 +37,176 @@ confirmed:
   external_question: Will Genter Drummond be the Republican nominee for Governor in
     Oklahoma?
   confirmed_ts: '2026-07-07T13:32:25+00:00'
-proposed: []
+- condition_id: '0x37ec4c6b57a18b16eed1241f6155ee7ff45bc1697d7848f15ac33d406e38ed00'
+  question: Will Michelle Bolsonaro win the 2026 Brazilian presidential election?
+  venue: kalshi
+  external_id: KXBRPRES-26-MB
+  external_question: Will Michelle Bolsonaro win the 2026 Brazilian presidential election?
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-08T11:57:13+00:00'
+- condition_id: '0xce9a5fa30fe74e323b4a8f15afbb0b7a41a537aa880779ddf7dee22223b2f34a'
+  question: Will Donald Trump win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-DTRU
+  external_question: Who will win the next presidential election?
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-08T11:57:32+00:00'
+- condition_id: '0x81a537b379a35e4e17c286d3b37394e94bd74c1779bbe9a13670eb991b201a3a'
+  question: Will Tarcisio de Freitas win the 2026 Brazilian presidential election?
+  venue: kalshi
+  external_id: KXBRPRES-26-TDF
+  external_question: Will Tarcisio de Frietas win the 2026 Brazilian presidential
+    election?
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-08T11:57:40+00:00'
+- condition_id: '0x8126317d621047fb13d508a2651eecc8d38305904671822a62309c5aabd353aa'
+  question: Will Marine Le Pen win the 2027 French presidential election?
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-MLEP
+  external_question: Will Marine Le Pen win the 2027 French presidential election?
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-08T11:57:46+00:00'
+- condition_id: '0x06ea9c02b4c6a2f7f07f78e21411bd367636564edb27c72cd038b556aada1a64'
+  question: Will Mathilde Panot win the 2027 French presidential election?
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-MPAN
+  external_question: Will Mathilde Panot win the 2027 French presidential election?
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-08T11:57:57+00:00'
+proposed:
+- condition_id: '0xbca3d70ec52a5a441ccc365a3b1b48b9cd0f08dfff4bc5871e2cd92d0d92caa1'
+  question: Will Ronaldo Caiado win the 2026 Brazilian presidential election?
+  venue: kalshi
+  external_id: KXBRPRES-26-RCAI
+  external_question: Will Ronaldo Caiado win the 2026 Brazilian presidential election?
+  rationale: Both markets ask whether Ronaldo Caiado will win the 2026 Brazilian presidential
+    election, with identical resolution criteria (based on the election result, including
+    a potential second round, confirmed by credible reporting or official TSE results).
+    The tool's high confidence is justified as the question text and resolution details
+    are nearly verbatim across platforms.
+  confidence: 0.95
+  proposed_ts: '2026-07-08T11:55:56+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x054725b2a7971376f7924a7021221b12acc50fe78d97817824fe411704d5b5a2'
+  question: Will Romeu Zema win the 2026 Brazilian presidential election?
+  venue: kalshi
+  external_id: KXBRPRES-26-RZEM
+  external_question: Will Romeu Zema win the 2026 Brazilian presidential election?
+  rationale: 'Both the Polymarket question and the Kalshi question ask exactly the
+    same binary event: whether Romeu Zema will win the 2026 Brazilian presidential
+    election. The resolution criteria align on the election date (October 4, 2026)
+    and authority (official results from the TSE or credible reporting). There is
+    no discrepancy in scope, timeline, or definition of ''win.'' The third-party tool''s
+    identity verdict at confidence 1.0 is consistent with this direct textual and
+    semantic match.'
+  confidence: 1.0
+  proposed_ts: '2026-07-08T11:56:05+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0xbac8d3ca6cc7297022850562d9d66669d5e0a112767337f8a5955417f1984b54'
+  question: Will Olivier Faure win the 2027 French presidential election?
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-OFAU
+  external_question: Will Olivier Faure win the 2027 French presidential election?
+  rationale: Both Polymarket and Kalshi questions ask whether Olivier Faure will win
+    the 2027 French presidential election, with consistent resolution criteria focusing
+    on the next presidential election outcome regardless of early or scheduled timing.
+    The naming and event are identical, and the third-party tool's high confidence
+    is corroborated by direct comparison.
+  confidence: 1.0
+  proposed_ts: '2026-07-08T11:56:11+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0x4c799a8378d60f34f055cf5c61fc3f6f1a6e7abe5d5384ef37961c506eab867c'
+  question: "Will Fran\xE7ois Ruffin win the 2027 French presidential election?"
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-FRUF
+  external_question: "Will Fran\xE7ois Ruffin win the 2027 French presidential election?"
+  rationale: "Both Polymarket and Kalshi questions ask whether Fran\xE7ois Ruffin\
+    \ will win the 2027 French presidential election, sharing the same event, candidate,\
+    \ and temporal scope. The resolution criteria on Polymarket (standard two-round\
+    \ system, runoff included, credible reporting/official results, deadline Dec 31,\
+    \ 2027) is consistent with typical election outcome resolution, and Kalshi's question\
+    \ implies identical resolution focus. No substantive differences in event definition\
+    \ or resolution conditions are apparent. Third-party tool also reports identity\
+    \ with high confidence."
+  confidence: 1.0
+  proposed_ts: '2026-07-08T11:56:14+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0xfd431e070263b5f24e43a8fc44532bf41aa008d99cab2330d979913b1c580bd2'
+  question: "Will Ya\xEBl Braun-Pivet win the 2027 French presidential election?"
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-YBRA
+  external_question: "Will Ya\xEBl Braun-Pivet win the 2027 French presidential election?"
+  rationale: "Both Polymarket and Kalshi questions are identical in phrasing ('Will\
+    \ Ya\xEBl Braun-Pivet win the 2027 French presidential election?') and clearly\
+    \ refer to the same future event with the same candidate and election year. The\
+    \ Polymarket resolution criteria specify standard election rules (two-round system,\
+    \ consensus of credible reporting or official French government results) that\
+    \ align with any reasonable resolution for this event. No significant differences\
+    \ in scope or criteria are apparent. Third-party tool confidence of 0.95 is high\
+    \ and consistent with independent assessment. However, a slight discount is applied\
+    \ due to potential future changes in election timing or candidate status, though\
+    \ the core identity is strong."
+  confidence: 0.95
+  proposed_ts: '2026-07-08T11:56:21+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x06a27c2810eaca94b53e7a17f15ad47761399ba445a6b02039b2679da203262d'
+  question: Will Xavier Bertrand win the 2027 French presidential election?
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-XBER
+  external_question: Will Xavier Bertrand win the 2027 French presidential election?
+  rationale: Both the Polymarket question and Kalshi market ask whether Xavier Bertrand
+    will win the 2027 French presidential election. Resolution criteria align on the
+    event, candidate, and election timeline. The third-party tool's high confidence
+    is consistent with the clear identity match.
+  confidence: 0.95
+  proposed_ts: '2026-07-08T11:56:23+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x0b4fdc620f5aeafbfa8603a7fe9f3dd2dbae70e73aa157c8c94275676043ce06'
+  question: Will Laurent Wauquiez win the 2027 French presidential election?
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-LWAU
+  external_question: Will Laurent Wauquiez win the 2027 French presidential election?
+  rationale: 'Both markets ask the exact same binary question about whether Laurent
+    Wauquiez will win the 2027 French presidential election. The resolution criteria
+    are substantively identical: both refer to the winner of the next French presidential
+    election, including potential runoffs, and rely on official or credible reporting.
+    There is no mismatch in event, timing, or entity.'
+  confidence: 0.95
+  proposed_ts: '2026-07-08T11:56:25+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
