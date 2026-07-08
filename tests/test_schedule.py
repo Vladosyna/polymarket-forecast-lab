@@ -102,12 +102,16 @@ def test_orchestrator_job_registration(tmp_path):
         _register_health_check(scheduler, config, ctx, actx)
 
         job_ids = {job.id for job in scheduler.get_jobs()}
-        assert job_ids >= {"nightly", "weekly", "monthly", "health_check"}
-        assert len(job_ids) >= 8  # 4 collector + 3 analytics + health_check
+        assert job_ids >= {"nightly", "weekly", "monthly", "health_check", "heartbeat_ping"}
+        assert len(job_ids) >= 9  # 4 collector + heartbeat_ping + 3 analytics + health_check
 
         health = scheduler.get_job("health_check")
         assert health is not None
         assert health.trigger.interval.total_seconds() == 60 * 60
+
+        hb = scheduler.get_job("heartbeat_ping")
+        assert hb is not None
+        assert hb.trigger.interval.total_seconds() == 5 * 60
 
         await ctx.aclose()
 

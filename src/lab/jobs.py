@@ -202,6 +202,8 @@ def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
         )
         if include_db and result.get("committed"):
             db.set_meta(conn, "last_raw_db_push_ts", now_utc_iso())
+        from lab.heartbeat import send_heartbeat
+        asyncio.run(send_heartbeat("backup"))
     except Exception:
         log.exception("publish job failed")
         return {"error": "publish_failed"}

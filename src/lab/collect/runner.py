@@ -42,6 +42,7 @@ from lab.collect.metaculus_collector import snapshot_metaculus, watch_metaculus_
 from lab.collect.resolutions import watch_resolutions
 from lab.collect.snapshots import snapshot_markets, snapshot_tier, tracked_markets_by_ids
 from lab.collect.universe import sync_universe
+from lab.heartbeat import send_heartbeat
 from lab.store import db
 from lab.store.snapshots import SnapshotStore, floor_ts_bucket
 from lab.util import PROJECT_ROOT, now_utc, now_utc_iso
@@ -191,6 +192,18 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
     scheduler.add_job(job_snap_tail, "interval", minutes=cadence["tail"])
     scheduler.add_job(job_resolutions, "interval",
                       minutes=config["collect"]["resolution_poll_minutes"])
+
+    # Phase 18: unconditional, unlike the 4 jobs above -- deliberately does NOT
+    # check is_paused(). The heartbeat's whole point is proving the process/
+    # event-loop itself is alive; if it went silent only because the operator
+    # deliberately dropped data/PAUSE for maintenance, the operator should NOT
+    # get a false "collector is dead" alert. So it pings every tick, PAUSE or not.
+    async def job_heartbeat_ping() -> None:
+        await send_heartbeat("collector")
+
+    scheduler.add_job(job_heartbeat_ping, "interval",
+                      minutes=config.get("ops", {}).get("heartbeat_interval_minutes", 5),
+                      id="heartbeat_ping", max_instances=1, coalesce=True)
 
     # --- Phase 10: external-venue collectors, each on its own TokenBucket ---
     venues_cfg = config.get("venues", {})

@@ -228,6 +228,17 @@ schedule:
 watchdog:
   restart_delay_seconds: 600   # 10 minutes
 
+# --- Phase 18: dead-man heartbeat (optional) ------------------------------
+# Outbound-only ping to a healthchecks.io-class endpoint; HEARTBEAT_URL unset
+# in .env means this is silently off (brief S12 carve-out -- an outbound
+# ping is not a notification bot; the external monitoring service does the
+# alerting, our code never does). Both the collector loop (this interval)
+# and the nightly backup job ping the SAME url at their own natural cadence
+# -- if setting this up for real, prefer healthchecks.io's "Cron" check type
+# over "Simple", since two different cadences hit one check.
+ops:
+  heartbeat_interval_minutes: 5
+
 # --- Cross-venue signal (M7, Phase 9, optional) --------------------------
 # `data/markets_map.yaml` is the confirmed-pairs source of truth (hardcoded
 # path, same precedent as M6's links.yaml). `lab map propose` only covers

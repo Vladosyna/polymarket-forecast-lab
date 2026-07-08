@@ -152,6 +152,27 @@ def test_run_publish_job_skipped_when_disabled(config):
     assert run_publish_job(config) == {"skipped": "disabled"}
 
 
+def test_run_publish_job_pings_heartbeat_on_success(config, monkeypatch):
+    """Phase 18: the dead-man heartbeat fires on run_publish_job's success path
+    (jobs.py imports lab.heartbeat.send_heartbeat lazily by name inside the
+    function, so patching the attribute on the lab.heartbeat module -- not on
+    lab.jobs -- is what takes effect)."""
+    import lab.heartbeat
+
+    calls = []
+
+    async def fake_send_heartbeat(source):
+        calls.append(source)
+        return True
+
+    monkeypatch.setattr(lab.heartbeat, "send_heartbeat", fake_send_heartbeat)
+
+    result = run_publish_job(config)
+
+    assert result.get("committed") is True
+    assert calls == ["backup"]
+
+
 def test_sync_db_overwrites_a_stale_unsmudged_lfs_pointer_stub(config, tmp_path):
     """Real bug found live: a results-repo checkout can hold an unsmudged Git
     LFS pointer stub (a small text file) where the real lab.db binary should

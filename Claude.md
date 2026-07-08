@@ -1,6 +1,6 @@
 # Polymarket Forecast Lab — Implementation Brief for Claude Code
 
-**v2.4** — post-completion review: distributional (RPS/CRPS) scoring for bucketed numeric events (Phase 16 — same events, more signal per resolution); BOCPD event-triggered off-schedule `lab learn` (changes when a batch runs, never how much it may move) with guardrail 14's wording amended to match; optional quarterly full-Bayes shrinkage audit; observation-quality pack (Phase 17): stable category taxonomy, depth-based tiering (volume is wash-trading-contaminated), matched-event high-frequency capture for the lead-lag hypothesis, CLV validity diagnostic on the null control, gap-aware derived metrics.
+**v2.6** — the final gap: operations hardening (Phase 18) — dead-man heartbeat (the brief's own named worst failure is a silently dead collector, and the operator travels for weeks at a time), operator runbook, tested backup restore. §12 amended: a passive outbound heartbeat is not a "notification bot." No model work remains; everything further should come from data, not code.
 
 **Read this entire document before writing any code.** It is the single source of truth for this project. Work through the phases in order. Each phase has acceptance criteria — do not move to the next phase until they pass.
 
@@ -32,7 +32,7 @@ The system continuously collects public market data, generates timestamped proba
 |---|---|---|
 | Language | Python 3.12 | |
 | Env/deps | `uv` | `pyproject.toml`, locked |
-| HTTP | `httpx` (async) + `tenacity` | thin hand-written clients; do NOT use `py-clob-client` (trading SDK, auth baggage we must not have) |
+| HTTP | `httpx` (async) + `tenacity` | thin hand-written clients; do NOT use `py-clob-client` or any unified trading SDK (e.g. pmxt) as a runtime dependency — read-only usage of a trading SDK still pulls signing/custody code into the dependency tree, and the scope guard (§9.5) greps our own `src/`, not installed packages, so it wouldn't catch the drift. Tools of this kind (pmxt's matching engine included) are fine run out-of-band, by a human, to produce a file this repo then commits — never imported into `src/lab`. |
 | Storage: state | SQLite via `sqlite3` stdlib | single file `data/lab.db`, WAL mode |
 | Storage: time series | Parquet via `polars` | partitioned by date under `data/snapshots/` |
 | Schemas | `pydantic` v2 | all API responses validated |
@@ -345,7 +345,7 @@ One thin adapter per category. Do not generalize prematurely — two adapters is
 
 **M6 `m6_consistency` — cross-market coherence scanner.** Deterministic, no LLM. Within a negRisk event, mutually exclusive YES prices must sum to ≈ 1 — record the deviation. For logically linked market pairs (curated `links.yaml`, starts empty), check conditional-probability bounds. Output is a signal attached to forecasts (direction + magnitude of incoherence); M6 emits standalone forecasts only for incoherent legs, pulling them toward the coherent joint solution.
 
-**M7 `m7_crossvenue` — cross-venue signal on matched questions.** For markets that also trade on Kalshi or carry a Metaculus community prediction, output the log-odds pool of the *external* venues' probabilities — Polymarket's own price stays out (M0 already carries it; the ensemble learns how much to trust each source). Question matching is the failure point and is handled conservatively: a curated `data/markets_map.yaml` where the LLM may *propose* candidate matches (question texts + resolution criteria side by side), but a human confirms every pair before it goes live — one mismatched pair silently poisons the signal. External prices are snapshotted at forecast ts under the same freshness rule (§9.13). Deterministic at forecast time; no LLM call in the loop.
+**M7 `m7_crossvenue` — cross-venue signal on matched questions.** For markets that also trade on Kalshi or carry a Metaculus community prediction, output the log-odds pool of the *external* venues' probabilities — Polymarket's own price stays out (M0 already carries it; the ensemble learns how much to trust each source). Question matching is the failure point and is handled conservatively: a curated `data/markets_map.yaml` where candidates are *proposed* (by the LLM, or — faster and likely more accurate for this specific job — a human running a third-party matching tool like pmxt's Router out-of-band, per §2's dependency rule) but a human confirms every pair before it goes live — one mismatched pair silently poisons the signal. `markets_map.yaml`, not whatever proposed it, is the committed source of truth read at forecast time — this is what keeps the pipeline reproducible (Phase 15) regardless of which proposer tool comes and goes. External prices are snapshotted at forecast ts under the same freshness rule (§9.13). Deterministic at forecast time; no LLM call in the loop.
 
 **M4 `m4_ensemble`.** Log-odds weighted pool of M0–M3, M5–M7; weights fit per category on a rolling window of resolved forecasts (equal weights until ≥100 resolved samples in that category), with the same 2%/60% per-model floor and ceiling given to the MWU challenger below (added here in v2.2 for parity — the incumbent shouldn't be less protected against streak-driven weight concentration than the challenger trying to unseat it). v1.9 adds a per-category **extremization exponent** `a ∈ [1.0, 2.5]` (config caps) applied to the pooled logit, fitted in `lab learn` under the bounded-step and challenger rules. Extremization compensates for the pool's shrink toward 0.5 — but only to the degree the sources are independent: scale it with the effective source count `n_eff = n / (1 + (n − 1) · ρ̄)`, where ρ̄ is the mean pairwise correlation of source log-odds estimated on matched events. Correlated venues must not be extremized as if independent; the same n_eff discount applies to M7's external pool. Where M5 exists it should dominate — the fit will discover that; don't hand-tune. (Model IDs are stable; the numbering is historical, ensemble stays last in the pipeline.)
 
@@ -541,6 +541,14 @@ Tasks:
 - **Gap-aware derived metrics:** CLV/drift windows overlapping a recorded collection gap are excluded and counted; the report shows how many windows were dropped and why.
 **Accept when:** a taxonomy remap on a fixture leaves per-category fit keys unchanged; tier assignment provably uses depth on a fixture where volume and depth disagree; HF cadence activates only on confirmed pairs and stays inside rate limits; the CLV diagnostic renders with the null control; gap exclusion is counted on a fixture with a synthetic outage; `test_scope.py` still green.
 
+### Phase 18 — Operations hardening (final)
+No model work. Three items closing the gap between "built" and "safely unattended" — the operator travels for weeks at a time, and the system must survive without a keyboard.
+Tasks:
+- **Dead-man heartbeat:** the collector loop and the nightly backup job emit an outbound HTTPS heartbeat to a free monitoring endpoint (healthchecks.io-class; URL in `.env` as `HEARTBEAT_URL`, absent = feature silently off). If heartbeats stop, the external service alerts the operator by email — our code never notifies anyone itself (§12 carve-out). This directly addresses §11's named worst failure: the collector dying silently.
+- **Operator runbook:** `docs/OPERATIONS.md` — what runs where (host, service/unit names), cold-start restart procedure, the PAUSE file, backup location and restore procedure, key inventory with rotation steps (LLM provider, FRED, Metaculus, heartbeat URL), and what each `lab status` red flag means and what to do about it.
+- **Backup-restore drill:** one-time now, then quarterly per the runbook: restore `data/` from the private backup repo onto a clean checkout, run `lab status` and the full test suite against the restored state, record the date in the runbook. An untested backup is a hope, not a backup.
+**Accept when:** killing the collector demonstrably stops heartbeats and the monitoring service registers the lapse (manual check, documented in the runbook); a cold-start restart succeeds by following `OPERATIONS.md` literally, with any missing step fixed in the doc rather than improvised; the restore drill has been executed once with its date recorded; `test_scope.py` still green.
+
 ---
 
 ## 11. Operations
@@ -555,7 +563,7 @@ Tasks:
 
 ## 12. Explicitly out of scope (do not build)
 
-Order execution or anything touching wallets/keys (belongs in downstream projects — §13); VPN/proxy logic; Betfair (requires an account); Kalshi *trading* endpoints — its read-only market data is in scope via Phases 9–10; ALL crypto/equity price-target markets, not just sub-24h pulses; a database server; user auth; Docker (plain `uv` is fine); notification bots. If a task seems to require any of these, stop and flag it instead.
+Order execution or anything touching wallets/keys (belongs in downstream projects — §13); VPN/proxy logic; Betfair (requires an account); Kalshi *trading* endpoints — its read-only market data is in scope via Phases 9–10; ALL crypto/equity price-target markets, not just sub-24h pulses; a database server; user auth; Docker (plain `uv` is fine); notification bots — with one carve-out: the passive dead-man heartbeat of Phase 18 is not one (our code only emits an outbound ping; the external monitoring service does the notifying). If a task seems to require any of these, stop and flag it instead.
 
 ---
 
