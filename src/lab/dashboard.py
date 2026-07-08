@@ -25,6 +25,9 @@ from datetime import timedelta
 
 import polars as pl
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from lab.collect.status import gather_status
 from lab.eval.report import latest_eval_rows
