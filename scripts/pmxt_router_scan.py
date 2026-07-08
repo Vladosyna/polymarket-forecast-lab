@@ -24,6 +24,15 @@ lab.models.m7_crossvenue.verify_pmxt_candidates, which is the only code
 path that ever writes into data/markets_map.yaml -- nothing here is
 auto-confirmed; a human still runs `lab map confirm`.
 
+Two independent ways this script avoids re-spending pmxt API calls (and
+downstream LLM verification calls) on pairs already handled: (1)
+data/pmxt_scan_state.json tracks the timestamp of the last successful scan
+and passes it as `updated_since` on every call, so pmxt itself only returns
+clusters it has touched since then; (2) candidates already present in
+data/markets_map.yaml's `confirmed` or `proposed` lists are filtered out
+before being written to the output file at all, regardless of what pmxt
+returns.
+
 NOTE ON FIELD NAMES: pmxt's exact Router response schema (attribute names on
 its Market/Cluster objects) was assembled from partial public docs and could
 not be live-tested from the assistant session that wrote this script (the
@@ -50,9 +59,36 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(REPO_ROOT / ".env")
 
 from lab.collect.categories import load_categories  # noqa: E402
+from lab.models.m7_crossvenue import load_markets_map  # noqa: E402
 from lab.util import load_config  # noqa: E402
 
 OUTPUT_PATH = REPO_ROOT / "data" / "pmxt_candidates.json"
+STATE_PATH = REPO_ROOT / "data" / "pmxt_scan_state.json"
+
+
+def _load_last_scan_ts() -> str | None:
+    if not STATE_PATH.exists():
+        return None
+    try:
+        return json.loads(STATE_PATH.read_text(encoding="utf-8")).get("last_scan_ts")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_last_scan_ts(ts: str) -> None:
+    STATE_PATH.write_text(json.dumps({"last_scan_ts": ts}), encoding="utf-8")
+
+
+def _known_pairs() -> set[tuple[str, str]]:
+    """(condition_id, external_id) pairs already confirmed or proposed --
+    from ANY source, not just pmxt. Skipping these here saves an LLM
+    verification call downstream and keeps the candidates file focused on
+    genuinely new suggestions; updated_since (below) already does most of
+    the work of not re-fetching unchanged pmxt matches in the first place."""
+    data = load_markets_map()
+    return {(e["condition_id"], e["external_id"])
+           for e in data.get("confirmed", []) + data.get("proposed", [])
+           if e.get("venue") == "kalshi"}
 
 
 def _attr(obj, *names, default=None):
@@ -120,9 +156,17 @@ def main() -> None:
     config = load_config()
     router = pmxt.Router(pmxt_api_key=api_key)
 
+    known_pairs = _known_pairs()
+    last_scan_ts = _load_last_scan_ts()
+    if last_scan_ts:
+        print(f"updated_since={last_scan_ts} ({len(known_pairs)} pair(s) already known, will be skipped)")
+    else:
+        print(f"no prior scan state -- full scan ({len(known_pairs)} pair(s) already known, will be skipped)")
+
     candidates: list[dict] = []
     seen_pairs: set[tuple[str, str]] = set()
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    skipped_known = 0
 
     # Diagnostics -- printed regardless of outcome so a 0-candidate run is
     # distinguishable from "the schema guesses are all wrong and everything
@@ -140,10 +184,15 @@ def main() -> None:
             # (same resolution criteria) is actually the endpoint's own
             # default, passed explicitly here for clarity. venues= restricts
             # server-side to just the two venues M7 cares about.
-            clusters = router.fetch_matched_market_clusters(
-                query=query, relation="identity", venues="polymarket,kalshi",
-                min_confidence=0.5, limit=20,
-            )
+            kwargs = {"query": query, "relation": "identity", "venues": "polymarket,kalshi",
+                     "min_confidence": 0.5, "limit": 20}
+            if last_scan_ts:
+                # Only clusters pmxt has touched since our last successful
+                # scan -- an already-known, unchanged match won't come back
+                # at all, so we stop re-spending API calls (and downstream
+                # LLM re-verification) on the same pairs every run.
+                kwargs["updated_since"] = last_scan_ts
+            clusters = router.fetch_matched_market_clusters(**kwargs)
         except Exception as exc:  # noqa: BLE001 -- log and keep scanning other queries
             print(f"fetch_matched_market_clusters(query={query!r}) failed: {exc}")
             continue
@@ -198,6 +247,13 @@ def main() -> None:
             if key in seen_pairs:
                 continue
             seen_pairs.add(key)
+            if key in known_pairs:
+                # Already confirmed or already sitting in `proposed` (from
+                # pmxt or the LLM path) -- skip so the candidates file, and
+                # the LLM verification pass that consumes it, both stay
+                # focused on genuinely new suggestions.
+                skipped_known += 1
+                continue
             candidates.append({
                 "poly_condition_id": str(poly_condition_id),
                 "poly_question": poly_question,
@@ -208,11 +264,16 @@ def main() -> None:
                 "scanned_ts": now_iso,
             })
 
-    print(f"diagnostics: total_clusters_seen={total_clusters}")
+    print(f"diagnostics: total_clusters_seen={total_clusters} skipped_already_known={skipped_known}")
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(candidates, indent=2), encoding="utf-8")
     print(f"wrote {len(candidates)} candidate(s) to {OUTPUT_PATH}")
+
+    # Only advance the watermark after a fully successful pass -- if this run
+    # crashed partway through, the next run should still see everything from
+    # last_scan_ts onward rather than silently skipping whatever it missed.
+    _save_last_scan_ts(now_iso)
 
 
 if __name__ == "__main__":
