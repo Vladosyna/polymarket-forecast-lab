@@ -87,6 +87,33 @@ def test_eval_and_report_on_fixtures(config):
     conn.close()
 
 
+def test_report_renders_universe_exclusion_section(config):
+    """Phase 15 acceptance: the report shows daily universe_log exclusion
+    counts by reason_code, gated on there being any rows in the window."""
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+
+    path = render_report(conn, store, config)
+    assert "INSUFFICIENT DATA — no universe_log rows in this window yet." in path.read_text(encoding="utf-8")
+
+    ts = now_utc().isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO universe_log (ts, venue, venue_native_id, reason_code) VALUES (?, 'polymarket', '0x1', 'low_liquidity')",
+        (ts,),
+    )
+    conn.execute(
+        "INSERT INTO universe_log (ts, venue, venue_native_id, reason_code) VALUES (?, 'polymarket', '0x2', 'crypto_price_target')",
+        (ts,),
+    )
+    conn.commit()
+
+    path = render_report(conn, store, config)
+    html = path.read_text(encoding="utf-8")
+    assert "low_liquidity" in html
+    assert "crypto_price_target" in html
+    conn.close()
+
+
 def test_report_shows_clv_untrusted_banner_only_when_flagged(config):
     """Phase 17 item 4: the report reads the sticky clv_trusted meta flag --
     banner absent by default, present only once the flag is explicitly set."""

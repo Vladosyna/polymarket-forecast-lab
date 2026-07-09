@@ -91,6 +91,27 @@ def sync() -> None:
 
 
 @app.command()
+def exclude(
+    venue: str = typer.Argument(..., help="e.g. polymarket, kalshi."),
+    venue_native_id: str = typer.Argument(..., help="condition_id or venue-native market id."),
+) -> None:
+    """Manually record a market as excluded from the universe (Phase 15's
+    universe_log, reason_code='manual') -- a thin, log-only annotation, not a
+    propose/confirm flow: it does not itself stop the market from being
+    forecast if it's otherwise eligible."""
+    from lab.collect.universe import log_universe_exclusion
+    from lab.store import db
+
+    conn = db.connect(load_config()["storage"]["db_path"])
+    try:
+        log_universe_exclusion(conn, venue, venue_native_id, "manual")
+        conn.commit()
+    finally:
+        conn.close()
+    typer.echo(f"exclude: logged ({venue}, {venue_native_id}) as manual")
+
+
+@app.command()
 def collect() -> None:
     """Run the long-lived collection process (snapshots + resolution watcher)."""
     from lab.collect.runner import run_collect

@@ -137,6 +137,21 @@ def test_venues_seeded_with_brief_flags(conn):
     assert rows["manifold"] == {"venue": "manifold", "trust_tier": "play", "forecastable": 0, "in_m7_pool": 0}
 
 
+def test_universe_log_table_exists_and_accepts_rows(conn):
+    """Phase 15: universe_log is a brand-new table (CREATE TABLE IF NOT
+    EXISTS), no ALTER migration needed -- just confirm it's created and
+    accepts a row with the expected columns."""
+    conn.execute(
+        "INSERT INTO universe_log (ts, venue, venue_native_id, reason_code) VALUES (?, ?, ?, ?)",
+        ("2026-07-09T00:00:00+00:00", "polymarket", "0xabc", "low_liquidity"),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM universe_log").fetchone()
+    assert row["venue"] == "polymarket"
+    assert row["venue_native_id"] == "0xabc"
+    assert row["reason_code"] == "low_liquidity"
+
+
 def test_venue_condition_id():
     assert db.venue_condition_id("polymarket", "0xabc") == "0xabc"
     assert db.venue_condition_id("kalshi", "KXFOO-26") == "kalshi:KXFOO-26"

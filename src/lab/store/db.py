@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -180,6 +180,21 @@ CREATE TABLE IF NOT EXISTS category_drift_log (
   fallback_category TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_category_drift_venue ON category_drift_log(venue, raw_tag);
+
+-- Phase 15 (v2.3/v2.7): every market considered and excluded from the universe,
+-- with a reason code -- answers "why isn't X in the ledger" and defends against
+-- selection-bias claims in review (brief section 5/15). No CHECK constraint on
+-- reason_code: it is deliberately an open, non-exhaustive enum (see
+-- collect/universe.py for which codes are actually populated today).
+CREATE TABLE IF NOT EXISTS universe_log (
+  id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL,
+  venue TEXT NOT NULL, venue_native_id TEXT NOT NULL,
+  reason_code TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_universe_log_ts ON universe_log(ts);
+CREATE INDEX IF NOT EXISTS idx_universe_log_reason ON universe_log(reason_code);
+CREATE INDEX IF NOT EXISTS idx_universe_log_venue_native ON universe_log(venue, venue_native_id);
 """
 
 

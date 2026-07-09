@@ -6,6 +6,15 @@ clear the tail thresholds, else `ignored`. Markets without a live order book
 are `ignored` regardless. Excluded categories (crypto/equities) stay in the
 DB as `ignored` so calibration stats can still use them, except sub-24h
 crypto "pulse" markets which are skipped entirely.
+
+Phase 15's `universe_log` records every exclusion with a reason code:
+'non_binary', 'crypto_price_target', 'no_orderbook', 'low_liquidity' (all via
+`log_universe_exclusion`, called from `sync_universe`), plus 'tail_price'
+(a forecast-target exclusion, orthogonal to tiering -- see `_mid_lookup`) and
+'manual' (the `lab exclude` CLI command). 'ambiguous_resolution' is
+deliberately NOT auto-populated: no safe deterministic detector exists for
+resolution-wording ambiguity, and inventing one would itself be the kind of
+editorial judgment guardrail 12 forbids.
 """
 
 from __future__ import annotations
@@ -22,7 +31,7 @@ from lab.collect.categories import (
 )
 from lab.store import db
 from lab.store.snapshots import SnapshotStore, utc_date_str
-from lab.util import now_utc
+from lab.util import now_utc, now_utc_iso
 
 log = logging.getLogger(__name__)
 
@@ -74,11 +83,11 @@ def is_sub_24h_crypto(m: GammaMarket, now: datetime) -> bool:
 
 
 def assign_tier(m: GammaMarket, config: dict[str, Any]) -> str:
-    return assign_tier_with_category(m, _category(m), config)
+    return assign_tier_with_category(m, _category(m), config)[0]
 
 
 def assign_tier_with_category(m: GammaMarket, category: str, config: dict[str, Any],
-                              depth_usd: float | None = None) -> str:
+                              depth_usd: float | None = None) -> tuple[str, str | None]:
     """Phase 17 item 2: once we have our own collected order-book depth for a
     market, tier on THAT (depth_usd = bid_depth_usd + ask_depth_usd from the
     latest snapshot) instead of Gamma's self-reported liquidity_num/volume_num
@@ -86,26 +95,32 @@ def assign_tier_with_category(m: GammaMarket, category: str, config: dict[str, A
     sports) and was never a sound tiering signal, just the only one available
     pre-collection. A brand-new market has no snapshot yet (depth_usd is
     None); it falls back to the liquidity/volume path below until one exists.
+
+    Returns (tier, reason_code): reason_code is populated only when tier ==
+    'ignored', for universe_log (Phase 15) -- callers log it so a market that
+    never gets a forecast row (tier='ignored' is excluded from
+    eligible_market_states just like a market never upserted at all) still
+    answers "why isn't X in the ledger".
     """
     if m.enable_order_book is False or m.accepting_orders is False:
-        return "ignored"
+        return "ignored", "no_orderbook"
     if (category in set(config["universe"]["excluded_categories"]) or _looks_crypto(m)
             or _looks_equity_price_target(m)):
-        return "ignored"
+        return "ignored", "crypto_price_target"
     tiers = config["universe"]["tiers"]
     if depth_usd is not None:
         if depth_usd >= tiers["liquid"]["min_depth_usd"]:
-            return "liquid"
+            return "liquid", None
         if depth_usd >= tiers["tail"]["min_depth_usd"]:
-            return "tail"
-        return "ignored"
+            return "tail", None
+        return "ignored", "low_liquidity"
     liq = m.liquidity_num or 0.0
     vol = m.volume_num or 0.0
     if liq >= tiers["liquid"]["min_liquidity"] and vol >= tiers["liquid"]["min_volume"]:
-        return "liquid"
+        return "liquid", None
     if liq >= tiers["tail"]["min_liquidity"] and vol >= tiers["tail"]["min_volume"]:
-        return "tail"
-    return "ignored"
+        return "tail", None
+    return "ignored", "low_liquidity"
 
 
 def market_row(m: GammaMarket, tier: str, category: str | None = None) -> dict[str, Any]:
@@ -160,6 +175,28 @@ def _depth_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> di
     return dict(zip(df["condition_id"].to_list(), depth.to_list()))
 
 
+def _mid_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> dict[str, float]:
+    """condition_id -> most recent mid price, for the tail_price universe_log
+    check (Phase 15) -- mirrors _depth_lookup's exact "absent means no data
+    yet, not zero" contract."""
+    dates = [utc_date_str(now - timedelta(days=d)) for d in range(days_back + 1)]
+    df = store.latest_per_market(dates)
+    if df.is_empty():
+        return {}
+    return dict(zip(df["condition_id"].to_list(), df["mid"].to_list()))
+
+
+def log_universe_exclusion(conn, venue: str, venue_native_id: str, reason_code: str) -> None:
+    """Record a market excluded from -- or never granted forecast-target
+    status in -- the universe, with why (Phase 15's universe_log, brief
+    section 5/15). One row per occurrence, not deduplicated (repeated
+    exclusion across syncs is itself a useful signal); caller commits."""
+    conn.execute(
+        "INSERT INTO universe_log (ts, venue, venue_native_id, reason_code) VALUES (?, ?, ?, ?)",
+        (now_utc_iso(), venue, venue_native_id, reason_code),
+    )
+
+
 async def sync_universe(gamma: GammaClient, conn, store: SnapshotStore,
                         config: dict[str, Any]) -> dict[str, int]:
     """Fetch active events (markets + tags) from Gamma, tier and upsert (idempotent).
@@ -170,6 +207,8 @@ async def sync_universe(gamma: GammaClient, conn, store: SnapshotStore,
     now = now_utc()
     taxonomy = load_categories()
     depth_by_market = _depth_lookup(store, now)
+    mid_by_market = _mid_lookup(store, now)
+    price_lo, price_hi = config["universe"]["forecast_price_bounds"]
     events = await gamma.iter_events(active="true", closed="false")
     counts = {"events": len(events), "seen": 0, "binary": 0,
               "liquid": 0, "tail": 0, "ignored": 0, "skipped": 0}
@@ -185,16 +224,28 @@ async def sync_universe(gamma: GammaClient, conn, store: SnapshotStore,
             seen_ids.add(m.condition_id)
             counts["seen"] += 1
             if not m.is_binary:
+                log_universe_exclusion(conn, "polymarket", m.condition_id, "non_binary")
                 continue
             counts["binary"] += 1
             if config["universe"]["skip_sub_24h_crypto"] and is_sub_24h_crypto(m, now):
                 counts["skipped"] += 1
+                log_universe_exclusion(conn, "polymarket", m.condition_id, "crypto_price_target")
                 continue
             effective = m if not ev.neg_risk else m.model_copy(update={"neg_risk": True})
             depth_usd = depth_by_market.get(effective.condition_id)
-            tier = assign_tier_with_category(effective, category, config, depth_usd=depth_usd)
+            tier, reason = assign_tier_with_category(effective, category, config, depth_usd=depth_usd)
             counts[tier] += 1
             db.upsert_market(conn, market_row(effective, tier, category))
+            if reason:
+                log_universe_exclusion(conn, "polymarket", effective.condition_id, reason)
+            # tail_price is orthogonal to tiering -- a liquid/tail market can
+            # still be excluded as a forecast TARGET (not from the universe
+            # outright) if its price sits outside forecast_price_bounds; only
+            # log when we actually have a snapshot to check (Phase 15).
+            if tier in ("liquid", "tail"):
+                mid = mid_by_market.get(effective.condition_id)
+                if mid is not None and not (price_lo < mid < price_hi):
+                    log_universe_exclusion(conn, "polymarket", effective.condition_id, "tail_price")
             if ev.neg_risk:
                 event_leg_ids.append(effective.condition_id)
         if ev.neg_risk and len(event_leg_ids) >= 2:

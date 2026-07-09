@@ -44,6 +44,30 @@ shadow-portfolio numbers, where present, are SIMULATION only.</p>
 <h2>Data health</h2>
 <div class="health">{{ health }}</div>
 
+<h2>Universe inclusion / exclusion (trailing {{ universe_log_days }} days)</h2>
+<p class="note">Every market excluded from -- or never granted forecast-target status in -- the
+universe, with a reason code (brief section 5/15). Defends against selection-bias claims in
+review: answers "why isn't X in the ledger" in aggregate. 'ambiguous_resolution' is deliberately
+not auto-populated (no safe deterministic detector exists); 'manual' comes from `lab exclude`.</p>
+{% if universe_exclusion_rows %}
+<table>
+<tr><th>date</th><th>reason</th><th>n excluded</th></tr>
+{% for r in universe_exclusion_rows %}
+<tr><td>{{ r.day }}</td><td>{{ r.reason_code }}</td><td>{{ r.n }}</td></tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no universe_log rows in this window yet.</p>
+{% endif %}
+{% if universe_inclusion_rows %}
+<table>
+<tr><th>date</th><th>tier</th><th>n newly included</th></tr>
+{% for r in universe_inclusion_rows %}
+<tr><td>{{ r.day }}</td><td>{{ r.tier }}</td><td>{{ r.n }}</td></tr>
+{% endfor %}
+</table>
+{% endif %}
+
 <h2>Skill vs market (paired Brier), by venue and category</h2>
 <p class="note">skill = mean(brier_market − brier_model); positive = beating the market.
 95% CI: cluster bootstrap by event (fallback market) -- descriptive only as of Phase 11.
@@ -215,6 +239,40 @@ def latest_eval_rows(conn) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def universe_exclusion_counts(conn, days: int = 30) -> list[dict]:
+    """Phase 15: daily excluded-market counts by reason_code, from
+    universe_log -- answers "why isn't X in the ledger" in aggregate."""
+    cutoff = (now_utc() - timedelta(days=days)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        """
+        SELECT date(ts) AS day, reason_code, COUNT(*) AS n
+        FROM universe_log
+        WHERE ts >= ?
+        GROUP BY day, reason_code
+        ORDER BY day DESC, reason_code
+        """,
+        (cutoff,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def universe_inclusion_counts(conn, days: int = 30) -> list[dict]:
+    """Daily count of markets newly added to the forecastable universe
+    (tier in liquid/tail), for symmetry with universe_exclusion_counts."""
+    cutoff = (now_utc() - timedelta(days=days)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        """
+        SELECT date(first_seen_ts) AS day, tier, COUNT(*) AS n
+        FROM markets
+        WHERE first_seen_ts >= ? AND tier IN ('liquid', 'tail')
+        GROUP BY day, tier
+        ORDER BY day DESC, tier
+        """,
+        (cutoff,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def render_report(conn, store, config: dict[str, Any]) -> Path:
     reports = Path(config["storage"]["reports_dir"])
     reports = reports if reports.is_absolute() else PROJECT_ROOT / reports
@@ -222,6 +280,10 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
 
     from lab.collect.status import format_status
     health = format_status(gather_status(config))
+
+    universe_log_days = 30
+    universe_exclusion_rows = universe_exclusion_counts(conn, universe_log_days)
+    universe_inclusion_rows = universe_inclusion_counts(conn, universe_log_days)
 
     skill_rows = []
     bins_by_model: dict[str, list[dict]] = {}
@@ -372,6 +434,9 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         generated_at=now_utc_iso(),
         lessons=lessons_digest(conn),
         health=health,
+        universe_log_days=universe_log_days,
+        universe_exclusion_rows=universe_exclusion_rows,
+        universe_inclusion_rows=universe_inclusion_rows,
         skill_rows=skill_rows,
         rps_rows=rps_rows,
         min_bucketed_events=config["eval"].get("min_bucketed_events", 20),
