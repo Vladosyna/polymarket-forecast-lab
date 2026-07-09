@@ -8,7 +8,12 @@ import pytest
 
 from lab.forecast import run_forecasts
 from lab.models.base import MarketState
-from lab.models.m3_evidence import M3Evidence, m3_target_ids
+from lab.models.m3_evidence import (
+    M3_BOUNDARY_BAND_HALF_WIDTH,
+    M3Evidence,
+    m3_boundary_randomized_ids,
+    m3_target_ids,
+)
 from lab.news.extract import BudgetExceeded
 from lab.news.providers import Article
 from lab.store import db
@@ -100,6 +105,98 @@ def test_m3_end_to_end_writes_evidence_and_forecasts(config):
     assert len(fc) == 3
     assert all(f["evidence_run_id"] is not None for f in fc)
     assert all(f["p_yes"] > 0.60 for f in fc)  # for_yes evidence shifts up
+    conn.close()
+
+
+def test_m3_evidence_tags_randomized_forecasts(config):
+    """M3Evidence.forecast() sets m3_randomized/m3_random_seed on the
+    ForecastResult based on membership in randomized_ids, and run_forecasts()
+    persists both through append_forecast() into the ledger."""
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    _seed_markets(conn, store, n=3)
+
+    m3 = M3Evidence(conn, FakeLlm(), [FakeProvider()], config, ["0x0", "0x1", "0x2"],
+                    randomized_ids={"0x1"}, random_seed="test-seed-7")
+    run_forecasts(conn, store, [m3], config)
+
+    rows = {r["condition_id"]: r for r in conn.execute(
+        "SELECT condition_id, m3_randomized, m3_random_seed FROM forecasts WHERE model_id='m3_evidence'"
+    )}
+    assert rows["0x1"]["m3_randomized"] == 1
+    assert rows["0x1"]["m3_random_seed"] == "test-seed-7"
+    assert rows["0x0"]["m3_randomized"] == 0
+    assert rows["0x0"]["m3_random_seed"] is None
+    conn.close()
+
+
+def _seed_many_markets(conn, n):
+    for i in range(n):
+        cid = f"0x{i:03d}"
+        conn.execute(
+            """INSERT INTO markets (condition_id, slug, question, category, description,
+                                    end_date_iso, tier, active, closed, liquidity_num, volume_num)
+               VALUES (?, ?, ?, 'politics', 'Resolves YES if X.', '2026-12-31T00:00:00+00:00',
+                       'liquid', 1, 0, ?, 5000000)""",
+            (cid, f"m-{i}", f"Will X{i} happen?", 1_000_000 - i),
+        )
+    conn.commit()
+
+
+def test_boundary_randomization_covers_exactly_k_when_enough_candidates(config):
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_many_markets(conn, 40)
+    k = config["forecast"]["m3_top_k"]
+
+    final_ids, chosen, seed = m3_boundary_randomized_ids(conn, config)
+    assert len(final_ids) == k
+    assert chosen <= set(final_ids)
+    conn.close()
+
+
+def test_boundary_randomization_guaranteed_and_excluded_segments_are_fixed(config):
+    """Markets ranked strictly above the K-10..K+10 band always make it in;
+    markets ranked strictly below the band never do -- only the band itself
+    (the coin-flip region) is randomized."""
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_many_markets(conn, 40)
+    k = config["forecast"]["m3_top_k"]
+    half = M3_BOUNDARY_BAND_HALF_WIDTH
+
+    full_order = m3_target_ids(conn, {**config, "forecast": {**config["forecast"], "m3_top_k": 999}})
+    guaranteed = set(full_order[:max(0, k - half)])
+    below_band = set(full_order[k + half:])
+
+    final_ids, chosen, seed = m3_boundary_randomized_ids(conn, config)
+    final_set = set(final_ids)
+    assert guaranteed <= final_set
+    assert not (below_band & final_set)
+    conn.close()
+
+
+def test_boundary_randomization_reproducible_from_same_seed(config):
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_many_markets(conn, 40)
+
+    final_a, chosen_a, seed_a = m3_boundary_randomized_ids(conn, config)
+    final_b, chosen_b, seed_b = m3_boundary_randomized_ids(conn, config)
+
+    assert final_a == final_b
+    assert chosen_a == chosen_b
+    assert seed_a == seed_b
+    conn.close()
+
+
+def test_boundary_randomization_different_seed_picks_different_band_members(config):
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_many_markets(conn, 40)
+
+    cfg_a = {**config, "forecast": {**config["forecast"], "m3_boundary_random_seed": "seed-a"}}
+    cfg_b = {**config, "forecast": {**config["forecast"], "m3_boundary_random_seed": "seed-b"}}
+    _, chosen_a, _ = m3_boundary_randomized_ids(conn, cfg_a)
+    _, chosen_b, _ = m3_boundary_randomized_ids(conn, cfg_b)
+
+    assert chosen_a != chosen_b
     conn.close()
 
 

@@ -221,6 +221,8 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
                 "inputs_hash": _inputs_hash(model.model_id, result.meta, config, state.snapshot_ts),
                 "evidence_run_id": result.evidence_run_id,
                 "cost_usd": result.cost_usd,
+                "m3_randomized": result.m3_randomized,
+                "m3_random_seed": result.m3_random_seed,
             })
             counts["written"] += 1
     conn.commit()
@@ -272,16 +274,22 @@ def build_default_models(conn, config: dict[str, Any], store=None) -> list[Forec
 
     llm = create_llm_client(conn, config)
     if llm:
-        from lab.models.m3_evidence import M3Evidence, m3_target_ids
+        from lab.models.m3_evidence import M3Evidence, m3_boundary_randomized_ids, m3_target_ids
         from lab.news.providers import FeedListProvider, GoogleNewsRss
 
         providers = [GoogleNewsRss()]
         feeds = config.get("news", {}).get("rss_feeds", [])
         if feeds:
             providers.append(FeedListProvider(feeds))
-        models.append(M3Evidence(conn, llm, providers, config,
-                                 m3_target_ids(conn, config, store),
-                                 model_id=m3_model_id(config)))
+        if config["forecast"].get("m3_boundary_randomization_enabled", False):
+            target_ids, randomized_ids, seed = m3_boundary_randomized_ids(conn, config, store)
+            models.append(M3Evidence(conn, llm, providers, config, target_ids,
+                                     model_id=m3_model_id(config),
+                                     randomized_ids=randomized_ids, random_seed=seed))
+        else:
+            models.append(M3Evidence(conn, llm, providers, config,
+                                     m3_target_ids(conn, config, store),
+                                     model_id=m3_model_id(config)))
     else:
         key_env = config.get("llm", {}).get("api_key_env", "ANTHROPIC_API_KEY")
         log.warning("forecast: no %s; M3 disabled", key_env)

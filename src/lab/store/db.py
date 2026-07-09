@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -316,6 +316,27 @@ def migrate_distributional_scoring(conn: sqlite3.Connection) -> dict[str, bool]:
     return applied
 
 
+def migrate_m3_boundary_randomization(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Idempotent v2.7 migration (Phase 15): ALTER `forecasts` with the M3
+    boundary-randomization columns only -- the other Phase 15 `forecasts`
+    covariates (depth_covariate, volume_24h, trades_24h, hour_utc) are a
+    separate sub-task, not part of this migration. `m3_randomized` flags
+    whether THIS forecast row was a coin-flip member of the K-10..K+10
+    liquidity band (guardrail 12's pre-specified, seeded randomization
+    carve-out); `m3_random_seed` is the exact seed used, so the whole
+    roster is reproducible later from historical liquidity snapshots."""
+    applied = {"m3_randomized_column": False, "m3_random_seed_column": False}
+    for key, (column, sql_type) in {
+        "m3_randomized_column": ("m3_randomized", "INTEGER DEFAULT 0"),
+        "m3_random_seed_column": ("m3_random_seed", "TEXT"),
+    }.items():
+        if not _column_exists(conn, "forecasts", column):
+            conn.execute(f"ALTER TABLE forecasts ADD COLUMN {column} {sql_type}")
+            applied[key] = True
+    conn.commit()
+    return applied
+
+
 class ForecastLedgerViolation(RuntimeError):
     """Raised on any attempt to UPDATE or DELETE a forecast row."""
 
@@ -343,6 +364,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     migrate_multi_venue(conn)
     migrate_eval_measurement_upgrade(conn)
     migrate_distributional_scoring(conn)
+    migrate_m3_boundary_randomization(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )
@@ -458,15 +480,19 @@ def append_forecast(conn: sqlite3.Connection, row: dict) -> int:
     cur = conn.execute(
         """
         INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts,
-                               spread_at_ts, inputs_hash, evidence_run_id, cost_usd)
+                               spread_at_ts, inputs_hash, evidence_run_id, cost_usd,
+                               m3_randomized, m3_random_seed)
         VALUES (:ts, :condition_id, :model_id, :p_yes, :p_market_at_ts,
-                :spread_at_ts, :inputs_hash, :evidence_run_id, :cost_usd)
+                :spread_at_ts, :inputs_hash, :evidence_run_id, :cost_usd,
+                :m3_randomized, :m3_random_seed)
         """,
         {
             "spread_at_ts": None,
             "inputs_hash": None,
             "evidence_run_id": None,
             "cost_usd": 0.0,
+            "m3_randomized": 0,
+            "m3_random_seed": None,
             **row,
         },
     )

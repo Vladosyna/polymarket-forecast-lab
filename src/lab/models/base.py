@@ -29,6 +29,9 @@ class ForecastResult:
     meta: dict[str, Any] = field(default_factory=dict)
     cost_usd: float = 0.0
     evidence_run_id: int | None = None
+    m3_randomized: int = 0            # Phase 15: 1 iff this market was a coin-flip
+                                       # member of M3's boundary-randomization band
+    m3_random_seed: str | None = None  # the seed used, for reproducibility
 
 
 class Forecaster(Protocol):

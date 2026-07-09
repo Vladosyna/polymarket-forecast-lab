@@ -97,6 +97,15 @@ forecast:
   # M3 runs only on the liquid tier: top-K by liquidity within priority
   # categories -- a deterministic rule, never editorial judgment.
   m3_top_k: 20
+  # Phase 15 boundary-randomization experiment (guardrail 12's pre-specified,
+  # seeded-randomization carve-out): markets ranked m3_top_k-10..+10 are
+  # randomly assigned to M3 coverage instead of a hard cutoff, to identify
+  # M3's marginal contribution causally. Default OFF -- changes M3's live
+  # targeting/cost profile, so enabling it is a deliberate choice, not a
+  # silent behavior change. Seed is fixed and committed (mirrors
+  # universe.null_control.random_seed's pattern), never rolled fresh per run.
+  m3_boundary_randomization_enabled: false
+  m3_boundary_random_seed: 43
 
 # --- LLM ----------------------------------------------------------------
 llm:

@@ -137,6 +137,16 @@ def test_venues_seeded_with_brief_flags(conn):
     assert rows["manifold"] == {"venue": "manifold", "trust_tier": "play", "forecastable": 0, "in_m7_pool": 0}
 
 
+def test_migrate_m3_boundary_randomization_is_idempotent(conn):
+    # db.connect() (the `conn` fixture) already ran the migration once.
+    applied_again = db.migrate_m3_boundary_randomization(conn)
+    assert applied_again == {
+        "m3_randomized_column": False, "m3_random_seed_column": False,
+    }
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(forecasts)")}
+    assert {"m3_randomized", "m3_random_seed"} <= cols
+
+
 def test_universe_log_table_exists_and_accepts_rows(conn):
     """Phase 15: universe_log is a brand-new table (CREATE TABLE IF NOT
     EXISTS), no ALTER migration needed -- just confirm it's created and
