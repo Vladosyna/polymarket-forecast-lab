@@ -204,6 +204,31 @@ The "sports" category is the null-control reference: skill there should stay nea
 <p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no resolved forecasts scored into the wealth ledger yet.</p>
 {% endif %}
 
+<h2>Shadow portfolio (SIMULATION only, no real money)</h2>
+<p class="note">Entry-filtered, M4-only realistic "would we have traded this" simulation (brief
+section 8) -- distinct from the wealth ledger above, which scores every model unconditionally
+for comparison power. Uses a real, sourced venue fee schedule
+(<code>data/fee_schedule.yaml</code>) plus a slippage haircut; <b>net P&amp;L</b> is realized P&amp;L
+after both, <b>gross P&amp;L</b> is before fees, for the net-of-cost comparison (brief section 15).</p>
+{% if shadow_summary %}
+<table>
+<tr><th>bankroll</th><th>resolved trades</th><th>gross P&amp;L</th><th>fees paid</th>
+<th>net P&amp;L</th><th>hit rate</th><th>open trades</th><th>unrealized P&amp;L</th>
+<th>max drawdown</th></tr>
+<tr><td>${{ "%.2f"|format(shadow_summary.bankroll_sim) }}</td>
+<td>{{ shadow_summary.resolved_trades }}</td>
+<td>${{ "%.2f"|format(shadow_summary.gross_pnl_sim) }}</td>
+<td>${{ "%.2f"|format(shadow_summary.total_fees_sim) }}</td>
+<td>${{ "%.2f"|format(shadow_summary.realized_pnl_sim) }}</td>
+<td>{{ "%.1f%%"|format(shadow_summary.hit_rate * 100) if shadow_summary.hit_rate is not none else "—" }}</td>
+<td>{{ shadow_summary.open_trades }}</td>
+<td>${{ "%.2f"|format(shadow_summary.unrealized_pnl_sim) }}</td>
+<td>${{ "%.2f"|format(shadow_summary.max_drawdown_sim) }}</td></tr>
+</table>
+{% else %}
+<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no shadow trades yet.</p>
+{% endif %}
+
 <h2>Lessons digest (trailing quarter)</h2>
 {% if lessons.n %}
 <p class="note">{{ lessons.n }} post-mortems in the last {{ lessons.window_days }} days.
@@ -424,6 +449,15 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         wealth_drawdown_plot = drawdown_path.name if drawdown_path else None
         wealth_attribution = m4_attribution_snapshot(conn, config)
 
+    # Phase 15: shadow-portfolio section -- the net-of-cost skill line
+    # (brief section 8/15). Gated on any trade ever existing; portfolio_summary
+    # itself is safe to call on an empty shadow_trades table (COALESCE(...,0)).
+    from lab.shadow.portfolio import portfolio_summary as _shadow_portfolio_summary
+
+    shadow_summary = _shadow_portfolio_summary(conn, store, config)
+    if shadow_summary["resolved_trades"] == 0 and shadow_summary["open_trades"] == 0:
+        shadow_summary = None
+
     llm_total = conn.execute("SELECT COALESCE(SUM(cost_usd),0) AS t FROM llm_spend").fetchone()["t"]
     from lab.store.db import llm_spend_today
     llm_today = llm_spend_today(conn, utc_date_str(now_utc()))
@@ -449,6 +483,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         wealth_curves_plot=wealth_curves_plot,
         wealth_drawdown_plot=wealth_drawdown_plot,
         wealth_attribution=wealth_attribution,
+        shadow_summary=shadow_summary,
         llm_total=llm_total,
         llm_today=llm_today,
         llm_cap=config["llm"]["daily_cost_cap_usd"],

@@ -114,6 +114,36 @@ def test_report_renders_universe_exclusion_section(config):
     conn.close()
 
 
+def test_report_renders_shadow_portfolio_section(config):
+    """Phase 15 acceptance: the report gains a net-of-cost shadow-portfolio
+    section (gross vs net P&L), gated on there being any shadow trade."""
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+
+    path = render_report(conn, store, config)
+    assert "INSUFFICIENT DATA — no shadow trades yet." in path.read_text(encoding="utf-8")
+
+    conn.execute(
+        "INSERT INTO markets (condition_id, question, category, tier, active, closed) "
+        "VALUES ('0xshadow', 'Q?', 'politics', 'liquid', 1, 0)"
+    )
+    conn.execute(
+        """INSERT INTO shadow_trades (opened_ts, condition_id, token_side, entry_price,
+                                      p_model, p_market, edge, stake_sim, kelly_frac, status,
+                                      exit_ts, exit_price, pnl_sim, fee_paid_sim, effective_spread_sim)
+           VALUES ('2026-07-01T00:00:00+00:00', '0xshadow', 'YES', 0.62, 0.72, 0.60, 0.12,
+                   100.0, 0.2, 'resolved', '2026-07-02T00:00:00+00:00', 1.0, 58.0, 3.5, 0.02)"""
+    )
+    conn.commit()
+
+    path = render_report(conn, store, config)
+    html = path.read_text(encoding="utf-8")
+    assert "Shadow portfolio" in html
+    assert "58.00" in html  # net P&L
+    assert "3.50" in html   # fees paid
+    conn.close()
+
+
 def test_report_shows_clv_untrusted_banner_only_when_flagged(config):
     """Phase 17 item 4: the report reads the sticky clv_trusted meta flag --
     banner absent by default, present only once the flag is explicitly set."""

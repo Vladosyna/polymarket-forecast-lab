@@ -8,8 +8,10 @@ top-of-book depth >= $500 on the entry side AND 0.05 < p_market < 0.95.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
+from lab.shadow.fees import fee_usd_for, load_fee_schedule
 from lab.store import db as dbmod
 from lab.util import now_utc_iso
 
@@ -77,9 +79,12 @@ def run_shadow_entries(conn, store, config: dict[str, Any],
     """One daily entry pass over today's model forecasts on the liquid tier."""
     scfg = config["shadow"]
     bankroll = scfg["bankroll_sim_usd"]
+    fee_schedule = load_fee_schedule(
+        Path(scfg["fee_schedule_path"]) if scfg.get("fee_schedule_path") else None
+    )
     rows = conn.execute(
         """
-        SELECT f.condition_id, f.p_yes, f.p_market_at_ts, f.spread_at_ts, m.category
+        SELECT f.condition_id, f.p_yes, f.p_market_at_ts, f.spread_at_ts, m.category, m.venue
         FROM forecasts f
         JOIN markets m ON m.condition_id = f.condition_id
         JOIN (SELECT condition_id, MAX(ts) AS ts FROM forecasts
@@ -134,12 +139,18 @@ def run_shadow_entries(conn, store, config: dict[str, Any],
                                          scfg["slippage_coefficient"], scfg["slippage_cap"]),
         )
         edge = abs(r["p_yes"] - r["p_market_at_ts"])
+        opened_ts = now_utc_iso()
+        effective_spread_sim = entry_price - raw_price
+        fee_paid_sim = fee_usd_for(fee_schedule, r["venue"] or "polymarket", r["category"],
+                                   entry_price, stake, opened_ts)
         conn.execute(
             """INSERT INTO shadow_trades (opened_ts, condition_id, token_side, entry_price,
-                                          p_model, p_market, edge, stake_sim, kelly_frac, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')""",
-            (now_utc_iso(), r["condition_id"], side, entry_price, r["p_yes"],
-             r["p_market_at_ts"], edge, stake, scfg["kelly_fraction"]),
+                                          p_model, p_market, edge, stake_sim, kelly_frac, status,
+                                          fee_paid_sim, effective_spread_sim)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)""",
+            (opened_ts, r["condition_id"], side, entry_price, r["p_yes"],
+             r["p_market_at_ts"], edge, stake, scfg["kelly_fraction"],
+             fee_paid_sim, effective_spread_sim),
         )
         opened += 1
     conn.commit()
@@ -148,9 +159,15 @@ def run_shadow_entries(conn, store, config: dict[str, Any],
 
 
 def settle_resolved(conn) -> int:
-    """Close open sim positions whose markets resolved. Hold-to-resolution v1."""
+    """Close open sim positions whose markets resolved. Hold-to-resolution v1.
+
+    pnl_sim is net of the fee paid at entry (fee_paid_sim, Phase 15) --
+    neither venue's current published fee schedule includes a separate
+    settlement fee, so only the already-recorded entry fee is subtracted."""
     rows = conn.execute(
-        """SELECT t.id, t.token_side, t.entry_price, t.stake_sim, r.payout_yes, r.resolved_ts
+        """SELECT t.id, t.token_side, t.entry_price, t.stake_sim,
+                  COALESCE(t.fee_paid_sim, 0) AS fee_paid_sim,
+                  r.payout_yes, r.resolved_ts
            FROM shadow_trades t JOIN resolutions r ON r.condition_id = t.condition_id
            WHERE t.status = 'open'"""
     ).fetchall()
@@ -159,7 +176,7 @@ def settle_resolved(conn) -> int:
         won = (r["payout_yes"] == 1.0) == (r["token_side"] == "YES")
         exit_price = 1.0 if won else 0.0
         shares = r["stake_sim"] / r["entry_price"]
-        pnl = shares * exit_price - r["stake_sim"]
+        pnl = shares * exit_price - r["stake_sim"] - r["fee_paid_sim"]
         conn.execute(
             "UPDATE shadow_trades SET status='resolved', exit_ts=?, exit_price=?, pnl_sim=? WHERE id=?",
             (r["resolved_ts"], exit_price, pnl, r["id"]),
@@ -172,7 +189,8 @@ def settle_resolved(conn) -> int:
 def portfolio_summary(conn, store, config: dict[str, Any]) -> dict[str, Any]:
     realized = conn.execute(
         """SELECT COUNT(*) AS n, COALESCE(SUM(pnl_sim),0) AS pnl,
-                  COALESCE(SUM(pnl_sim > 0),0) AS wins
+                  COALESCE(SUM(pnl_sim > 0),0) AS wins,
+                  COALESCE(SUM(fee_paid_sim),0) AS fees
            FROM shadow_trades WHERE status='resolved'"""
     ).fetchone()
 
@@ -211,7 +229,9 @@ def portfolio_summary(conn, store, config: dict[str, Any]) -> dict[str, Any]:
         "label": "SIMULATION",
         "bankroll_sim": config["shadow"]["bankroll_sim_usd"],
         "resolved_trades": realized["n"],
-        "realized_pnl_sim": realized["pnl"],
+        "realized_pnl_sim": realized["pnl"],          # net of fees (already subtracted in settle_resolved)
+        "total_fees_sim": realized["fees"],
+        "gross_pnl_sim": realized["pnl"] + realized["fees"],  # before fees, for the net-of-cost comparison
         "hit_rate": (realized["wins"] / realized["n"]) if realized["n"] else None,
         "open_trades": len(open_rows),
         "unrealized_pnl_sim": unrealized,

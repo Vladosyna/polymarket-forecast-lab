@@ -95,6 +95,9 @@ def test_entries_only_when_all_filters_pass(config):
     assert t["status"] == "open"
     # Fill at best ask (0.61) plus slippage.
     assert t["entry_price"] > 0.61
+    # Phase 15: fee/slippage now persisted explicitly, not just implicit in entry_price.
+    assert t["fee_paid_sim"] > 0
+    assert t["effective_spread_sim"] == pytest.approx(t["entry_price"] - 0.61)
     conn.close()
 
 
@@ -109,7 +112,11 @@ def test_settlement_pnl(config):
     t = conn.execute("SELECT * FROM shadow_trades").fetchone()
     assert t["status"] == "resolved"
     assert t["exit_price"] == 1.0
-    # shares = stake/entry; pnl = shares - stake > 0 for a winning YES.
-    assert t["pnl_sim"] == pytest.approx(t["stake_sim"] / t["entry_price"] - t["stake_sim"])
+    # shares = stake/entry; pnl = shares - stake - fee_paid_sim for a winning YES
+    # (Phase 15: pnl_sim is net of the fee recorded at entry).
+    assert t["fee_paid_sim"] > 0
+    assert t["effective_spread_sim"] >= 0
+    expected_pnl = t["stake_sim"] / t["entry_price"] - t["stake_sim"] - t["fee_paid_sim"]
+    assert t["pnl_sim"] == pytest.approx(expected_pnl)
     assert t["pnl_sim"] > 0
     conn.close()

@@ -170,6 +170,10 @@ shadow:
   # Slippage haircut proportional to (stake / visible depth), capped.
   slippage_coefficient: 0.5
   slippage_cap: 0.02
+  # Phase 15: real, sourced per-venue taker-fee rates (net-of-cost accounting,
+  # brief section 8/15) -- see the file itself for sources and the derived
+  # fee_usd = stake * rate * (1 - entry_price) formula.
+  fee_schedule_path: data/fee_schedule.yaml
 
 # --- Learning loop (monthly `lab learn`) ---------------------------------
 learn:

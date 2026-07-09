@@ -147,6 +147,16 @@ def test_migrate_m3_boundary_randomization_is_idempotent(conn):
     assert {"m3_randomized", "m3_random_seed"} <= cols
 
 
+def test_migrate_shadow_fees_is_idempotent(conn):
+    # db.connect() (the `conn` fixture) already ran the migration once.
+    applied_again = db.migrate_shadow_fees(conn)
+    assert applied_again == {
+        "fee_paid_sim_column": False, "effective_spread_sim_column": False,
+    }
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(shadow_trades)")}
+    assert {"fee_paid_sim", "effective_spread_sim"} <= cols
+
+
 def test_universe_log_table_exists_and_accepts_rows(conn):
     """Phase 15: universe_log is a brand-new table (CREATE TABLE IF NOT
     EXISTS), no ALTER migration needed -- just confirm it's created and

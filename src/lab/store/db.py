@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -337,6 +337,24 @@ def migrate_m3_boundary_randomization(conn: sqlite3.Connection) -> dict[str, boo
     return applied
 
 
+def migrate_shadow_fees(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Idempotent v2.7 migration (Phase 15): ALTER `shadow_trades` with the
+    net-of-cost fee columns. `fee_paid_sim` is the simulated taker fee paid
+    at entry (src/lab/shadow/fees.py); `effective_spread_sim` is
+    entry_price - raw_price, i.e. the slippage haircut actually applied,
+    now persisted explicitly rather than only computed inline."""
+    applied = {"fee_paid_sim_column": False, "effective_spread_sim_column": False}
+    for key, (column, sql_type) in {
+        "fee_paid_sim_column": ("fee_paid_sim", "REAL"),
+        "effective_spread_sim_column": ("effective_spread_sim", "REAL"),
+    }.items():
+        if not _column_exists(conn, "shadow_trades", column):
+            conn.execute(f"ALTER TABLE shadow_trades ADD COLUMN {column} {sql_type}")
+            applied[key] = True
+    conn.commit()
+    return applied
+
+
 class ForecastLedgerViolation(RuntimeError):
     """Raised on any attempt to UPDATE or DELETE a forecast row."""
 
@@ -365,6 +383,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     migrate_eval_measurement_upgrade(conn)
     migrate_distributional_scoring(conn)
     migrate_m3_boundary_randomization(conn)
+    migrate_shadow_fees(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )

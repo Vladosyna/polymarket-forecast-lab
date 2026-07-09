@@ -1,0 +1,98 @@
+# Phase 15: real, sourced trading-fee rates for the shadow portfolio's
+# net-of-cost accounting (brief section 8/15).
+#
+# Sources (fetched 2026-07-09):
+#   Polymarket -- https://docs.polymarket.com/trading/fees
+#     "Makers are never charged fees. Only takers pay fees."
+#     fee_per_share = category_rate * p * (1-p), category_rate:
+#       crypto 0.07, sports 0.03, finance/politics/mentions/tech 0.04,
+#       economics/culture/weather/other 0.05, geopolitics 0 (fee-free).
+#   Kalshi -- https://kalshi.com/fee-schedule (page itself dated "effective
+#     2026-07-07"), corroborated via search snippet quoting the same page:
+#     fee_per_contract = 0.07 * C * (1-C), taker only; maker fee (rests on
+#     the book) is 25% of that -- not modeled here, see below.
+#
+# Both formulas are PRICE-DEPENDENT (peak at the 50c price point, ~0 at the
+# 1c/99c extremes), not flat bps of stake. `taker_rate` below is the
+# coefficient `rate` in this repo's derived formula:
+#     fee_usd = stake_usd * taker_rate * (1 - entry_price)
+# (N shares/contracts at price p cost stake = N*p; fee = N*rate*p*(1-p) =
+# stake*rate*(1-p) -- see src/lab/shadow/fees.py's docstring for the algebra.)
+#
+# Our shadow portfolio always fills as a TAKER (crosses the best bid/ask plus
+# a slippage haircut, brief section 8 -- it never rests a limit order), so
+# maker fees/rebates are never modeled: only taker_rate is used.
+#
+# Polymarket's real fee categories don't map 1:1 onto this repo's internal
+# taxonomy (data/categories.yaml) -- stated assumption, per guardrail 1:
+#   crypto        -> Polymarket "crypto"                              (0.07)
+#   sports        -> Polymarket "sports"                              (0.03)
+#   tech          -> Polymarket "finance/politics/mentions/tech"      (0.04)
+#   business      -> same bucket as tech (IPO/M&A/finance-adjacent)   (0.04)
+#   economics     -> Polymarket "economics/culture/weather/other"     (0.05)
+#   weather       -> same bucket as economics                        (0.05)
+#   entertainment -> same bucket ("culture")                         (0.05)
+#   health        -> same bucket ("other")                           (0.05)
+#   equities      -> same bucket ("other"); already fully excluded from
+#                    the universe (guardrail: crypto/equity price-target
+#                    markets), so this rate is never actually applied live
+#   geopolitics   -> Polymarket "geopolitics", fee-free                (0.0)
+# Any category with no entry below falls back to `default` (0.04), logged
+# once rather than raised (fail-soft, guardrail 9).
+#
+# `effective_from` for Polymarket entries is a documented LIMITATION, not a
+# researched fact: the docs above describe Polymarket's CURRENT fee
+# structure but do not state when it took effect, so "2000-01-01" here is a
+# deliberate "predates every row this lab has ever collected" sentinel, not
+# a claim about Polymarket's actual fee history. Kalshi's date (2026-07-07)
+# IS the real, sourced effective date from its own fee-schedule page.
+version: 1
+schedule:
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: default
+    taker_rate: 0.04
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: crypto
+    taker_rate: 0.07
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: sports
+    taker_rate: 0.03
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: tech
+    taker_rate: 0.04
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: business
+    taker_rate: 0.04
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: economics
+    taker_rate: 0.05
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: weather
+    taker_rate: 0.05
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: entertainment
+    taker_rate: 0.05
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: health
+    taker_rate: 0.05
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: equities
+    taker_rate: 0.05
+  - effective_from: "2000-01-01"
+    venue: polymarket
+    category: geopolitics
+    taker_rate: 0.0
+  - effective_from: "2026-07-07"
+    venue: kalshi
+    category: default
+    taker_rate: 0.07
