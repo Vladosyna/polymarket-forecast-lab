@@ -124,4 +124,23 @@ at any point in time by reading this file's own git history.
 
 ## 9. Addenda
 
-*(none yet)*
+**Addendum 9.1 (2026-07-09).** The confirmatory analysis window for H1–H3 closes at 2026-12-31
+23:59 UTC. Forecasts frozen on or before that timestamp, resolving at any later date, remain in
+the confirmatory set; forecasts frozen after it are exploratory for this paper and may seed a
+future pre-registered window. Primary analyses will be executed once, after the freeze, exactly
+as specified in §2–§6; the honesty-tier label corresponding to realized n will be reported as-is,
+whatever it turns out to be.
+
+**Addendum 9.2 (2026-07-09).** Two corrections surfaced by an independent verification audit
+cross-checking this plan and `CLAUDE.md` against the actual codebase:
+
+- (a) §3's reference to "WSR asymptotic CS" was a citation error. The confirmatory statistic
+  (`src/lab/eval/anytime.py`) implements the normal-mixture uniform boundary of Howard, Ramdas,
+  McAuliffe & Sekhon (2021, *Annals of Statistics* 49(2):1055-1080, arXiv:1810.08240), not
+  Waudby-Smith & Ramdas (2020)'s distinct betting-based construction. This is a citation
+  correction only — the statistic itself, its time-uniform coverage guarantee, and its role as
+  the sole confirmatory claim statistic for H1–H3 are unchanged.
+- (b) A pre-specified robustness check, implicit in the exclusion rules (§5) but not previously
+  stated explicitly: primary analyses for H1–H3 will be re-run excluding forecasts on markets
+  where `resolutions.disputed = 1`, reported as a named robustness check alongside the primary
+  result — not a new primary outcome, and not a gate on any hypothesis in §2.
