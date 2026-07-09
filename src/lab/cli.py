@@ -8,6 +8,7 @@ loudly rather than silently succeeding.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 
@@ -185,20 +186,44 @@ def shadow() -> None:
 @app.command()
 def export(
     out: str = typer.Option(None, help="Output file; stdout when omitted."),
+    paper: bool = typer.Option(
+        False, "--paper", help="Full resolved-forecast replication dataset + manifest (Phase 15)."),
 ) -> None:
-    """Emit latest forecast per (market, model) as JSONL -- the downstream integration point."""
-    from lab.export import export_jsonl
+    """Emit latest forecast per (market, model) as JSONL -- the downstream integration point.
+
+    `--paper` emits a different, second dataset instead: every resolved
+    forecast from every model, plus a `<out>.meta.json` manifest (code
+    version hash, schema version, row count) so a reviewer can verify what
+    they're re-analyzing. Requires --out (a manifest has nowhere sensible to
+    go on stdout)."""
+    from pathlib import Path
+
     from lab.store import db
 
     config = load_config()
     conn = db.connect(config["storage"]["db_path"])
     try:
+        if paper:
+            if not out:
+                typer.secho("export --paper requires --out (manifest needs a file path)",
+                           fg=typer.colors.RED, err=True)
+                raise typer.Exit(code=2)
+            from lab.export import export_paper_jsonl, paper_export_manifest
+
+            lines = list(export_paper_jsonl(conn))
+            manifest = paper_export_manifest(conn, len(lines))
+            Path(out).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            Path(f"{out}.meta.json").write_text(
+                json.dumps(manifest, indent=2), encoding="utf-8")
+            typer.echo(f"export --paper: {len(lines)} rows -> {out} "
+                      f"(manifest: {out}.meta.json, code_version={manifest['code_version']})")
+            return
+        from lab.export import export_jsonl
+
         lines = list(export_jsonl(conn))
     finally:
         conn.close()
     if out:
-        from pathlib import Path
-
         Path(out).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         typer.echo(f"export: {len(lines)} rows -> {out}")
     else:

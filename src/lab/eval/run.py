@@ -56,8 +56,12 @@ def resolved_forecast_rows(
     """Paired rows: forecast + resolution outcome + venue/category/event_id
     for one model, optionally scoped to one venue and/or one category."""
     query = """
-        SELECT f.condition_id, f.p_yes, f.p_market_at_ts, r.payout_yes, r.resolved_ts,
-               m.venue AS venue, m.category AS category, m.event_id AS event_id
+        SELECT f.condition_id, f.p_yes, f.p_market_at_ts, f.spread_at_ts,
+               r.payout_yes, r.resolved_ts,
+               f.ts AS forecast_ts, f.m3_randomized AS m3_randomized,
+               f.m3_random_seed AS m3_random_seed,
+               m.venue AS venue, m.category AS category, m.event_id AS event_id,
+               m.tier AS tier
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id
         JOIN markets m ON m.condition_id = f.condition_id
