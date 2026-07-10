@@ -310,6 +310,42 @@ orchestrator (e.g. via Task Scheduler "Run", or `uv run lab run`) right away.
 
 ---
 
+## Personal git identity: SSH auth + GPG commit signing (added 2026-07-10)
+
+Separate from the repo-scoped deploy keys used by automation (this host has none —
+it authenticates over HTTPS via `gh` CLI's credential helper, `credential.https://
+github.com.helper`), this laptop also has a **personal-account** SSH key and GPG
+signing key, generated the same day as the VPS's equivalents (see
+`docs/VPS_OPERATIONS.md`'s matching section) so commits from either host are
+independently attributable and verifiable, not just push-authorized.
+
+- **SSH key** — `~/.ssh/id_ed25519_personal_github` (no passphrase), added to
+  GitHub under **Settings → SSH and GPG keys** as an *Authentication Key* on the
+  personal account. Not currently wired into any remote (this host still pushes
+  over HTTPS via `gh`) — it exists so this host can authenticate as the personal
+  account over SSH if ever needed (e.g. cloning another private repo), without
+  depending on the `gh` CLI's OAuth session.
+- **GPG key** — ed25519, no passphrase, `Name-Real: Vladosyna`, same email as
+  `git config user.email`. `git config --global commit.gpgsign true` and
+  `tag.gpgsign true` are set, so **every commit from this host is now signed by
+  default** — public key added to GitHub under **Settings → SSH and GPG keys**.
+  Confirmed showing `"verified": true` via the GitHub API on a real pushed commit.
+  No passphrase was a deliberate simplification to generate it non-interactively
+  in one sitting — regenerate it locally with a passphrase (`gpg --full-generate-
+  key`, then re-point `user.signingkey` and re-add the new public key to GitHub)
+  if tighter protection of this specific key ever matters more than convenience;
+  nothing else in this repo depends on the current key's fingerprint.
+- **Key IDs and rotation.** Find the current signing key: `gpg --list-secret-keys
+  --keyid-format=long vlad.yurchina@gmail.com`. To rotate: generate a new key the
+  same way, `git config --global user.signingkey <new-fingerprint>`, add the new
+  public key to GitHub, then optionally revoke the old one there.
+- **Why per-host keys, not one shared key.** Each host has its own independent
+  SSH/GPG keypair rather than copying one keypair's private material between
+  machines — a compromise of one host's key doesn't implicate the other, and
+  revoking one host's access on GitHub doesn't touch the other's.
+
+---
+
 ## `lab status` red-flag glossary
 
 | Flag | What it means | What to do |
