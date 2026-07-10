@@ -158,4 +158,18 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-07-08T11:58:23+00:00'
+- condition_id: '0x876506d8b2bd7a0d3fa4fe18c024eee6e1dd81ee24c26795dadd6cfe4a7b5d0d'
+  question: Will the Fed increase interest rates by 25 bps after the September 2026
+    meeting?
+  venue: kalshi
+  external_id: KXFEDDECISION-26SEP-H25
+  external_question: Will the Federal Reserve Hike rates by 25bps at their September
+    2026 meeting?
+  confirmed_ts: '2026-07-10T12:28:37+00:00'
+- condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
+  question: Will LeBron James win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESNOMD-28-LJAM
+  external_question: Will Lebron James be the Democratic Presidential nominee in 2028?
+  confirmed_ts: '2026-07-10T12:28:45+00:00'
 proposed: []
