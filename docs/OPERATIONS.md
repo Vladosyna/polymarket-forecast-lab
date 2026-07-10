@@ -5,6 +5,16 @@ This is the operator runbook required by CLAUDE.md Phase 18 ("Operations hardeni
 If a step below does not work exactly as written when you actually run it, **fix this
 doc** — don't route around it and don't rely on tribal knowledge instead.
 
+**As of 2026-07-10, this laptop is the secondary host — the VPS
+(`docs/VPS_OPERATIONS.md`) is primary.** The laptop's `lab run` is running in
+parallel for a few days as a stand-by/verification instance only, with
+`config.yaml`'s `publish.enabled` overridden to `false` **locally, uncommitted**
+(never push that change — it would wrongly disable the VPS's own publish too,
+since it's the same tracked file) so both hosts don't race pushing to the
+private results repo on the same nightly cron. Everything below still describes
+this host accurately for as long as it keeps running — just read "primary" as
+"was primary, now stand-by" until this laptop's `lab run` is retired for good.
+
 ---
 
 ## What runs where
@@ -192,6 +202,12 @@ public repo.
   table. This spacing exists because `lab.db` is a single, ever-growing binary with no
   Git LFS delta compression: pushing it as often as the small/incremental snapshot
   partitions would burn a GitHub LFS free-tier month's 1GB bandwidth quota in days.
+
+**Currently paused on this host (2026-07-10 onward, local-only override — see the
+banner at the top of this doc):** `publish.enabled` is `false` in this laptop's own
+`config.yaml`, uncommitted, so none of the above runs from here while the VPS is
+the primary pusher to the same private repo. Nothing to fix — this is intentional
+for the parallel-verification window, not a broken backup.
 
 **Manual, on-demand push** (does not wait for the nightly schedule):
 ```powershell
