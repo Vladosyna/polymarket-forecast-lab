@@ -172,37 +172,40 @@ confirmed:
   external_id: KXPRESNOMD-28-LJAM
   external_question: Will Lebron James be the Democratic Presidential nominee in 2028?
   confirmed_ts: '2026-07-10T12:28:45+00:00'
-proposed:
 - condition_id: '0xa6c3848b7861841cc9d93a5c2c1d26b3f44e0298a49889968a627214a2b177ae'
   question: Will Manuel Bompard win the 2027 French presidential election?
   venue: kalshi
   external_id: KXFRENCHPRES-27-MBOM
   external_question: Will Manuel Bompard win the 2027 French presidential election?
-  rationale: Both markets ask exactly the same question about Manuel Bompard winning
-    the 2027 French presidential election, and the Polymarket resolution criteria
-    describe the standard two-round system and official result source, which is consistent
-    with any standard election market. There is no discrepancy in the event description
-    or resolution criteria that would affect the identity match.
-  confidence: 1.0
-  proposed_ts: '2026-07-09T16:10:45+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-10T17:52:10+00:00'
 - condition_id: '0x0b298ab2b2cad3308d486c804985c1ede7ea949bde363f44784a3b2a460be788'
   question: "Will \xC9lisabeth Borne win the 2027 French presidential election?"
   venue: kalshi
   external_id: KXFRENCHPRES-27-EBOR
   external_question: "Will \xC9lisabeth Borne win the 2027 French presidential election?"
-  rationale: "Both the Polymarket question and the Kalshi question ask exactly the\
-    \ same binary outcome: whether \xC9lisabeth Borne will win the 2027 French presidential\
-    \ election. The Polymarket resolution criteria detail the election process and\
-    \ fallback date, but the core event and subject are identical. There is no substantive\
-    \ difference in the described event or resolution conditions that would cause\
-    \ a mismatch. The third-party tool's high confidence of 0.95 is well-justified,\
-    \ and I find no reason to doubt it."
-  confidence: 1.0
-  proposed_ts: '2026-07-09T16:10:50+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-10T17:52:15+00:00'
+proposed:
+- condition_id: '0x1a01bf78f56a507fcb666d564d8c8b91b0750679163ed6e96746102c9b7d285d'
+  question: "Will Fl\xE1vio Bolsonaro win the 2026 Brazilian presidential election?"
+  venue: kalshi
+  external_id: KXBRPRES-26-FBOL
+  external_question: "Will Fl\xE1vio Bolsonaro win the 2026 Brazilian presidential\
+    \ election?"
+  rationale: "Both Polymarket question and Kalshi market are identically phrased,\
+    \ refer to the same event (2026 Brazilian presidential election), same candidate\
+    \ (Fl\xE1vio Bolsonaro), and resolution criteria are aligned with official election\
+    \ results. The third-party tool's high confidence is consistent with an exact\
+    \ textual match on a clear, well-defined event."
+  confidence: 0.95
+  proposed_ts: '2026-07-10T18:00:19+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
