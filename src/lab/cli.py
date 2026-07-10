@@ -467,5 +467,27 @@ def map_list() -> None:
                    f"(confidence={e.get('confidence', 0):.2f})")
 
 
+@map_app.command("pmxt-verify")
+def map_pmxt_verify() -> None:
+    """LLM-verify pmxt Router candidates (data/pmxt_candidates.json) into `proposed`.
+
+    A standalone, manually/cron-invokable wrapper around the same job the
+    orchestrator (`lab run`) fires twice daily on `cross_venue.pmxt_verify_cron`
+    -- for a host that runs the pmxt scan+verify cycle on its own schedule
+    (e.g. a native OS timer) without running the full orchestrator. Commits
+    (and, per config, pushes) markets_map.yaml when it actually gains new
+    proposals, so any other host reads them on its next `git pull`.
+    """
+    from lab.jobs import run_pmxt_verify_job
+
+    result = run_pmxt_verify_job(load_config())
+    if "skipped" in result:
+        typer.echo(f"map pmxt-verify: skipped ({result['skipped']})")
+        return
+    typer.echo(f"map pmxt-verify: {result['new_proposals']} new proposal(s)")
+    if "git" in result:
+        typer.echo(f"  git: {result['git']}")
+
+
 if __name__ == "__main__":
     app()

@@ -167,14 +167,19 @@ def run_map_propose_job(config: dict[str, Any]) -> dict[str, Any]:
 def run_pmxt_verify_job(config: dict[str, Any]) -> dict[str, Any]:
     """Twice-daily companion to the weekly LLM-based `run_map_propose_job`:
     verifies candidate pairs an out-of-band pmxt Router scan
-    (scripts/pmxt_router_scan.py, its own separate Windows Scheduled Task --
-    never called from this process, see that script's docstring) wrote to
+    (scripts/pmxt_router_scan.py, its own separate scheduled task -- never
+    called from this process, see that script's docstring) wrote to
     data/pmxt_candidates.json, and appends the ones our own LLM check agrees
     with into markets_map.yaml's `proposed` list. Same propose-then-confirm
     contract as run_map_propose_job -- a human still runs `lab map confirm`
     before a pair is ever live. Skips cleanly if no LLM is configured or no
-    candidates file exists yet."""
-    from lab.models.m7_crossvenue import verify_pmxt_candidates
+    candidates file exists yet.
+
+    When this host actually added new proposals, also commits+pushes
+    markets_map.yaml -- needed once the scan/verify cycle can run on a host
+    other than the one that reads the file at forecast time (never blocks or
+    re-triggers this job on failure, see commit_and_push_markets_map)."""
+    from lab.models.m7_crossvenue import commit_and_push_markets_map, verify_pmxt_candidates
     from lab.news.extract import create_llm_client
 
     conn = db.connect(config["storage"]["db_path"])
@@ -187,6 +192,8 @@ def run_pmxt_verify_job(config: dict[str, Any]) -> dict[str, Any]:
     finally:
         conn.close()
     result = {"new_proposals": len(proposals)}
+    if proposals:
+        result["git"] = commit_and_push_markets_map(config)
     log.info("pmxt verify job complete", extra={"ctx": result})
     return result
 

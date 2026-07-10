@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 
 import pytest
 
 from lab.learn.refit import save_artifact, sigmoid
 from lab.models.base import ForecastResult
 from lab.models.m7_crossvenue import (
+    commit_and_push_markets_map,
     confirm_match,
     confirmed_by_condition,
     kalshi_propose_candidates,
@@ -790,3 +792,117 @@ def test_verify_pmxt_candidates_skips_malformed_entry_missing_fields(config, tmp
     assert proposals == []
     assert llm.calls == 0
     conn.close()
+
+
+# --- commit_and_push_markets_map (multi-host pmxt: needed once the
+# scan+verify cycle can run on a host that isn't the one M7 reads at forecast
+# time -- see jobs.run_pmxt_verify_job) ------------------------------------
+
+def _init_git_repo(path):
+    for args in (
+        ["git", "init"],
+        ["git", "config", "user.email", "test@test.local"],
+        ["git", "config", "user.name", "Test"],
+    ):
+        subprocess.run(args, cwd=path, capture_output=True, text=True, check=True)
+    (path / "README.md").write_text("test repo\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=path, capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=path, capture_output=True, text=True, check=True)
+
+
+def test_commit_and_push_markets_map_is_noop_when_unchanged(config, tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    map_path = repo / "data" / "markets_map.yaml"
+    map_path.parent.mkdir(parents=True)
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+    # Committed as part of "init" so git sees no pending changes to it.
+    subprocess.run(["git", "add", "data/markets_map.yaml"], cwd=repo, capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-m", "seed markets_map"], cwd=repo, capture_output=True, text=True, check=True)
+    monkeypatch.setattr("lab.models.m7_crossvenue.PROJECT_ROOT", repo)
+
+    result = commit_and_push_markets_map(config, path=map_path)
+    assert result == {"committed": False, "reason": "no_changes"}
+
+
+def test_commit_and_push_markets_map_commits_pending_changes(config, tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    map_path = repo / "data" / "markets_map.yaml"
+    map_path.parent.mkdir(parents=True)
+    save_markets_map({"confirmed": [], "proposed": [{"condition_id": "0x1", "venue": "kalshi",
+                                                      "external_id": "FEDMAR"}]}, map_path)
+    monkeypatch.setattr("lab.models.m7_crossvenue.PROJECT_ROOT", repo)
+
+    config = {**config, "cross_venue": {"markets_map_push": False}}
+    result = commit_and_push_markets_map(config, path=map_path)
+    assert result["committed"] is True
+    assert "pushed" not in result  # push disabled by config
+
+    log = subprocess.run(["git", "log", "--name-only", "-1"], cwd=repo, capture_output=True, text=True)
+    assert "data/markets_map.yaml" in log.stdout
+
+    # A second call with nothing new pending is a clean no-op.
+    assert commit_and_push_markets_map(config, path=map_path) == {"committed": False, "reason": "no_changes"}
+
+
+def test_run_pmxt_verify_job_skips_cleanly_with_no_llm_and_makes_no_commit(config, tmp_path, monkeypatch):
+    from lab import jobs
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    map_path = repo / "data" / "markets_map.yaml"
+    map_path.parent.mkdir(parents=True)
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+    subprocess.run(["git", "add", "data/markets_map.yaml"], cwd=repo, capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=repo, capture_output=True, text=True, check=True)
+    monkeypatch.setattr("lab.models.m7_crossvenue.PROJECT_ROOT", repo)
+    monkeypatch.setattr("lab.models.m7_crossvenue.DEFAULT_MAP_PATH", map_path)
+    monkeypatch.setattr("lab.news.extract.create_llm_client", lambda *a, **k: None)
+
+    result = jobs.run_pmxt_verify_job({**config, "cross_venue": {"markets_map_push": False}})
+    assert result == {"skipped": "no_llm"}
+    # No LLM -> verify_pmxt_candidates never ran -> nothing to commit either.
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True)
+    assert status.stdout.strip() == ""
+
+
+def test_run_pmxt_verify_job_commits_when_it_produces_new_proposals(config, tmp_path, monkeypatch):
+    from lab import jobs
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    map_path = repo / "data" / "markets_map.yaml"
+    map_path.parent.mkdir(parents=True)
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+    subprocess.run(["git", "add", "data/markets_map.yaml"], cwd=repo, capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=repo, capture_output=True, text=True, check=True)
+
+    cand_path = repo / "data" / "pmxt_candidates.json"
+    cand_path.write_text(json.dumps([{
+        "poly_condition_id": "0x1", "poly_question": "Will the Fed cut rates in March?",
+        "kalshi_ticker": "FEDMAR", "kalshi_title": "Fed cuts rates in March FOMC meeting",
+        "relation_type": "identity", "confidence": 0.77, "scanned_ts": "2026-07-08T00:00:00+00:00",
+    }]), encoding="utf-8")
+
+    monkeypatch.setattr("lab.models.m7_crossvenue.PROJECT_ROOT", repo)
+    monkeypatch.setattr("lab.models.m7_crossvenue.DEFAULT_MAP_PATH", map_path)
+    monkeypatch.setattr("lab.models.m7_crossvenue.DEFAULT_PMXT_CANDIDATES_PATH", cand_path)
+    monkeypatch.setattr("lab.news.extract.create_llm_client",
+                        lambda *a, **k: FakeLlm({"match": True, "confidence": 0.9, "rationale": "x"}))
+
+    conn = db.connect(config["storage"]["db_path"])
+    _insert_market(conn)
+    conn.close()
+
+    result = jobs.run_pmxt_verify_job({**config, "cross_venue": {"markets_map_push": False}})
+    assert result["new_proposals"] == 1
+    assert result["git"]["committed"] is True
+
+    log = subprocess.run(["git", "log", "--name-only", "-1"], cwd=repo, capture_output=True, text=True)
+    assert "data/markets_map.yaml" in log.stdout
+    assert len(load_markets_map(map_path)["proposed"]) == 1

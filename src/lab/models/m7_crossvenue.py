@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,51 @@ def save_markets_map(data: dict[str, Any], path: Path | None = None) -> None:
         "# M7 reads ONLY `confirmed`. This file is the source of truth.\n"
     )
     p.write_text(header + yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+
+
+def commit_and_push_markets_map(config: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
+    """Commit (and push) data/markets_map.yaml if it has uncommitted changes.
+
+    Needed once more than one host can append to this file (e.g. a pmxt-scan
+    host distinct from the host(s) that read it at forecast time) --
+    `verify_pmxt_candidates` already durably writes the new proposals to disk
+    before this is ever called, so unlike ledger_commitment.py/paper_export.py
+    there is nothing to revert on failure: a failed commit just leaves the
+    same uncommitted change in place for the next call (or a human) to retry,
+    it can never lose or duplicate a proposal.
+    """
+    p = path or DEFAULT_MAP_PATH
+    rel_path = str(p.relative_to(PROJECT_ROOT))
+    status = _run_git(["status", "--porcelain", "--", rel_path], PROJECT_ROOT)
+    if not status.stdout.strip():
+        return {"committed": False, "reason": "no_changes"}
+
+    try:
+        add = _run_git(["add", rel_path], PROJECT_ROOT)
+        if add.returncode != 0:
+            return {"error": "git_add_failed", "stderr": add.stderr}
+        commit = _run_git(["commit", "-m", "M7: pmxt-verified candidate pairs proposed"], PROJECT_ROOT)
+        if commit.returncode != 0:
+            return {"error": "git_commit_failed", "stderr": commit.stderr}
+    except Exception as exc:
+        log.exception("markets_map commit step failed")
+        return {"error": "git_step_exception", "detail": str(exc)}
+
+    result: dict[str, Any] = {"committed": True}
+    if config.get("cross_venue", {}).get("markets_map_push", True):
+        try:
+            pushed = _run_git(["push"], PROJECT_ROOT)
+            result["pushed"] = pushed.returncode == 0
+            if not result["pushed"]:
+                result["push_stderr"] = pushed.stderr
+        except Exception as exc:
+            result["pushed"] = False
+            result["push_error"] = str(exc)
+    return result
 
 
 def confirmed_by_condition(data: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
