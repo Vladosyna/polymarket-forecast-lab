@@ -252,6 +252,55 @@ hourly-pull behavior back on whichever host that mechanism belongs on next.
 
 ---
 
+## Public-repo push access (discovered missing, fixed 2026-07-10)
+
+The cutover above gave this host a way to push to the **private** results repo
+(`id_ed25519_results`) but nothing to push to the **public**
+`polymarket-forecast-lab` repo itself — its `origin` remote was plain HTTPS with
+no credential helper configured. That's a real gap: once this host became
+primary, `pmxt_verify`'s `commit_and_push_markets_map`, the weekly
+`paper_export`, and the nightly ledger-commitment job all commit to *this*
+repo, not the results one. A commit made here would succeed locally and then
+fail to push, silently piling up unpushed commits until someone noticed a git
+push job on the VPS with `pushed: false` in the logs — a genuine one-day gap
+was caught only because a manually-confirmed M7 pair needed to reach GitHub
+right away and didn't.
+
+Fixed the same way as the results repo: a second dedicated deploy key,
+`~/.ssh/id_ed25519_public_repo`, added on GitHub under this repo's own
+**Settings → Deploy keys** with **write access**, separate from
+`id_ed25519_results` (scoped to the results repo only) and from
+`id_ed25519_deploy` (the operator's own access key into this VPS). Because both
+deploy keys authenticate against the same `github.com` host, `~/.ssh/config`
+disambiguates them with a second alias:
+
+```
+Host github.com
+  IdentityFile ~/.ssh/id_ed25519_results
+  IdentitiesOnly yes
+
+Host github.com-public
+  HostName github.com
+  IdentityFile ~/.ssh/id_ed25519_public_repo
+  IdentitiesOnly yes
+```
+
+and this checkout's `origin` remote points at the alias, not the bare host:
+
+```bash
+cd /root/polymarket-forecast-lab
+git remote set-url origin git@github.com-public:Vladosyna/polymarket-forecast-lab.git
+```
+
+Verify push access still works after any key rotation:
+
+```bash
+ssh -T git@github.com-public   # expect "You've successfully authenticated" (exit 1 is normal -- no shell access)
+git push --dry-run
+```
+
+---
+
 ## Rotating the Basic Auth password
 
 ```bash
