@@ -97,8 +97,34 @@ actually happened, in order:
    parquet ever appears again for *today's* date specifically, this is almost
    certainly the same pattern (a partition file touched into existence right as
    a process was interrupted) rather than a sign of a different bug.
-4. `results-pull.timer` disabled — see below, role reversed.
-5. On the laptop: `config.yaml`'s `publish.enabled` set to `false` as a
+4. **Second bug, fixed on the spot:** `config.yaml`'s `publish.results_dir:
+   ../Polymarket-results` is a relative path that only resolves correctly on
+   the laptop's own directory layout (`D:\Polymarket` + sibling
+   `D:\Polymarket-results`). On this host it resolved to `/Polymarket-results`
+   (filesystem root!) — nonexistent, so `publish_results` correctly no-op'd
+   every time (`{"skipped": "results_dir_not_a_git_checkout"}`), logged
+   misleadingly as a generic "publish job complete" with no error surfaced.
+   Fixed with a **local-only, uncommitted** override to the correct absolute
+   path (`/root/forecast-lab-results`) — never commit this line, it's
+   host-specific, same reasoning as item 5 below. Confirmed fixed by directly
+   invoking `run_publish_job` once by hand: a real new commit landed in
+   `forecast-lab-results` with the expected reports/exports/models/snapshots
+   diff.
+5. **Third bug, fixed on the spot:** this checkout had **no git committer
+   identity configured at all** (`git config user.name`/`user.email` both
+   empty) — it had only ever been `git pull`'d before, never committed from.
+   Every job that commits here (`ledger_commitment`, `paper_export`,
+   `pmxt_verify`, and `publish_results` targeting `forecast-lab-results`) was
+   silently failing its `git commit` step and logging a misleadingly generic
+   "complete" regardless. Fixed with `git config user.name`/`user.email` (both
+   repos: `polymarket-forecast-lab` and `forecast-lab-results`), matching the
+   laptop's own identity. **If a git-committing job ever again logs "complete"
+   with no matching new commit showing up, check this first** — it's a
+   config-scoped setting (not global), so a fresh checkout or a new sibling
+   results-repo checkout on a third host would need this set again from
+   scratch.
+6. `results-pull.timer` disabled — see below, role reversed.
+7. On the laptop: `config.yaml`'s `publish.enabled` set to `false` as a
    **local-only, uncommitted** override (never propagate this to git — it would
    wrongly disable the VPS's own publish too, since it's the same tracked file).
    Prevents both hosts' nightly `run_publish_job` from racing to push the same
@@ -267,4 +293,4 @@ covers what is specific to this VPS host.
 | 2026-07-10 | Initial VPS dashboard exposure: nginx + Let's Encrypt + HTTP Basic Auth on `167-71-201-113.sslip.io`, `lab-dashboard.service` added alongside the pre-existing `lab-collect.service`. |
 | 2026-07-10 | pmxt scan+verify cycle moved here (sole owner): `pmxt-scan.timer`/`pmxt-verify.timer` added; laptop's `PolymarketForecastLabPmxtScan` task disabled. |
 | 2026-07-10 | `results-pull.timer` added: hourly `git pull --ff-only` of `/root/forecast-lab-results`, so this host holds an independent, recent local copy of the actual experiment results if the laptop's orchestrator ever stops. |
-| 2026-07-10 | **Cutover to primary**: laptop's `lab.db` (fuller forecast/eval history) copied here, replacing this host's stale one; `lab-collect.service` disabled and replaced by `lab-run.service` (full orchestrator); `results-pull.timer` disabled (role reversed — this host now pushes to `forecast-lab-results` via its own nightly `run_publish_job`); laptop's own push disabled locally to avoid a git race during the parallel-verification window. |
+| 2026-07-10 | **Cutover to primary**: laptop's `lab.db` (fuller forecast/eval history) copied here, replacing this host's stale one; `lab-collect.service` disabled and replaced by `lab-run.service` (full orchestrator); `results-pull.timer` disabled (role reversed — this host now pushes to `forecast-lab-results` via its own nightly `run_publish_job`); laptop's own push disabled locally to avoid a git race during the parallel-verification window. Two real bugs found and fixed on the spot: `publish.results_dir`'s relative path resolved wrong on this host (local override to an absolute path); this checkout had no git committer identity configured at all, silently failing every commit-based job (`git config user.name`/`user.email` set on both repo checkouts). Both confirmed fixed via direct live invocation, not just "no error logged." |
