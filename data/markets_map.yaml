@@ -199,13 +199,16 @@ proposed:
   external_id: KXBRPRES-26-FBOL
   external_question: "Will Fl\xE1vio Bolsonaro win the 2026 Brazilian presidential\
     \ election?"
-  rationale: "Both Polymarket question and Kalshi market are identically phrased,\
-    \ refer to the same event (2026 Brazilian presidential election), same candidate\
-    \ (Fl\xE1vio Bolsonaro), and resolution criteria are aligned with official election\
-    \ results. The third-party tool's high confidence is consistent with an exact\
-    \ textual match on a clear, well-defined event."
-  confidence: 0.95
-  proposed_ts: '2026-07-10T18:00:19+00:00'
+  rationale: "Both the Polymarket question and the Kalshi question explicitly ask\
+    \ whether Fl\xE1vio Bolsonaro will win the 2026 Brazilian presidential election,\
+    \ covering the same candidate, election, and time frame. The Polymarket resolution\
+    \ criteria detail the election date, potential runoff, and reliance on credible\
+    \ reporting or TSE official results, which are standard for such an event and\
+    \ align with the straightforward Kalshi resolution. No material difference in\
+    \ outcome criteria is evident. The third-party tool's high confidence of 0.95\
+    \ supports the match, and independent review confirms identity."
+  confidence: 1.0
+  proposed_ts: '2026-07-10T18:00:30+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
