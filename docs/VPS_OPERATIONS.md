@@ -42,6 +42,7 @@ own collection — nothing here forecasts, scores, or learns.
 | `lab-dashboard.service` | Streamlit dashboard, loopback-only | `/root/.local/bin/uv run streamlit run src/lab/dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.headless true` |
 | `pmxt-scan.timer` → `pmxt-scan.service` | pmxt Router scan, twice daily 05:00/17:00 UTC | `uv run --with pmxt python scripts/pmxt_router_scan.py` |
 | `pmxt-verify.timer` → `pmxt-verify.service` | LLM-verify pmxt candidates into `markets_map.yaml`, twice daily 06:00/18:00 UTC | `uv run lab map pmxt-verify` |
+| `results-pull.timer` → `results-pull.service` | Hourly pull of the private results mirror (see below) | `git pull --ff-only origin main` |
 
 Standard commands apply to the two long-running services:
 
@@ -142,6 +143,37 @@ certbot installs itself (`systemctl list-timers | grep certbot`).
 
 ---
 
+## Results mirror: hourly pull, a second local copy of the experiment results
+
+`/root/forecast-lab-results` is a checkout of the **private** `forecast-lab-results`
+repo — the same one the laptop's nightly `run_publish_job` pushes `lab.db`, snapshots,
+reports, exports, and model artifacts to (see `docs/OPERATIONS.md`'s backup section).
+It was restored here once during initial VPS setup; `results-pull.timer` now keeps it
+current automatically (hourly, `git pull --ff-only`), so **this host holds its own
+independent, recent local copy of the actual experiment results** — not just code — that
+survives the laptop's own orchestrator stopping. Read-only: this checkout is never
+written to or pushed from the VPS.
+
+Access uses its own dedicated key (`~/.ssh/id_ed25519_results`, set up during initial VPS
+provisioning, scoped via `~/.ssh/config`'s `Host github.com` block), separate from the
+`id_ed25519_deploy` key the operator's own machine uses to SSH *into* this VPS — already
+confirmed working (git-lfs installed and configured, `data/lab.db` pulls as real content,
+not an LFS pointer stub).
+
+```bash
+systemctl list-timers results-pull.timer --no-pager   # next/last fire time
+systemctl start results-pull.service                  # pull right now, out of schedule
+journalctl -u results-pull.service -n 40 --no-pager
+```
+
+A failed pull (network blip, etc.) just logs to the journal and retries next hour —
+`--ff-only` means it can never silently create a merge commit or lose history; if the
+mirror's local history and origin's ever genuinely diverge (shouldn't happen, since
+nothing ever commits into this checkout from the VPS side), the timer will fail loudly
+every hour until a human resolves it by hand.
+
+---
+
 ## Rotating the Basic Auth password
 
 ```bash
@@ -182,3 +214,4 @@ is specific to this second, collector+dashboard-only VPS host.
 |---|---|
 | 2026-07-10 | Initial VPS dashboard exposure: nginx + Let's Encrypt + HTTP Basic Auth on `167-71-201-113.sslip.io`, `lab-dashboard.service` added alongside the pre-existing `lab-collect.service`. |
 | 2026-07-10 | pmxt scan+verify cycle moved here (sole owner): `pmxt-scan.timer`/`pmxt-verify.timer` added; laptop's `PolymarketForecastLabPmxtScan` task disabled. |
+| 2026-07-10 | `results-pull.timer` added: hourly `git pull --ff-only` of `/root/forecast-lab-results`, so this host holds an independent, recent local copy of the actual experiment results if the laptop's orchestrator ever stops. |
