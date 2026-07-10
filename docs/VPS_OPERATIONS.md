@@ -34,14 +34,16 @@ deliberate scope decision, not a gap). The VPS exists as a second, independent
 data-collection vantage point for cross-checking continuity against the laptop's
 own collection — nothing here forecasts, scores, or learns.
 
-**Two systemd units run on this host:**
+**Two long-running systemd services, plus two systemd timers, run on this host:**
 
 | Unit | Purpose | Command |
 |---|---|---|
 | `lab-collect.service` | Long-running collector (pre-existing) | `uv run lab collect` |
-| `lab-dashboard.service` | Streamlit dashboard, loopback-only (new) | `/root/.local/bin/uv run streamlit run src/lab/dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.headless true` |
+| `lab-dashboard.service` | Streamlit dashboard, loopback-only | `/root/.local/bin/uv run streamlit run src/lab/dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.headless true` |
+| `pmxt-scan.timer` → `pmxt-scan.service` | pmxt Router scan, twice daily 05:00/17:00 UTC | `uv run --with pmxt python scripts/pmxt_router_scan.py` |
+| `pmxt-verify.timer` → `pmxt-verify.service` | LLM-verify pmxt candidates into `markets_map.yaml`, twice daily 06:00/18:00 UTC | `uv run lab map pmxt-verify` |
 
-Standard commands apply to both:
+Standard commands apply to the two long-running services:
 
 ```bash
 systemctl status lab-collect.service
@@ -52,7 +54,59 @@ journalctl -u lab-dashboard.service -f      # follow live logs
 journalctl -u lab-collect.service -n 200    # last 200 lines
 ```
 
+For the timers (oneshot services, triggered on schedule — nothing to "keep running"):
+
+```bash
+systemctl list-timers pmxt-scan.timer pmxt-verify.timer --no-pager   # next/last fire time
+systemctl start pmxt-scan.service      # trigger a scan right now, out of schedule
+systemctl start pmxt-verify.service    # trigger a verify pass right now
+journalctl -u pmxt-scan.service -n 40 --no-pager
+journalctl -u pmxt-verify.service -n 40 --no-pager
+```
+
 ---
+
+## pmxt scan + verify: why this host, and how it stays safe
+
+As of 2026-07-10, **this VPS is the sole host running the pmxt scan+verify cycle** — the
+laptop's own `PolymarketForecastLabPmxtScan` Scheduled Task is disabled (not deleted; see
+`docs/OPERATIONS.md`). Two things made running it on both hosts unsafe, not just
+redundant:
+
+1. **`data/markets_map.yaml` has no merge strategy.** Every write (`save_markets_map`) is
+   a full read-modify-write of the whole YAML file, and nothing auto-commits it as a
+   matter of course. Two hosts independently rewriting it would eventually collide on
+   `git pull`/push with an ordinary line-based conflict that silently drops one side's
+   proposed pairs.
+2. **The `$5/day` LLM cap is enforced per host.** `llm.daily_cost_cap_usd` (config.yaml)
+   is checked against each machine's own local `lab.db` — running the verify step on two
+   independent checkouts doubles effective spend to `$10/day` with no code-level
+   awareness of the other host.
+
+**How this host stays the single source of truth going forward:** `run_pmxt_verify_job`
+(v2.9) now commits — and, per `cross_venue.markets_map_push` (default `true`), pushes —
+`data/markets_map.yaml` to the public repo whenever it actually adds new proposals. No
+revert-on-failure is needed (unlike the ledger-commitment/paper-export jobs): the
+proposal is already durable on disk before the git step runs, so a failed commit just
+leaves the same pending change for the next scheduled run (or a human) to retry — it can
+never lose or duplicate a proposal. **The laptop (or any other host) sees new proposals
+only after its own `git pull`** — nothing pulls automatically in the other direction.
+
+Reviewing and confirming proposed pairs: use this host's own dashboard
+(https://167-71-201-113.sslip.io, Cross-Venue Matching (M7) mode) or SSH in and run
+`uv run lab map confirm <condition_id> --venue kalshi`. Either way, confirming here means
+the laptop needs its own `git pull` to see the confirmation before its next `lab
+forecast` run picks it up.
+
+**First real run, 2026-07-10:** the initial scan fired all 12 query terms back-to-back
+with no delay and about half came back with an empty response body
+(`Expecting value: line 1 column 1`), interleaved with queries that succeeded normally —
+consistent with a rate limit on pmxt's own API, not a schema problem. Fixed by pacing
+queries 1.5s apart (`scripts/pmxt_router_scan.py`); confirmed on retest — all 12 queries
+returned cleanly (0 clusters matched for any of them at the time, which is a legitimate
+"nothing found yet" result, not an error). If a genuine schema problem appears instead,
+the script prints a line starting `pmxt schema mismatch` with the raw object dump needed
+to diagnose it.
 
 ## The dashboard: nginx + Let's Encrypt + HTTP Basic Auth
 
@@ -127,3 +181,4 @@ is specific to this second, collector+dashboard-only VPS host.
 | Date | Change |
 |---|---|
 | 2026-07-10 | Initial VPS dashboard exposure: nginx + Let's Encrypt + HTTP Basic Auth on `167-71-201-113.sslip.io`, `lab-dashboard.service` added alongside the pre-existing `lab-collect.service`. |
+| 2026-07-10 | pmxt scan+verify cycle moved here (sole owner): `pmxt-scan.timer`/`pmxt-verify.timer` added; laptop's `PolymarketForecastLabPmxtScan` task disabled. |

@@ -70,34 +70,47 @@ a substitute for the other.
 Both scheduled tasks, the venv, and all scripts live under `D:\Polymarket`.
 
 **Third scheduled task — pmxt Router scan (M7, out-of-band, separate from everything
-above).** `PolymarketForecastLabPmxtScan`, twice daily (05:00 and 17:00 local), runs
-`uv run --with pmxt python scripts\pmxt_router_scan.py`. This is deliberately its own
-task, not part of the orchestrator or the watchdog: pmxt is a third-party unified
-prediction-market **trading** SDK (Claude.md tech-stack row / §12) — its hosted API key
-(`PMXT_API_KEY` in `.env`) can also authorize live trading, so per Claude.md's own rule it
-must never be imported into `src/lab` or run by any automated process this repo owns.
-`uv run --with pmxt` installs it into an ephemeral environment for just that one
-invocation — `pyproject.toml` is never touched, so pmxt never becomes this project's own
-dependency.
+above) — DISABLED on this machine since 2026-07-10, ownership moved to the VPS.**
+`PolymarketForecastLabPmxtScan` (`Disable-ScheduledTask`, not deleted — re-enable with
+`Enable-ScheduledTask -TaskName PolymarketForecastLabPmxtScan` if the VPS is ever
+decommissioned) used to run `uv run --with pmxt python scripts\pmxt_router_scan.py`
+twice daily (05:00/17:00 local). This is deliberately its own task, not part of the
+orchestrator or the watchdog: pmxt is a third-party unified prediction-market
+**trading** SDK (Claude.md tech-stack row / §12) — its hosted API key (`PMXT_API_KEY`
+in `.env`) can also authorize live trading, so per Claude.md's own rule it must never
+be imported into `src/lab` or run by any automated process this repo owns. `uv run
+--with pmxt` installs it into an ephemeral environment for just that one invocation —
+`pyproject.toml` is never touched, so pmxt never becomes this project's own dependency.
+
+**Why disabled, not left running alongside the VPS's copy (v2.9):** the pmxt scan +
+LLM-verify cycle writes to `data\markets_map.yaml`, a single git-tracked file with no
+merge strategy — two hosts independently rewriting it would silently drop whichever
+side lost the next merge, and the $5/day LLM cap (`llm.daily_cost_cap_usd`) is enforced
+per-host against each machine's own `lab.db`, so running it twice would silently double
+effective spend to $10/day. See `docs/VPS_OPERATIONS.md`'s pmxt section for the VPS
+side, which is now the sole owner of this cycle — `run_pmxt_verify_job` there commits
+and pushes `markets_map.yaml` whenever it finds new proposals, so `git pull` on this
+laptop is what surfaces them here.
 
 The scan writes `data\pmxt_candidates.json` (raw pairs pmxt's Router thinks might be the
 same event across Polymarket and Kalshi). A **second, independent** step —
-`verify_pmxt_candidates`, wired into the orchestrator's own scheduler at
-`cross_venue.pmxt_verify_cron` (twice daily, default 06:00/18:00 **UTC** — deliberately
-~1h behind the scan's local-time triggers so fresh candidates are usually ready) — reads
-that file, runs our own LLM check on each pair (pmxt's own confidence score is treated as
-context, not ground truth), and only THEN appends anything it agrees with into
-`data\markets_map.yaml`'s `proposed` list. A human still runs `lab map confirm` (CLI or
-the dashboard's Cross-Venue Matching mode) before any pair is ever live — nothing pmxt
-surfaces is ever auto-confirmed.
+`verify_pmxt_candidates` (also wired into `lab run`'s own scheduler at
+`cross_venue.pmxt_verify_cron`, twice daily, default 06:00/18:00 UTC, though it's a
+harmless no-op here now with the scan disabled and no fresh candidates file ever
+appearing) — reads that file, runs our own LLM check on each pair (pmxt's own
+confidence score is treated as context, not ground truth), and only THEN appends
+anything it agrees with into `data\markets_map.yaml`'s `proposed` list. A human still
+runs `lab map confirm` (CLI or the dashboard's Cross-Venue Matching mode) before any
+pair is ever live — nothing pmxt surfaces is ever auto-confirmed.
 
 Install: `powershell -ExecutionPolicy Bypass -File scripts\install-pmxt-scan-task.ps1`.
-Remove: `scripts\uninstall-pmxt-scan-task.ps1`. **First-run caveat:** pmxt's exact Router
-response field names were assembled from partial public docs and could not be live-tested
-in advance (the same "never run from inside the lab's own process" rule that this task
-exists to satisfy also meant it couldn't be dry-run from the assistant session that wrote
-it). Run it once by hand after installing and watch for a line starting `pmxt schema
-mismatch` — if you see one, the printed raw object dump is enough to get a quick fix.
+Remove: `scripts\uninstall-pmxt-scan-task.ps1`. **First-run caveat (resolved, kept for
+history):** the very first live run fired every query term back-to-back with no delay
+and about half came back with an empty response body (`Expecting value: line 1 column
+1`), interleaved with queries that succeeded normally — consistent with a rate limit on
+pmxt's own API. Fixed by pacing queries 1.5s apart (`scripts\pmxt_router_scan.py`); if a
+genuine schema problem ever appears instead, it prints a line starting `pmxt schema
+mismatch` with the raw object dump needed to fix it.
 
 ---
 
