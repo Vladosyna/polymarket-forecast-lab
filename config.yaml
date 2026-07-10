@@ -229,6 +229,7 @@ schedule:
     shadow_max_age_hours: 168      # weekly -> 7 days
     learn_max_age_hours: 720       # monthly -> 30 days
     pmxt_verify_max_age_hours: 18  # twice-daily -> catch-up if a ~12h cycle is missed
+    paper_export_max_age_hours: 192  # weekly -> 8 days (small buffer over the 7-day cadence)
   # Hourly health/liveness check: re-runs overdue analytics services and forces
   # a collection cycle if the collector has stalled (liquid snapshots too old).
   health_check_interval_minutes: 60
@@ -380,6 +381,19 @@ publish:
 ledger:
   enabled: true
   commitments_path: docs/ledger_commitments.jsonl
+  push: true
+
+# Phase 15 addendum (v2.8): weekly automated `lab export --paper` snapshot,
+# committed to the SAME public repo docs/ledger_commitments.jsonl lives in
+# (independent verifiability -- see ledger_commitment.py's own docstring).
+# Distinct from the on-demand `lab export --paper --out <path>` CLI flow,
+# which stays available for one-off manual exports and is unaffected.
+paper_export:
+  enabled: true
+  dir: docs/paper_exports
+  cron: "0 5 * * 0"   # weekly, Sunday 05:00 UTC -- after the nightly bundle's
+                       # own ledger-commitment push (02:00) and the weekly
+                       # shadow job (03:00), so git pushes don't overlap
   push: true
 
 # --- Storage -------------------------------------------------------------

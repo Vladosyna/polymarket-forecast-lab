@@ -47,3 +47,12 @@ else needs redacting.
 | `generated_at` | ISO 8601 UTC timestamp of the export run. |
 | `row_count` | Number of rows in the JSONL file. |
 | `fields` | The exact field list above, for a quick sanity check against this document. |
+
+## Automated weekly snapshot
+
+Since v2.8, `docs/paper_exports/YYYY-MM-DD.jsonl` (+ matching
+`YYYY-MM-DD.jsonl.meta.json`) is produced automatically every week
+(`paper_export.cron`, default Sunday 05:00 UTC) and committed to this public
+repo, using the exact schema and manifest fields documented above — the CLI's
+manual `lab export --paper --out <path>` flow is unaffected and remains
+available for one-off exports. See `src/lab/paper_export.py`.

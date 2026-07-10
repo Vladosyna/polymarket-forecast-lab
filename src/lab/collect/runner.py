@@ -327,7 +327,7 @@ async def run_collect(config: dict[str, Any]) -> None:
         log.info("collector stopped")
 
 
-SERVICE_NAMES = ("forecast", "shadow", "learn", "map_propose", "pmxt_verify")
+SERVICE_NAMES = ("forecast", "shadow", "learn", "map_propose", "pmxt_verify", "paper_export")
 
 
 @dataclass
@@ -346,6 +346,7 @@ def _control_max_ages(config: dict[str, Any]) -> dict[str, float]:
         "learn": control.get("learn_max_age_hours", 720),
         "map_propose": control.get("map_propose_max_age_hours", 168),
         "pmxt_verify": control.get("pmxt_verify_max_age_hours", 18),
+        "paper_export": control.get("paper_export_max_age_hours", 192),
     }
 
 
@@ -403,12 +404,16 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
     async def run_pmxt_verify_service() -> None:
         await _run("pmxt_verify", lambda: asyncio.to_thread(analytics.run_pmxt_verify_job, config))
 
+    async def run_paper_export_service() -> None:
+        await _run("paper_export", lambda: asyncio.to_thread(analytics.run_paper_export_job, config))
+
     return {
         "forecast": run_forecast_service,
         "shadow": run_shadow_service,
         "learn": run_learn_service,
         "map_propose": run_map_propose_service,
         "pmxt_verify": run_pmxt_verify_service,
+        "paper_export": run_paper_export_service,
     }
 
 
@@ -448,6 +453,7 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
         "propose_cron", "0 5 * * 1")                          # weekly Mon 05:00
     pmxt_verify_cron = config.get("cross_venue", {}).get(
         "pmxt_verify_cron", "0 6,18 * * *")                    # twice daily 06:00/18:00
+    paper_export_cron = config.get("paper_export", {}).get("cron", "0 5 * * 0")
 
     services = _build_analytics_services(config)
     actx = AnalyticsContext(services=services, max_age_hours=_control_max_ages(config))
@@ -468,10 +474,12 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
     # contract as map_propose above.
     scheduler.add_job(services["pmxt_verify"], CronTrigger.from_crontab(pmxt_verify_cron, timezone="UTC"),
                       id="pmxt_verify_twice_daily", max_instances=1, coalesce=True)
+    scheduler.add_job(services["paper_export"], CronTrigger.from_crontab(paper_export_cron, timezone="UTC"),
+                      id="paper_export_weekly", max_instances=1, coalesce=True)
     log.info("analytics scheduled",
              extra={"ctx": {"nightly": forecast_cron, "weekly": shadow_cron,
                             "monthly": learn_cron, "map_propose": map_propose_cron,
-                            "pmxt_verify": pmxt_verify_cron,
+                            "pmxt_verify": pmxt_verify_cron, "paper_export": paper_export_cron,
                             "control": actx.max_age_hours}})
     return actx
 

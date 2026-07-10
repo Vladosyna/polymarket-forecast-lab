@@ -279,6 +279,27 @@ def run_ledger_commitment_job(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def run_paper_export_job(config: dict[str, Any]) -> dict[str, Any]:
+    """Phase 15 addendum (v2.8): weekly automated `lab export --paper`
+    snapshot, committed and pushed to the public repo. Never raises: a failed
+    git step here must not block or re-trigger the forecast/eval/report
+    bundle, same contract as run_publish_job / run_ledger_commitment_job."""
+    from lab.paper_export import commit_and_push_paper_export
+
+    if not config.get("paper_export", {}).get("enabled", True):
+        return {"skipped": "disabled"}
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        result = commit_and_push_paper_export(config, conn)
+    except Exception:
+        log.exception("paper export job failed")
+        return {"error": "paper_export_failed"}
+    finally:
+        conn.close()
+    log.info("paper export job complete", extra={"ctx": result})
+    return result
+
+
 def run_rollback_job(config: dict[str, Any], model_id: str,
                      to_version_tag: str | None = None) -> dict[str, Any]:
     """Manually revert a model's active version to a prior one (outside the cycle)."""
