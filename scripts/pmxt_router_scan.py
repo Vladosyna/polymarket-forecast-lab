@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -175,7 +176,15 @@ def main() -> None:
     dumped_cluster_sample = False
     dumped_poly_kalshi_pair = False
 
-    for query in _query_terms(config):
+    for i, query in enumerate(_query_terms(config)):
+        if i > 0:
+            # Polite pacing (brief guardrail 4, extended to pmxt's own API):
+            # firing every query back-to-back with zero delay produced
+            # empty-body ("Expecting value: line 1 column 1") failures on
+            # roughly half the queries in first-run testing, interleaved with
+            # queries that succeeded normally -- consistent with a rate limit
+            # on pmxt's side rather than a schema problem.
+            time.sleep(1.5)
         try:
             # Per docs.pmxt.dev/api-reference/getV0Matched-market-clusters:
             # fetch_matched_market_clusters takes its OWN query/venues/
