@@ -35,7 +35,7 @@ continuously against public data.
  Data API   ──┘                       └─▶ Parquet (order-book snapshots)
                                               │
                                               ▼
-                          lab forecast  (M0…M6 → M4 ensemble)
+                          lab forecast  (M0…M7 → M4 ensemble)
                           ├─ M0 market mid (null baseline)
                           ├─ M1 horizon-recalibration (logistic, per-bucket)
                           ├─ M2 category base rates
@@ -151,6 +151,21 @@ A short field guide to the estimators this repo actually computes — see
   so promotion is a pointer flip — no changes needed anywhere else — gated
   by a 90-day/n≥200-per-category probation before it's even eligible for the
   standard CI-gated promotion. [`economy/mwu.py`](src/lab/economy/mwu.py).
+- **Net-of-cost accounting (Phase 15).** The shadow portfolio's simulated fills are
+  charged a real, sourced per-venue taker fee (`data/fee_schedule.yaml` — Polymarket's
+  and Kalshi's actual published fee formulas, not invented numbers), and the report
+  carries a net-of-cost skill line alongside the gross one — a headline "beats the
+  market" number that ignores trading cost isn't one worth reporting.
+  [`shadow/fees.py`](src/lab/shadow/fees.py).
+- **Distributional scoring for bucketed events (Phase 16).** Many Kalshi/Polymarket
+  macro and weather markets are really one numeric question split into mutually
+  exclusive buckets (CPI ranges, temperature bands); scoring each bucket as an
+  isolated binary throws away the cross-bucket shape. `eval/scoring.py` also computes
+  the ranked probability score (RPS) per event — the same paired-vs-market,
+  event-clustered, anytime-valid machinery as Brier — reported as a declared
+  secondary outcome once a category has ≥20 resolved bucketed events (binary Brier
+  stays the primary pre-registered outcome).
+  [`eval/distributional.py`](src/lab/eval/distributional.py).
 
 All of the above are fit or computed monthly inside `lab learn`, dry-run by
 default, walk-forward validated, bounded-step, and CI-gated on promotion —
@@ -166,9 +181,10 @@ gate as any other challenger).
 ## Project status
 
 All core phases, the multi-venue collection foundation, the measurement
-upgrade, and the hierarchical/pooling refinements are implemented and tested
-(incl. the `test_scope.py` tripwire that fails the build if execution-code
-strings ever land in `src/`):
+upgrade, the hierarchical/pooling refinements, and the publication,
+distributional-scoring, observation-quality, and operations-hardening rounds
+(Phases 15–18) are implemented and tested (incl. the `test_scope.py` tripwire
+that fails the build if execution-code strings ever land in `src/`):
 
 - [x] Phase 0 — scaffold, config, CLI skeleton
 - [x] Phase 1 — collection (Gamma/CLOB clients, tiering, snapshot loop, resolution watcher)
@@ -178,7 +194,7 @@ strings ever land in `src/`):
 - [x] Phase 5 — M5 structural nowcasts, M6 coherence scanner
 - [x] Phase 6 — M4 ensemble, shadow portfolio (simulation), weekly report
 - [x] Phase 7 / 7.1 — learning loop (`lab learn`: scheduled refits, `model_versions` registry, walk-forward guard, CI-gated promotion, automatic rollback, post-mortems)
-- [x] Phase 8 — Streamlit dashboard (read-only: live universe, forecasts vs market, calibration, shadow book)
+- [x] Phase 8 — Streamlit dashboard (mostly read-only: live universe, forecasts vs market, calibration, shadow book, wealth economy; the one exception, Cross-Venue Matching (M7), lets a human confirm/reject proposed matches, writing to `data/markets_map.yaml` — see "Dashboard" below)
 - [x] Phase 9 — cross-venue signal (M7): Kalshi read-only client (verified live, public, no auth), Metaculus client (requires an operator-supplied API token — Metaculus removed anonymous access; see `src/lab/api/metaculus.py` for the verified request shape), curated propose-then-confirm matching (`lab map propose` / `lab map confirm` / `data/markets_map.yaml`), wired into the ledger and the M4 weight fit
 - [x] Phase 10 — multi-venue collection foundation: Kalshi/Metaculus/Manifold collectors, `venues`/`events` schema, synthesized `{venue}:{native_id}` keys, per-venue `lab status` lines
 - [x] Phase 11 — measurement upgrade: event-level cluster bootstrap, anytime-valid confidence sequence (the actual promotion/rollback gate), precision-weighted stratified estimator, venue × category report matrix
@@ -186,6 +202,10 @@ strings ever land in `src/`):
 - [x] Phase 13 — extremized, correlation-aware pooling: per-category extremization exponent on M4's and M7's pools, discounted by the correlation-adjusted effective source count
 - [x] Phase 14 — virtual prediction economy: `wealth_ledger`, Kelly log-wealth accounting per (model, category) wired into the nightly `lab eval` step, sleeping-expert-normalized comparison (`cum_log_wealth / n_forecasts`), equity-curve/drawdown/attribution report section and a dedicated dashboard mode
 - [x] Phase 14.1 — shadow MWU ensemble weighting: a wealth-derived, regret-bounded (Hedge/MWU) challenger to M4's category weights, cluster-aware floor/ceiling clamped, 90-day/n≥200-per-category probation, CI-gated and rollback-guarded through the same registry as any other challenger
+- [x] Phase 15 — publication instrumentation: `universe_log` (every excluded market + reason code, `lab exclude` for manual entries), M3 boundary-randomization experiment (guardrail 12's pre-specified-seed carve-out), microstructure covariates (spread/depth/volume/trade-count/hour-of-day) persisted at forecast time, a real sourced venue fee schedule (`data/fee_schedule.yaml`) feeding a net-of-cost shadow-portfolio report section, a dated `docs/pre_analysis_plan.md`, and `lab export --paper` (anonymized replication dataset + manifest, now also snapshotted weekly and committed automatically — see below)
+- [x] Phase 16 — distributional scoring: ranked probability score (RPS) for bucketed (negRisk / ordered-bucket) events in `eval/scoring.py` / `eval/distributional.py`, using the same pairing, event-clustering, and anytime-valid machinery as Brier — a declared secondary outcome, not a replacement for the primary pre-registered Brier skill
+- [x] Phase 17 — observation-quality pack: versioned `data/categories.yaml` taxonomy (remaps logged, per-category fits keyed on the internal enum only), depth-based liquidity tiering (order-book depth, not wash-trading-contaminated volume), 1-minute matched-event high-frequency capture on confirmed cross-venue pairs, a CLV validity diagnostic against the sports null control, and gap-aware derived metrics
+- [x] Phase 18 — operations hardening: dead-man heartbeat (`HEARTBEAT_URL`) from the collector and the nightly backup job, the [`docs/OPERATIONS.md`](docs/OPERATIONS.md) operator runbook, and a completed, logged backup-restore drill
 
 Every phase in the engineering brief ([`CLAUDE.md`](CLAUDE.md)) is now implemented and tested.
 
@@ -215,17 +235,21 @@ cost caps) — every default is documented inline.
 | Command | Purpose |
 |---|---|
 | `lab sync` | Discover markets from Gamma, tier the universe (liquid / tail / ignored) |
+| `lab exclude <venue> <venue_native_id>` | Manually log a market as excluded from the universe (`universe_log`, reason_code='manual') |
 | `lab bootstrap` | One-time historical bootstrap: download resolved markets, fit M1/M2 artifacts |
 | `lab collect` | Long-running collector: order-book snapshots + resolution watcher |
 | `lab forecast` | Generate forecasts for the eligible universe, freeze in the ledger |
 | `lab eval` | Score resolved forecasts: paired Brier / log loss, skill with bootstrap CIs |
 | `lab report` | Render the static HTML report |
 | `lab shadow` | Simulated shadow portfolio (SIMULATION only) |
-| `lab export` | Latest forecast per (market, model) as JSONL — the integration point |
+| `lab export` | Latest forecast per (market, model) as JSONL — the integration point; `--paper` emits the full resolved-forecast replication dataset + manifest instead |
 | `lab status` | Data health: snapshot freshness, gaps, watcher lag, spend |
 | `lab learn` | Monthly learning loop: batch refits, champion/challenger, post-mortems |
+| `lab rollback <model_id>` | Manually revert a model's active version to a prior one, outside the monthly learn cycle |
 | `lab run` | **One-button orchestrator**: collector + scheduled forecast/eval/report/shadow/learn in a single process |
 | `lab watchdog` | Supervises `lab run`: auto-restarts it 10 minutes after any exit/crash |
+| `lab guard` | Stop redundant or unmanaged lab instances (orchestrator, collector, dashboard, watchdog) |
+| `lab ps` | List this machine's running lab instances; flag stale code versions and duplicates |
 | `lab map propose` | M7: LLM proposes candidate Kalshi/Metaculus matches into `markets_map.yaml` (`proposed`, not live) |
 | `lab map confirm <condition_id>` | M7: human confirms a proposed (or hand-curated) match — only confirmed pairs are ever forecast |
 | `lab map list` | M7: show confirmed and pending-proposed matches |
@@ -259,11 +283,12 @@ uv run lab run            # or run the orchestrator directly, without auto-resta
 
 ### Manual operation (advanced)
 
-If you prefer external scheduling (cron / systemd) instead of `lab run`:
+If you prefer external scheduling (cron / systemd / Windows Scheduled Tasks)
+instead of `lab run`:
 
 ```bash
-uv run lab collect                      # under tmux / systemd
-# nightly cron:
+uv run lab collect                      # under tmux / systemd / a Scheduled Task
+# nightly:
 uv run lab forecast && uv run lab eval && uv run lab report
 # weekly:  uv run lab shadow
 # monthly: uv run lab learn
@@ -272,13 +297,38 @@ uv run lab forecast && uv run lab eval && uv run lab report
 Back up `data/lab.db` and `data/snapshots/` daily from day one — historical
 order-book snapshots cannot be re-downloaded later.
 
+**This project does not assume one canonical deployment topology.** The reference
+operator runbook, [`docs/OPERATIONS.md`](docs/OPERATIONS.md), documents the actual
+production setup in full: primarily a Windows 11 laptop running the complete
+pipeline (collector + forecast/eval/report/shadow/learn) under Windows Scheduled
+Tasks rather than tmux/systemd/cron — CLAUDE.md's original assumption of "an
+always-on Linux box" was a starting default, not a hard requirement, and the runbook
+documents this as a deliberate, working deviation. A second host, a small Debian
+VPS, separately runs `lab-collect.service` (a systemd unit) as an independent,
+parallel collector for cross-checking data continuity — see
+[`docs/VPS_OPERATIONS.md`](docs/VPS_OPERATIONS.md) for that host's setup; it does not
+run the forecast/eval/report/shadow/learn pipeline, which stays the laptop's job for
+now. Pick whichever scheduler fits your own platform — nothing in the code assumes
+a specific one.
+
 ## Dashboard (optional)
 
-A read-only Streamlit dashboard over the same SQLite/Parquet, organized into modes via a
-sidebar selector: **Overview** (health + universe), **Forecasts vs Market**, **Calibration &
-Skill**, **Wealth Economy** (Phase 14: equity curves, drawdown, sleeping-expert rankings, M4
-attribution — reusing the same plot functions the static report renders), and **Shadow
-Portfolio** (SIMULATION).
+A Streamlit dashboard over the same SQLite/Parquet, organized into six modes via a
+sidebar selector: **Overview** (health + universe), **Forecasts vs Market**,
+**Calibration & Skill**, **Wealth Economy** (Phase 14: equity curves, drawdown,
+sleeping-expert rankings, M4 attribution — reusing the same plot functions the
+static report renders), **Shadow Portfolio** (SIMULATION), and **Cross-Venue
+Matching (M7)**.
+
+Five of the six modes are read-only. **Cross-Venue Matching (M7) is the one
+exception — it writes.** Confirming or rejecting a proposed match there calls the
+exact same `confirm_match`/`reject_match` functions `lab map confirm` uses, editing
+`data/markets_map.yaml` directly — this is the human-in-the-loop gate M7's design
+requires (a human confirms every cross-venue pair before it's ever live), just
+surfaced as a button instead of only a CLI argument. That mode's "Run `lab map
+propose` now" button also makes real Kalshi + LLM API calls, drawing against the
+same daily LLM cost cap as everything else (guardrail 10) — small, but not free and
+not read-only.
 
 ```bash
 uv sync --group dashboard
