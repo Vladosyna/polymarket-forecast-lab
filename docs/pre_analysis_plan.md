@@ -144,3 +144,16 @@ cross-checking this plan and `CLAUDE.md` against the actual codebase:
   stated explicitly: primary analyses for H1–H3 will be re-run excluding forecasts on markets
   where `resolutions.disputed = 1`, reported as a named robustness check alongside the primary
   result — not a new primary outcome, and not a gate on any hypothesis in §2.
+
+**Addendum 9.3 (2026-07-10).** Motivated by Gebele & Matthes (2026, arXiv 2605.31431), which shows
+that a substantial share of apparent long-horizon underconfidence in near-certain prediction-market
+contracts reflects settlement-induced discounting (delayed, collateral-locked redemption) rather
+than belief miscalibration: as a pre-specified robustness check on H1 (not a change to its primary
+specification), the confirmatory analysis will additionally report M1/M1.x skill separately for
+(a) negRisk vs. non-negRisk markets, and (b) venues/periods with active collateral-yield programs
+(e.g., Kalshi's APY, Polymarket's holding-rewards-eligible markets) vs. without — both mitigate the
+settlement wedge per the cited mechanism (Gebele & Matthes §5.3: negRisk conversion compresses it,
+yield-bearing collateral flattens its term structure). This stratification is exploratory relative
+to the frozen primary hypotheses but is committed now, before any confirmatory data exists,
+specifically to prevent this becoming a post hoc excuse in either direction if H1 resolves cleanly
+or resolves to null.
