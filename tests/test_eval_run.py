@@ -68,6 +68,52 @@ def test_run_eval_produces_rows_per_venue_and_category(config):
     conn.close()
 
 
+def _seed_disputed(conn, cid, venue, category, disputed):
+    db.upsert_market(conn, {
+        "condition_id": cid, "venue": venue, "venue_native_id": cid,
+        "slug": None, "question": f"q {cid}", "category": category, "description": "d",
+        "end_date_iso": "2026-12-31T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+        "neg_risk": 0, "active": 1, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
+        "tier": "liquid",
+    })
+    ts = now_utc().isoformat(timespec="seconds")
+    db.append_forecast(conn, {
+        "ts": ts, "condition_id": cid, "model_id": "m0_market",
+        "p_yes": 0.6, "p_market_at_ts": 0.5,
+    })
+    db.record_resolution(conn, cid, ts, 1.0, disputed, "gamma")
+
+
+def test_include_disputed_adds_a_separate_row_without_touching_the_primary_one(config):
+    """PAP Addendum 9.2(b): the default (include_disputed=False) path is
+    completely unchanged -- disputed markets stay excluded, same as before
+    this option existed. include_disputed=True is a genuinely different,
+    additional comparison: it must pick up the disputed row the default
+    path drops, and it must land under a distinctly-suffixed window_label
+    rather than overwriting/mixing into the primary eval_runs row."""
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_disputed(conn, "clean", "polymarket", "economics", disputed=False)
+    _seed_disputed(conn, "disputed", "polymarket", "economics", disputed=True)
+    conn.commit()
+
+    run_eval(conn, config)
+    run_eval(conn, config, include_disputed=True)
+
+    primary = conn.execute(
+        "SELECT n FROM eval_runs WHERE model_id='m0_market' AND window_label='all_time' "
+        "AND venue='polymarket' AND category='economics' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    inclusive = conn.execute(
+        "SELECT n FROM eval_runs WHERE model_id='m0_market' "
+        "AND window_label='all_time_disputed_inclusive' "
+        "AND venue='polymarket' AND category='economics' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+
+    assert primary["n"] == 1  # unchanged: only the clean market
+    assert inclusive["n"] == 2  # both markets, disputed one now included
+    conn.close()
+
+
 def _seed_bucket_event(conn, event_id, model_id, ts, category="economics", true_idx=1):
     """One resolved 3-leg negRisk-style bucketed event, bucket-orderable via
     each question's numeric value (Phase 16). Legs are also ordinary resolved

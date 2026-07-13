@@ -301,6 +301,41 @@ git push --dry-run
 
 ---
 
+## Personal git identity: SSH auth + GPG commit signing (added 2026-07-10)
+
+Separate from the two repo-scoped deploy keys above (`id_ed25519_results`,
+`id_ed25519_public_repo` — push authorization only, no signing), this host also
+has a **personal-account** SSH key and GPG signing key, matching the laptop's
+equivalents (see `docs/OPERATIONS.md`'s corresponding section) so every commit
+this host makes — including the fully automated ones (`pmxt_verify`,
+`ledger_commitment`, `paper_export`, `run_publish_job`) — is signed and shows
+as `Verified` on GitHub, not just push-authorized.
+
+- **SSH key** — `~/.ssh/id_ed25519_personal_github` (no passphrase), added to
+  GitHub under **Settings → SSH and GPG keys** as an *Authentication Key* on the
+  personal account. Not wired into either repo's remote (both still use their
+  own deploy-key aliases) — exists for future personal-identity SSH use from
+  this host if ever needed.
+- **GPG key** — ed25519, no passphrase (required here: every signing job runs
+  unattended via systemd/cron with no human present to unlock a passphrase-
+  protected key — the same reasoning as the deploy keys being passphrase-less),
+  `Name-Real: Vladosyna`, same email as `git config user.email`. Configured
+  **globally** (`git config --global commit.gpgsign true` / `tag.gpgsign true`),
+  so it covers both the public repo and `/root/forecast-lab-results` checkouts
+  with no extra wiring. Public key added to GitHub under **Settings → SSH and
+  GPG keys**. Confirmed `"verified": true` via the GitHub API on real pushed
+  commits in *both* repos.
+- **Key IDs and rotation.** `gpg --list-secret-keys --keyid-format=long
+  vlad.yurchina@gmail.com` shows the current signing key. To rotate: generate a
+  new key the same way, `git config --global user.signingkey <new-fingerprint>`,
+  add the new public key to GitHub, then revoke the old one there.
+- **Why this host's key is different from the laptop's.** Independent keypairs,
+  not shared private material — a compromise of this VPS's root doesn't expose
+  the laptop's signing identity, and either host's GitHub-side key can be
+  revoked without touching the other.
+
+---
+
 ## Rotating the Basic Auth password
 
 ```bash
@@ -343,3 +378,5 @@ covers what is specific to this VPS host.
 | 2026-07-10 | pmxt scan+verify cycle moved here (sole owner): `pmxt-scan.timer`/`pmxt-verify.timer` added; laptop's `PolymarketForecastLabPmxtScan` task disabled. |
 | 2026-07-10 | `results-pull.timer` added: hourly `git pull --ff-only` of `/root/forecast-lab-results`, so this host holds an independent, recent local copy of the actual experiment results if the laptop's orchestrator ever stops. |
 | 2026-07-10 | **Cutover to primary**: laptop's `lab.db` (fuller forecast/eval history) copied here, replacing this host's stale one; `lab-collect.service` disabled and replaced by `lab-run.service` (full orchestrator); `results-pull.timer` disabled (role reversed — this host now pushes to `forecast-lab-results` via its own nightly `run_publish_job`); laptop's own push disabled locally to avoid a git race during the parallel-verification window. Two real bugs found and fixed on the spot: `publish.results_dir`'s relative path resolved wrong on this host (local override to an absolute path); this checkout had no git committer identity configured at all, silently failing every commit-based job (`git config user.name`/`user.email` set on both repo checkouts). Both confirmed fixed via direct live invocation, not just "no error logged." |
+| 2026-07-10 | **Public-repo push access fixed**: found this host had no way to push to the public `polymarket-forecast-lab` repo at all (plain HTTPS origin, no credential helper) — a gap that would have silently stranded every `pmxt_verify`/`ledger_commitment`/`paper_export` commit made here. Fixed with a new `id_ed25519_public_repo` deploy key (write access) plus a `github.com-public` SSH config alias, confirmed with a real push. |
+| 2026-07-10 | **Personal git identity added**: new personal-account SSH key (`id_ed25519_personal_github`) and GPG signing key generated on this host (and, independently, on the laptop); `commit.gpgsign`/`tag.gpgsign` enabled globally. Confirmed real commits to both the public and private results repos show `"verified": true` via the GitHub API. |
