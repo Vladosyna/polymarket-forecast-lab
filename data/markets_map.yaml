@@ -203,19 +203,31 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-07-10T22:34:21+00:00'
-proposed:
 - condition_id: '0x64396449b471b10b006285fa49dd9a5df535694de7b4c703fdeb0d88d5c4cd33'
   question: Will Vivek Ramaswamy win the 2028 US Presidential Election?
   venue: kalshi
   external_id: KXPRESPERSON-28-VRAM
   external_question: Who will win the next presidential election?
-  rationale: "Both markets ask who will win the next U.S. presidential election (2028).\
-    \ Polymarket explicitly names Vivek Ramaswamy as one possible answer, but the\
-    \ question is general; Kalshi asks 'Who will win the next presidential election?'\
-    \ implicitly for 2028. Resolution criteria are consistent \u2014 both rely on\
-    \ standard election outcome calls. The third-party tool's high confidence is justified."
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-12T11:54:19+00:00'
+proposed:
+- condition_id: '0xdf8e2dc5860027decbe6164555c3c1c9645c3bd33e16b9dc57ca87125047d4a8'
+  question: "Will Luiz In\xE1cio Lula da Silva win the 2026 Brazilian presidential\
+    \ election?"
+  venue: kalshi
+  external_id: KXBRPRES-26-LULA
+  external_question: "Will Luiz In\xE1cio Lula da Silva win the 2026 Brazilian presidential\
+    \ election?"
+  rationale: "Both markets ask identically whether Luiz In\xE1cio Lula da Silva will\
+    \ win the 2026 Brazilian presidential election, and the resolution criteria (election\
+    \ date, second round, use of official TSE results) are consistent with a standard\
+    \ winner-take-all market on the same event. The high confidence from the tool\
+    \ is well justified."
   confidence: 0.95
-  proposed_ts: '2026-07-12T06:00:14+00:00'
+  proposed_ts: '2026-07-13T06:00:10+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
