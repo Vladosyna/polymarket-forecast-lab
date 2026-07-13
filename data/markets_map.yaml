@@ -221,13 +221,13 @@ proposed:
   external_id: KXBRPRES-26-LULA
   external_question: "Will Luiz In\xE1cio Lula da Silva win the 2026 Brazilian presidential\
     \ election?"
-  rationale: "Both markets ask identically whether Luiz In\xE1cio Lula da Silva will\
-    \ win the 2026 Brazilian presidential election, and the resolution criteria (election\
-    \ date, second round, use of official TSE results) are consistent with a standard\
-    \ winner-take-all market on the same event. The high confidence from the tool\
-    \ is well justified."
-  confidence: 0.95
-  proposed_ts: '2026-07-13T06:00:10+00:00'
+  rationale: "Both markets ask the identical question about Lula winning the 2026\
+    \ Brazilian presidential election, and the resolution criteria are functionally\
+    \ equivalent\u2014both defer to official TSE results and credible reporting, including\
+    \ potential second rounds. The shared name, event, and resolution details confirm\
+    \ an identity match with no substantive differences."
+  confidence: 1.0
+  proposed_ts: '2026-07-13T06:00:20+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
