@@ -40,55 +40,61 @@
 # Any category with no entry below falls back to `default` (0.04), logged
 # once rather than raised (fail-soft, guardrail 9).
 #
-# `effective_from` for Polymarket entries is a documented LIMITATION, not a
-# researched fact: the docs above describe Polymarket's CURRENT fee
-# structure but do not state when it took effect, so "2000-01-01" here is a
-# deliberate "predates every row this lab has ever collected" sentinel, not
-# a claim about Polymarket's actual fee history. Kalshi's date (2026-07-07)
-# IS the real, sourced effective date from its own fee-schedule page.
+# `effective_from` for Polymarket entries was, until 2026-07-12, a documented
+# LIMITATION rather than a researched fact (the docs above describe
+# Polymarket's CURRENT fee structure but never stated when it took effect).
+# It is now sourced: Qin & Yang (2026, arXiv:2606.04217, "Polymarket-v1
+# Database"), Section 5.3, documents Polymarket's 2026 taker-fee reform as a
+# STAGGERED, category-by-category rollout used as their own paper's
+# identification strategy -- "Crypto in January 2026, Sports in February
+# 2026, and other categories in March 2026." Dates are month-level only (no
+# exact day given in the source); each row below uses the first of its
+# reform month as the documented convention for that precision. Kalshi's
+# date (2026-07-07) remains the real, sourced effective date from its own
+# fee-schedule page, unrelated to Qin & Yang's reform (a different venue).
 version: 1
 schedule:
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-03-01"
     venue: polymarket
     category: default
     taker_rate: 0.04
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-01-01"
     venue: polymarket
     category: crypto
     taker_rate: 0.07
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-02-01"
     venue: polymarket
     category: sports
     taker_rate: 0.03
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-03-01"
     venue: polymarket
     category: tech
     taker_rate: 0.04
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-03-01"
     venue: polymarket
     category: business
     taker_rate: 0.04
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-03-01"
     venue: polymarket
     category: economics
     taker_rate: 0.05
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-03-01"
     venue: polymarket
     category: weather
     taker_rate: 0.05
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-03-01"
     venue: polymarket
     category: entertainment
     taker_rate: 0.05
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-03-01"
     venue: polymarket
     category: health
     taker_rate: 0.05
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-03-01"
     venue: polymarket
     category: equities
     taker_rate: 0.05
-  - effective_from: "2000-01-01"
+  - effective_from: "2026-03-01"
     venue: polymarket
     category: geopolitics
     taker_rate: 0.0

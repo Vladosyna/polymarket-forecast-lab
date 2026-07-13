@@ -52,9 +52,17 @@ def resolved_forecast_rows(
     conn, model_id: str, window_days: int | None,
     venue: str | None = None, category: str | None = None,
     null_control_ids: set[str] | None = None, invert_null_control: bool = False,
+    include_disputed: bool = False,
 ) -> list[dict]:
     """Paired rows: forecast + resolution outcome + venue/category/event_id
-    for one model, optionally scoped to one venue and/or one category."""
+    for one model, optionally scoped to one venue and/or one category.
+
+    include_disputed=False (default, unchanged behavior) excludes disputed
+    resolutions unconditionally -- every existing caller keeps today's
+    result exactly. include_disputed=True drops that filter, giving PAP
+    Addendum 9.2(b)'s promised robustness check something to actually
+    compare against (previously nothing did: disputed markets were excluded
+    everywhere with no inclusive path to re-run instead)."""
     query = """
         SELECT f.condition_id, f.p_yes, f.p_market_at_ts, f.spread_at_ts,
                r.payout_yes, r.resolved_ts,
@@ -65,8 +73,10 @@ def resolved_forecast_rows(
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id
         JOIN markets m ON m.condition_id = f.condition_id
-        WHERE f.model_id = ? AND r.disputed = 0
+        WHERE f.model_id = ?
     """
+    if not include_disputed:
+        query += " AND r.disputed = 0"
     params: list[Any] = [model_id]
     if venue is not None:
         query += " AND m.venue = ?"
@@ -192,8 +202,17 @@ def evaluate_model(
     }
 
 
-def run_eval(conn, config: dict[str, Any]) -> list[dict[str, Any]]:
+def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> list[dict[str, Any]]:
+    """include_disputed=False (default) is the unchanged nightly path.
+    include_disputed=True is PAP Addendum 9.2(b)'s robustness re-run: same
+    models/venues/categories/windows, disputed markets included instead of
+    unconditionally dropped, written to eval_runs under a distinctly
+    suffixed window_label so it never collides with or overwrites a primary
+    row -- a named comparison alongside the primary result, not a
+    replacement for it (brief section 9.2(b), section 4.9(i))."""
     from lab.forecast import null_control_ids_by_venue
+
+    label_suffix = "_disputed_inclusive" if include_disputed else ""
 
     nc_ids_by_venue = null_control_ids_by_venue(conn, config)
     model_ids = [r["model_id"] for r in conn.execute(
@@ -217,11 +236,11 @@ def run_eval(conn, config: dict[str, Any]) -> list[dict[str, Any]]:
                 for label, days in WINDOWS.items():
                     rows = resolved_forecast_rows(
                         conn, model_id, days, venue=venue, category=category,
-                        null_control_ids=nc_ids,
+                        null_control_ids=nc_ids, include_disputed=include_disputed,
                     )
                     summary = evaluate_model(
-                        conn, model_id, label, rows, config, venue=venue, category=category,
-                        window_days=days,
+                        conn, model_id, label + label_suffix, rows, config,
+                        venue=venue, category=category, window_days=days,
                     )
                     if summary:
                         out.append(summary)
@@ -231,10 +250,11 @@ def run_eval(conn, config: dict[str, Any]) -> list[dict[str, Any]]:
             for label, days in WINDOWS.items():
                 rows = resolved_forecast_rows(
                     conn, model_id, days, venue=venue, null_control_ids=nc_ids,
+                    include_disputed=include_disputed,
                 )
                 summary = evaluate_model(
-                    conn, model_id, label, rows, config, venue=venue, category=ALL_CATEGORIES,
-                    window_days=days,
+                    conn, model_id, label + label_suffix, rows, config,
+                    venue=venue, category=ALL_CATEGORIES, window_days=days,
                 )
                 if summary:
                     out.append(summary)
@@ -243,14 +263,14 @@ def run_eval(conn, config: dict[str, Any]) -> list[dict[str, Any]]:
             # (all-time) since nc_rows above isn't window-scoped either.
             nc_rows = resolved_forecast_rows(
                 conn, model_id, None, venue=venue, null_control_ids=nc_ids,
-                invert_null_control=True,
+                invert_null_control=True, include_disputed=include_disputed,
             )
             nc_summary = evaluate_model(
-                conn, model_id, "null_control", nc_rows, config,
+                conn, model_id, "null_control" + label_suffix, nc_rows, config,
                 venue=venue, category=ALL_CATEGORIES, window_days=None,
             )
             if nc_summary:
                 out.append(nc_summary)
     conn.commit()
-    log.info("eval complete", extra={"ctx": {"summaries": len(out)}})
+    log.info("eval complete", extra={"ctx": {"summaries": len(out), "include_disputed": include_disputed}})
     return out

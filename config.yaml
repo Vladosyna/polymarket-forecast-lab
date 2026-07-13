@@ -100,11 +100,13 @@ forecast:
   # Phase 15 boundary-randomization experiment (guardrail 12's pre-specified,
   # seeded-randomization carve-out): markets ranked m3_top_k-10..+10 are
   # randomly assigned to M3 coverage instead of a hard cutoff, to identify
-  # M3's marginal contribution causally. Default OFF -- changes M3's live
-  # targeting/cost profile, so enabling it is a deliberate choice, not a
-  # silent behavior change. Seed is fixed and committed (mirrors
-  # universe.null_control.random_seed's pattern), never rolled fresh per run.
-  m3_boundary_randomization_enabled: false
+  # M3's marginal contribution causally. Enabled 2026-07-12 -- a deliberate
+  # operator choice, not a silent behavior change (see CLAUDE.md v2.10):
+  # M3's live targeting/cost profile shifts from a hard top-K cutoff to the
+  # randomized band from this point forward. Seed is fixed and committed
+  # (mirrors universe.null_control.random_seed's pattern), never rolled
+  # fresh per run.
+  m3_boundary_randomization_enabled: true
   m3_boundary_random_seed: 43
 
 # --- LLM ----------------------------------------------------------------
@@ -343,7 +345,11 @@ venues:
 # run by hand, not by this automatic job. Never blocks or re-triggers the
 # bundle it follows on failure (e.g. no network) -- see jobs.run_publish_job.
 publish:
-  enabled: true
+  # TEMPORARY, LOCAL-ONLY OVERRIDE (2026-07-10, never commit this line):
+  # VPS is now the primary host pushing to this same private repo nightly --
+  # both hosts pushing would race on non-fast-forward errors every night.
+  # Re-enable once this laptop's own lab run is fully retired.
+  enabled: false
   results_dir: ../Polymarket-results   # sibling checkout of the private results repo
   # Raw-data backup to the private results repo (brief section 11: "the
   # historical order-book snapshots cannot be re-downloaded later"). Both

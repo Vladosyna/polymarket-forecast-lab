@@ -149,11 +149,29 @@ def forecast() -> None:
 
 
 @app.command()
-def eval() -> None:
+def eval(
+    include_disputed: bool = typer.Option(
+        False, "--include-disputed",
+        help="PAP Addendum 9.2(b) robustness re-run: score with disputed markets "
+             "included instead of excluded, written under a '_disputed_inclusive' "
+             "window_label alongside (not replacing) the primary eval_runs rows. "
+             "Not part of the nightly job; run manually when the comparison is needed.",
+    ),
+) -> None:
     """Score resolved forecasts: paired Brier/log-loss, skill with bootstrap CIs."""
-    from lab.jobs import run_eval_job
+    if include_disputed:
+        from lab.eval.run import run_eval
+        from lab.store import db
 
-    summaries = run_eval_job(load_config())
+        conn = db.connect(load_config()["storage"]["db_path"])
+        try:
+            summaries = run_eval(conn, load_config(), include_disputed=True)
+        finally:
+            conn.close()
+    else:
+        from lab.jobs import run_eval_job
+
+        summaries = run_eval_job(load_config())
     if not summaries:
         typer.echo("eval: no resolved paired forecasts yet (INSUFFICIENT DATA)")
     for s in summaries:
