@@ -5,15 +5,41 @@ This is the operator runbook required by CLAUDE.md Phase 18 ("Operations hardeni
 If a step below does not work exactly as written when you actually run it, **fix this
 doc** — don't route around it and don't rely on tribal knowledge instead.
 
-**As of 2026-07-10, this laptop is the secondary host — the VPS
-(`docs/VPS_OPERATIONS.md`) is primary.** The laptop's `lab run` is running in
-parallel for a few days as a stand-by/verification instance only, with
-`config.yaml`'s `publish.enabled` overridden to `false` **locally, uncommitted**
-(never push that change — it would wrongly disable the VPS's own publish too,
-since it's the same tracked file) so both hosts don't race pushing to the
-private results repo on the same nightly cron. Everything below still describes
-this host accurately for as long as it keeps running — just read "primary" as
-"was primary, now stand-by" until this laptop's `lab run` is retired for good.
+**Retired 2026-07-13. This laptop no longer runs the lab — the VPS
+(`docs/VPS_OPERATIONS.md`) is sole primary.** Everything below is kept as the
+historical/cold-start record, not a description of this host's current state.
+
+What actually happened at retirement, since the parallel-run window (started
+2026-07-10, meant to last "a few days") ran three days longer than intended
+and caused two real, concrete problems before anyone noticed: the two hosts'
+`lab.db` files had quietly diverged since the VPS-primary cutover (each
+generating its own new forecasts independently), which surfaced as (a) two
+non-reconciled `docs/ledger_commitments.jsonl` entries for the same calendar
+date on three separate days (2026-07-10/11/12 — resolved by keeping both
+sides' entries, never silently overwriting either, per the append-only
+discipline this file exists to enforce) and (b) this file's own local,
+never-commit `publish.enabled: false` override briefly leaking into a real
+commit on the shared repo (`26ccd36`, caught and reverted in `6fbbab4` before
+the VPS pulled it). Both are now fixed; see `Claude.md` v2.10 and
+`docs/VPS_OPERATIONS.md`'s changelog for the full account.
+
+Retirement steps actually taken: (1) final `lab status` comparison against
+the VPS, confirming VPS's 24h gap count was 0/0 (liquid/tail) against this
+laptop's 145/7 — the always-on server had already become the more reliable
+instance, independent of the divergence issue; (2) one last manual raw-data
+backup (`uv run python scripts\publish_results.py --raw-data`) — pushed to a
+dedicated `laptop-final-snapshot-2026-07-13` branch on the private results
+repo rather than `main`, since `main` had already diverged too far from the
+VPS's own ongoing pushes to merge a binary DB into sensibly; (3) all four
+running processes killed (two duplicate `lab run` orchestrators were found
+running simultaneously — one under `.venv`, one under a stray global Python
+install; likewise two duplicate Streamlit dashboards); (4) `data\PAUSE`
+created as a safety net, since removing the two scheduled tasks below
+requires an elevated PowerShell session neither this session nor the
+original retirement session had — **an operator still needs to run
+`scripts\uninstall-watchdog.ps1` from an admin PowerShell** to stop the
+hourly watchdog from resurrecting the orchestrator; until that happens,
+delete `data\PAUSE` at your own risk.
 
 ---
 
