@@ -301,7 +301,13 @@ cross_venue:
 venues:
   kalshi:
     sync_interval_minutes: 60
-    snapshot_interval_minutes: 5
+    # Was 5 -- live VPS audit (2026-07-14) found a full sequential sweep over
+    # ~2871 tracked markets takes ~10-11 min at this host's observed effective
+    # throughput, so ~46% of 5-minute ticks were silently discarded by the
+    # scheduler (max_instances=1, prior sweep still running). 15 gives honest
+    # headroom above the observed worst case instead of a cadence that was
+    # covertly running at ~2x its configured interval.
+    snapshot_interval_minutes: 15
     resolution_poll_minutes: 30
     rate_limit:
       requests_per_second: 8   # brief section 3: Kalshi tolerates ~10 req/s; stay under it

@@ -549,8 +549,16 @@ def _register_health_check(
                                 "collector_recovered": collector_recovered,
                                 "instances_stopped": guard.get("stopped", [])}})
 
+    # misfire_grace_time: APScheduler's own default (1s) is far tighter than
+    # this scheduler's observed jitter under load (5-7s late is routine when
+    # ~7 hourly jobs pile up on the same tick, per live VPS audit 2026-07-14)
+    # -- without an explicit override every firing was silently discarded as
+    # a misfire, so the one job meant to catch and recover an overdue nightly
+    # bundle never ran at all. An hourly check firing a few minutes late is
+    # inconsequential; being silently skipped forever is not.
     scheduler.add_job(health_check, "interval", minutes=minutes,
-                      id="health_check", max_instances=1, coalesce=True)
+                      id="health_check", max_instances=1, coalesce=True,
+                      misfire_grace_time=300)
     log.info("health-check scheduled", extra={"ctx": {"interval_minutes": minutes}})
 
 

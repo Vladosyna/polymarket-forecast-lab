@@ -109,6 +109,10 @@ def test_orchestrator_job_registration(tmp_path):
         health = scheduler.get_job("health_check")
         assert health is not None
         assert health.trigger.interval.total_seconds() == 60 * 60
+        # Live VPS audit (2026-07-14): APScheduler's 1s default misfire_grace_time
+        # was tighter than this scheduler's routine multi-second jitter under load,
+        # so every hourly firing was silently discarded and the job never once ran.
+        assert health.misfire_grace_time == 300
 
         hb = scheduler.get_job("heartbeat_ping")
         assert hb is not None
