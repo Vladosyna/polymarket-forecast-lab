@@ -123,7 +123,14 @@ async def snapshot_metaculus(
 def _extract_resolution(raw: dict[str, Any]) -> tuple[float, bool] | None:
     """Best-effort, defensive extraction of a final payout from the raw
     `GET /api/posts/{id}/` response. Returns None (treat as still open /
-    unrecognized shape) rather than guessing -- see module docstring."""
+    unrecognized shape) rather than guessing -- see module docstring.
+
+    Same group_of_questions/conditional scoping as api/metaculus.py's
+    _extract_probability: a post with no top-level "question" key is a
+    multi-question container, and M7 pairing only supports plain binary
+    questions, so this does not guess which sub-question resolution applies
+    -- it logs the distinct cause instead of returning an indistinguishable
+    None."""
     if not isinstance(raw, dict):
         return None
     q = raw.get("question")
@@ -146,6 +153,11 @@ def _extract_resolution(raw: dict[str, Any]) -> tuple[float, bool] | None:
             if payout in (0.0, 1.0):
                 return payout, False
             return None
+    elif isinstance(raw.get("group_of_questions"), dict) or isinstance(raw.get("conditional"), dict):
+        log.warning("metaculus resolutions: post is group_of_questions/conditional, not a "
+                    "plain question -- M7 pairing only supports plain binary questions, abstaining",
+                    extra={"ctx": {"post_id": raw.get("id")}})
+        return None
     # Fallback: a top-level resolved flag with an explicit payout, in case a
     # future/alternate response shape surfaces it outside `question`.
     if raw.get("resolved") and raw.get("actual_resolve_time"):

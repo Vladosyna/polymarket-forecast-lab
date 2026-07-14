@@ -1,14 +1,16 @@
 # VPS Operator Runbook (Debian 13, 167.71.201.113)
 
-**As of 2026-07-10, this VPS is the primary host** — it runs the full pipeline
-(collector + forecast/eval/report/shadow/learn + private-results publish). The
-Windows laptop is being phased out: it runs in parallel for a few days as a
-stand-by/verification instance (with its own push to the private results repo
-disabled to avoid a git race — see "Cutover" below), and its `lab run` will be
-stopped manually once the operator is satisfied this host is stable. This
-document is a companion to [`docs/OPERATIONS.md`](OPERATIONS.md) (the
-Windows-laptop runbook) — **not a replacement for it**; follow the same "fix
-this doc if a step doesn't work" discipline as that document.
+**As of 2026-07-10, this VPS is the primary host, and as of 2026-07-13 the sole
+one** — it runs the full pipeline (collector + forecast/eval/report/shadow/
+learn + private-results publish). The Windows laptop's parallel-verification
+window (meant to last "a few days") ran three days over, and the divergence
+that caused is documented in this file's Changelog and in
+`docs/OPERATIONS.md`'s own retirement entry — read those before assuming this
+host's `lab.db` and the laptop's ever agreed on anything after 2026-07-10.
+This document is a companion to [`docs/OPERATIONS.md`](OPERATIONS.md) (the
+Windows-laptop runbook, now a retired-host historical record) — **not a
+replacement for it**; follow the same "fix this doc if a step doesn't work"
+discipline as that document.
 
 ---
 
@@ -380,3 +382,4 @@ covers what is specific to this VPS host.
 | 2026-07-10 | **Cutover to primary**: laptop's `lab.db` (fuller forecast/eval history) copied here, replacing this host's stale one; `lab-collect.service` disabled and replaced by `lab-run.service` (full orchestrator); `results-pull.timer` disabled (role reversed — this host now pushes to `forecast-lab-results` via its own nightly `run_publish_job`); laptop's own push disabled locally to avoid a git race during the parallel-verification window. Two real bugs found and fixed on the spot: `publish.results_dir`'s relative path resolved wrong on this host (local override to an absolute path); this checkout had no git committer identity configured at all, silently failing every commit-based job (`git config user.name`/`user.email` set on both repo checkouts). Both confirmed fixed via direct live invocation, not just "no error logged." |
 | 2026-07-10 | **Public-repo push access fixed**: found this host had no way to push to the public `polymarket-forecast-lab` repo at all (plain HTTPS origin, no credential helper) — a gap that would have silently stranded every `pmxt_verify`/`ledger_commitment`/`paper_export` commit made here. Fixed with a new `id_ed25519_public_repo` deploy key (write access) plus a `github.com-public` SSH config alias, confirmed with a real push. |
 | 2026-07-10 | **Personal git identity added**: new personal-account SSH key (`id_ed25519_personal_github`) and GPG signing key generated on this host (and, independently, on the laptop); `commit.gpgsign`/`tag.gpgsign` enabled globally. Confirmed real commits to both the public and private results repos show `"verified": true` via the GitHub API. |
+| 2026-07-13 | **Laptop retired; the three-day-over parallel window's cost paid off in full.** Both hosts' `lab.db` had quietly diverged since the 07-10 cutover (each independently forecasting/resolving), which surfaced as two concrete problems on `git pull` here: (a) `docs/ledger_commitments.jsonl` had two non-reconciled entries for the same calendar date on three separate days (07-10/11/12) — resolved by keeping every entry from both sides (append-only discipline forbids picking a "winner" or silently rewriting either), so the file now honestly shows both hosts' independent commitments during the overlap; (b) the laptop's own local, never-commit `publish.enabled: false` override had leaked into a real commit (`26ccd36`, made from the laptop) — caught while merging this host's own pending commits back in, fixed in `6fbbab4` before this host pulled either. Also live-verified for the first time: this host's `lab-run.service` config also picked up `26ccd36`'s `m3_boundary_randomization_enabled: true` and the `eval/run.py`/`fee_schedule.yaml` changes cleanly through this same merge, then a `systemctl restart lab-run.service` (confirmed healthy: normal snapshot activity within seconds, `git rev-list` 0/0 against origin). Final `lab status` comparison ahead of retirement: this host 0 gaps in 24h on both tiers vs. the laptop's 145 (liquid) / 7 (tail) — the always-on host had already become the more reliable one, independent of the divergence bugs above. The laptop's final divergent state (a few hundred extra forecast rows unique to it) was backed up to the private results repo's own `laptop-final-snapshot-2026-07-13` branch, not merged into `main` — see `docs/OPERATIONS.md`'s retirement entry for why. One step remains outside any automated session's reach: the laptop's `PolymarketForecastLabWatchdog(Hourly)` scheduled tasks need `Unregister-ScheduledTask` from an **elevated** PowerShell to actually stop existing; until an operator runs that by hand, `data\PAUSE` on the laptop is the only thing stopping the hourly watchdog from resurrecting a now-pointless orchestrator there. |
