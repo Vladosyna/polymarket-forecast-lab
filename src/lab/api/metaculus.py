@@ -57,9 +57,25 @@ def _extract_probability(raw: dict[str, Any]) -> float | None:
     """`question.aggregations.{recency_weighted,unweighted}.latest.centers[0]`
     -- the exact path Metaculus's own forecasting-tools client reads. `latest`
     is frequently null (see module docstring); this returns None rather than
-    raising whenever the shape isn't there."""
+    raising whenever the shape isn't there.
+
+    Group-of-questions and conditional posts (spec's `GroupOfQuestions`/
+    `Conditional` schemas) have no top-level "question" key at all -- each
+    sub-question is its own nested Question object instead. M7 pairing is
+    scoped to plain binary questions only (CLAUDE.md's M7 section), so this
+    intentionally does not reach into `group_of_questions.questions[]` or
+    `conditional.*` to pick a sub-question -- guessing which one corresponds
+    to a confirmed pair would risk silently attaching the wrong probability,
+    which is worse than abstaining. It does distinguish the two None causes
+    in the log (unsupported post shape vs. this account's tier gating a
+    plain question's CP), so a future group/conditional mismatch is visible
+    rather than indistinguishable from the routine tier-gated null."""
     q = raw.get("question")
     if not isinstance(q, dict):
+        if isinstance(raw.get("group_of_questions"), dict) or isinstance(raw.get("conditional"), dict):
+            log.warning("metaculus: post is group_of_questions/conditional, not a plain "
+                        "question -- M7 pairing only supports plain binary questions, abstaining",
+                        extra={"ctx": {"post_id": raw.get("id")}})
         return None
     aggregations = q.get("aggregations")
     if not isinstance(aggregations, dict):

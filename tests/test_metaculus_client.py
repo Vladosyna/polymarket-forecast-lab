@@ -35,3 +35,21 @@ def test_returns_none_when_latest_is_null():
 def test_returns_none_when_aggregations_missing_entirely():
     assert _extract_probability({"question": {}}) is None
     assert _extract_probability({}) is None
+
+
+def test_returns_none_for_group_of_questions_post():
+    """A post with no top-level "question" key (group_of_questions/conditional
+    shape, per the spec's GroupOfQuestions/Conditional schemas) abstains rather
+    than guessing which sub-question's aggregations apply -- M7 pairing only
+    supports plain binary questions."""
+    raw = {"id": 17829, "group_of_questions": {"questions": [
+        {"id": 17876, "aggregations": {"recency_weighted": {"latest": {"centers": [0.3]}}}},
+    ]}}
+    assert _extract_probability(raw) is None
+
+
+def test_returns_none_for_conditional_post():
+    raw = {"id": 1, "conditional": {
+        "question_yes": {"aggregations": {"recency_weighted": {"latest": {"centers": [0.6]}}}},
+    }}
+    assert _extract_probability(raw) is None

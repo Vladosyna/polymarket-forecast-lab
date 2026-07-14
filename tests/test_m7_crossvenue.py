@@ -300,6 +300,34 @@ def test_scan_confirmed_pairs_recalibrates_metaculus_cp_via_m1_hier(config, tmp_
     conn.close()
 
 
+def test_scan_confirmed_pairs_skips_market_when_metaculus_cp_is_none(config, tmp_path, monkeypatch):
+    """Clean abstain path (CLAUDE.md guardrail: record NULL, never impute):
+    when Metaculus's community prediction is None (e.g. this account's
+    data-access tier gates it, per api/metaculus.py's module docstring) and
+    no other venue is paired, no quote is pooled and no forecast row is
+    produced for that market -- not a zero-price quote, not a crash."""
+    monkeypatch.setattr("lab.api.metaculus.MetaculusClient",
+                         lambda bucket: FakeMetaculusClient(bucket, raw_cp=None))
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", FakeKalshiClientNoMatch)
+
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    _seed_market_with_snapshot(conn, store, "0x1")
+    conn.commit()
+
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map(
+        {"confirmed": [{"condition_id": "0x1", "venue": "metaculus", "external_id": "123"}],
+         "proposed": []},
+        map_path,
+    )
+
+    results = asyncio.run(scan_confirmed_pairs(conn, store, config, markets_map_path=map_path))
+
+    assert "0x1" not in results
+    conn.close()
+
+
 def test_scan_confirmed_pairs_leaves_cp_unchanged_without_artifact(config, tmp_path, monkeypatch):
     monkeypatch.setattr("lab.api.metaculus.MetaculusClient", FakeMetaculusClient)
     monkeypatch.setattr("lab.api.kalshi.KalshiClient", FakeKalshiClientNoMatch)

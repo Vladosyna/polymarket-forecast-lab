@@ -207,6 +207,16 @@ def test_extract_resolution_missing_field_returns_none():
     assert _extract_resolution(None) is None
 
 
+def test_extract_resolution_returns_none_for_group_of_questions_post():
+    """Same group_of_questions/conditional scoping as api/metaculus.py's
+    _extract_probability -- abstain rather than guess which sub-question's
+    resolution applies."""
+    raw = {"id": 17829, "group_of_questions": {"questions": [
+        {"id": 17876, "resolution": "yes"},
+    ]}}
+    assert _extract_resolution(raw) is None
+
+
 def test_unresolved_metaculus_pairs_excludes_already_resolved(config):
     conn = db.connect(config["storage"]["db_path"])
     _seed_market(conn, "0xA")
