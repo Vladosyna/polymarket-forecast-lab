@@ -213,7 +213,6 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-07-12T11:54:19+00:00'
-proposed:
 - condition_id: '0xdf8e2dc5860027decbe6164555c3c1c9645c3bd33e16b9dc57ca87125047d4a8'
   question: "Will Luiz In\xE1cio Lula da Silva win the 2026 Brazilian presidential\
     \ election?"
@@ -221,13 +220,23 @@ proposed:
   external_id: KXBRPRES-26-LULA
   external_question: "Will Luiz In\xE1cio Lula da Silva win the 2026 Brazilian presidential\
     \ election?"
-  rationale: "Both markets ask the identical question about Lula winning the 2026\
-    \ Brazilian presidential election, and the resolution criteria are functionally\
-    \ equivalent\u2014both defer to official TSE results and credible reporting, including\
-    \ potential second rounds. The shared name, event, and resolution details confirm\
-    \ an identity match with no substantive differences."
-  confidence: 1.0
-  proposed_ts: '2026-07-13T06:00:20+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-13T08:56:24+00:00'
+proposed:
+- condition_id: '0xe0173375b7eaccb836f7b92d28a9a2d1cc69e54e5a65fae89a5d7e49aadd332e'
+  question: Will Nikki Haley win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-NHAL
+  external_question: Who will win the next presidential election?
+  rationale: Both markets ask who will win the next US presidential election (2028),
+    and the resolution criteria align on the winner being determined by standard election
+    outcomes. The high tool confidence is justified as the event and question are
+    effectively identical.
+  confidence: 0.95
+  proposed_ts: '2026-07-14T18:00:01+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
