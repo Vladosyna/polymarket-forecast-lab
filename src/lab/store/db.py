@@ -404,6 +404,15 @@ def migrate_universe_log_dedup(conn: sqlite3.Connection) -> dict[str, bool]:
     applied = {"deduped_existing_rows": False, "unique_index": False}
     if not _index_exists(conn, "idx_universe_log_dedup"):
         before = conn.execute("SELECT COUNT(*) FROM universe_log").fetchone()[0]
+        # Explicit BEGIN: unlike INSERT/UPDATE/DELETE, Python's sqlite3 module
+        # does NOT auto-open a transaction before DDL (CREATE/DROP/ALTER), so
+        # without this each DDL statement below would commit independently as
+        # its own atomic unit -- discovered the hard way when an interrupted
+        # run left a committed-but-half-populated universe_log_dedup_tmp
+        # table behind even though the migration "looked" like one block.
+        # DROP TABLE IF EXISTS defends against exactly that leftover.
+        conn.execute("BEGIN")
+        conn.execute("DROP TABLE IF EXISTS universe_log_dedup_tmp")
         conn.execute(
             "CREATE TABLE universe_log_dedup_tmp ("
             "  id INTEGER PRIMARY KEY, ts TEXT NOT NULL,"
