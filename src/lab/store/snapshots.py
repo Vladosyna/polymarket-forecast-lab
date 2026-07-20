@@ -86,17 +86,57 @@ class SnapshotStore:
                 merged = pl.concat([existing, part], how="diagonal")
             else:
                 merged = part
-            merged.write_parquet(path)
+            # Write atomically: a full write to a temp file, then an atomic
+            # rename over the real path (os.replace is atomic within a
+            # filesystem on both POSIX and Windows). A reader -- or the next
+            # append's read-back above -- therefore only ever sees a complete
+            # partition, never the half-written/0-byte file an interrupted
+            # in-place write.parquet() would leave behind (the corruption that
+            # otherwise crashes read_range, and with it the whole report job).
+            tmp = path.with_name(path.name + ".tmp")
+            merged.write_parquet(tmp)
+            tmp.replace(path)
             written += len(part)
         return written
 
-    def read_range(self, dates: list[str]) -> pl.DataFrame:
-        """Read snapshot partitions for the given YYYY-MM-DD dates (missing ones skipped)."""
-        frames = [
-            pl.read_parquet(self._partition(d)) for d in dates if self._partition(d).exists()
-        ]
+    def read_range(self, dates: list[str], columns: list[str] | None = None) -> pl.DataFrame:
+        """Read snapshot partitions for the given YYYY-MM-DD dates (missing ones skipped).
+
+        `columns`: optional projection. When given, only those columns are read
+        from disk via a lazy `scan_parquet`, so the heavy `bids_json`/`asks_json`
+        order-book blobs (the bulk of a row's bytes) are never materialized when
+        a caller only needs a few scalar columns -- the status/CLV/gap-window
+        readers, which span weeks of history, only ever touch ts/condition_id and
+        one of {mid, venue}. Defaults to None: the full schema, byte-for-byte the
+        same result every existing caller already gets. A projected column absent
+        from an older partition (columns are additive over time, e.g. `venue`,
+        `bids_json`) comes back null via the diagonal concat below -- exactly as a
+        full read already handles it.
+        """
+        present = [self._partition(d) for d in dates if self._partition(d).exists()]
+        frames = []
+        for p in present:
+            try:
+                if columns is None:
+                    frames.append(pl.read_parquet(p))
+                else:
+                    available = set(pl.scan_parquet(p).collect_schema().names())
+                    frames.append(
+                        pl.scan_parquet(p).select([c for c in columns if c in available]).collect()
+                    )
+            except Exception:
+                # A truncated or 0-byte partition -- e.g. a write interrupted
+                # before the atomic rename in append() landed, as happens on an
+                # abrupt shutdown -- must not abort the whole read and, via the
+                # report/eval path, take down (and crash-loop) the orchestrator.
+                # Skip that one day's file loudly rather than everything at once
+                # (guardrail 9: fail soft, log loud). append() now writes
+                # atomically so new files can't land in this state.
+                log.error("snapshot partition unreadable, skipping",
+                          extra={"ctx": {"path": str(p)}})
         if not frames:
-            return pl.DataFrame(schema=SNAPSHOT_SCHEMA)
+            schema = SNAPSHOT_SCHEMA if columns is None else {c: SNAPSHOT_SCHEMA[c] for c in columns}
+            return pl.DataFrame(schema=schema)
         return pl.concat(frames, how="diagonal")
 
     def latest_per_market(self, dates: list[str]) -> pl.DataFrame:

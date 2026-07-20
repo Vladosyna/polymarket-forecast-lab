@@ -9,7 +9,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from lab.eval.clv import clv_drift, clv_validity_check, update_clv_trust_flag
+from lab.eval.clv import (
+    CLV_SNAPSHOT_COLUMNS,
+    clv_dates,
+    clv_drift,
+    clv_validity_check,
+    update_clv_trust_flag,
+)
 from lab.store import db
 from lab.store.db import get_meta
 from lab.store.snapshots import SnapshotStore
@@ -64,6 +70,24 @@ def test_clv_drift_excludes_and_counts_windows_overlapping_a_gap(tmp_path):
     out_no_gap = clv_drift(forecasts, store, [24])
     assert out_no_gap[24]["n"] == 2
     assert out_no_gap[24]["dropped_for_gap"] == 0
+
+
+def test_clv_drift_shared_snapshots_matches_internal_read(tmp_path):
+    """Passing a pre-loaded `snapshots=` frame (the report render's read-once
+    optimization) yields byte-identical results to letting clv_drift read the
+    store itself -- and `clv_dates` covers exactly the partitions it needs."""
+    store = SnapshotStore(tmp_path / "snapshots")
+    ts = datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc)
+    _seed_mid(store, ts + timedelta(hours=24), "0x1", 0.65)
+    forecasts = [{"ts": ts.isoformat(timespec="seconds"), "condition_id": "0x1",
+                 "model_id": "m1", "p_yes": 0.7, "p_market_at_ts": 0.5}]
+
+    # Read once for the union of dates clv_dates reports, then share it.
+    shared = store.read_range(sorted(clv_dates(forecasts, [24])), columns=CLV_SNAPSHOT_COLUMNS)
+    out_shared = clv_drift(forecasts, store, [24], snapshots=shared)
+    out_internal = clv_drift(forecasts, store, [24])
+    assert out_shared == out_internal
+    assert out_shared[24]["mean_signed_drift"] == pytest.approx(0.15)
 
 
 # --- clv_validity_check / update_clv_trust_flag (Phase 17 item 4) ---------

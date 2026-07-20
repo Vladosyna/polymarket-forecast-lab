@@ -40,8 +40,31 @@ def _overlaps_gap(window_start: datetime, window_end: datetime,
     return any(window_start < g_end and g_start < window_end for g_start, g_end in gaps)
 
 
+# `_mid_at` only ever reads these three columns; every CLV read projects to
+# them so a multi-week drift window never materializes the order-book blobs.
+CLV_SNAPSHOT_COLUMNS = ["ts", "condition_id", "mid"]
+
+
+def clv_dates(forecasts: list[dict], horizons_hours: list[int]) -> set[str]:
+    """The set of YYYY-MM-DD snapshot partitions `clv_drift` needs for these
+    forecasts and horizons. Exposed so a caller scoring many model_ids over the
+    same recent window can union them and read the store ONCE, then hand the
+    result to each `clv_drift` via `snapshots=` -- avoiding one full read per
+    model (the report render's dominant redundant-I/O cost)."""
+    dates: set[str] = set()
+    for f in forecasts:
+        ts = datetime.fromisoformat(f["ts"])
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        for h in horizons_hours:
+            dates.add(utc_date_str(ts + timedelta(hours=h)))
+            dates.add(utc_date_str(ts + timedelta(hours=h) - timedelta(days=1)))
+    return dates
+
+
 def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[int],
               gap_windows: list[tuple[datetime, datetime]] | None = None,
+              snapshots: pl.DataFrame | None = None,
               ) -> dict[int, dict[str, float]]:
     """forecasts: rows with ts, condition_id, model_id, p_yes, p_market_at_ts.
 
@@ -51,21 +74,27 @@ def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[
     (`dropped_for_gap`) rather than silently folded into "no data" -- a gap
     is a known-missing measurement, not the same failure mode as no snapshot
     existing near the target time at all.
+
+    `snapshots`: an already-loaded (ts, condition_id, mid) frame covering at
+    least this forecast set's `clv_dates`. When given, the internal store read
+    is skipped -- callers scoring many models over one window read once and
+    share it (see `clv_dates`). A superset frame is fine: `_mid_at` filters by
+    condition_id and ts, so extra rows are simply ignored.
     """
     if not forecasts:
         return {}
     gaps = gap_windows or []
-    all_dates: set[str] = set()
     parsed = []
     for f in forecasts:
         ts = datetime.fromisoformat(f["ts"])
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
         parsed.append((f, ts))
-        for h in horizons_hours:
-            all_dates.add(utc_date_str(ts + timedelta(hours=h)))
-            all_dates.add(utc_date_str(ts + timedelta(hours=h) - timedelta(days=1)))
-    df = store.read_range(sorted(all_dates))
+    if snapshots is not None:
+        df = snapshots
+    else:
+        df = store.read_range(sorted(clv_dates(forecasts, horizons_hours)),
+                              columns=CLV_SNAPSHOT_COLUMNS)
 
     out: dict[int, dict[str, float]] = {}
     for h in horizons_hours:
@@ -133,7 +162,7 @@ def clv_validity_check(conn, config: dict[str, Any], store: SnapshotStore) -> di
         parsed.append((dict(row), ts))
         all_dates.add(utc_date_str(ts + timedelta(hours=horizon)))
         all_dates.add(utc_date_str(ts + timedelta(hours=horizon) - timedelta(days=1)))
-    df = store.read_range(sorted(all_dates))
+    df = store.read_range(sorted(all_dates), columns=CLV_SNAPSHOT_COLUMNS)
 
     drifts: list[float] = []
     skills: list[float] = []

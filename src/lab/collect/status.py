@@ -71,8 +71,10 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     out["forecast_rows"] = conn.execute("SELECT COUNT(*) AS n FROM forecasts").fetchone()["n"]
     out["resolutions"] = conn.execute("SELECT COUNT(*) AS n FROM resolutions").fetchone()["n"]
 
-    # Snapshot freshness + gaps per tier.
-    df7 = store.read_range(_dates_back(now, 7))
+    # Snapshot freshness + gaps per tier. Only ts/condition_id/venue are ever
+    # read off df7 here -- project to those so a week of history doesn't drag
+    # the order-book JSON blobs into memory (see SnapshotStore.read_range).
+    df7 = store.read_range(_dates_back(now, 7), columns=["ts", "condition_id", "venue"])
     cadence = config["collect"]["snapshot_interval_minutes"]
     out["tiers"] = {}
     for tier in ("liquid", "tail"):

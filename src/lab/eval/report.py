@@ -14,7 +14,7 @@ from jinja2 import Environment
 from lab.collect.status import gap_windows as compute_gap_windows
 from lab.collect.status import gather_status
 from lab.eval.calibration import plot_reliability
-from lab.eval.clv import clv_drift
+from lab.eval.clv import CLV_SNAPSHOT_COLUMNS, clv_dates, clv_drift
 from lab.eval.scoring import honesty_tier
 from lab.store.snapshots import utc_date_str
 from lab.util import PROJECT_ROOT, now_utc, now_utc_iso
@@ -407,7 +407,13 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
     # collection gap is excluded rather than silently folded into "no data".
     now = now_utc()
     clv_lookback_days = 30
-    gap_df = store.read_range([utc_date_str(now - timedelta(days=d)) for d in range(clv_lookback_days + 1)])
+    # compute_gap_windows only inspects ts/condition_id -- project to those so a
+    # 31-day span (the single largest read in a report render) doesn't pull the
+    # order-book JSON blobs into memory on this memory-constrained host.
+    gap_df = store.read_range(
+        [utc_date_str(now - timedelta(days=d)) for d in range(clv_lookback_days + 1)],
+        columns=["ts", "condition_id"],
+    )
     cadence = config["collect"]["snapshot_interval_minutes"]
     clv_gap_windows: list[tuple] = []
     for tier in ("liquid", "tail"):
@@ -418,13 +424,25 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
 
     clv_rows = []
     clv_dropped_for_gap = 0
+    clv_horizons = config["eval"]["clv_horizons_hours"]
     model_ids = [r["model_id"] for r in conn.execute("SELECT DISTINCT model_id FROM forecasts")]
-    for model_id in model_ids:
-        forecasts = [dict(r) for r in conn.execute(
+    # Every model's CLV windows fall in the same recent span, so read the
+    # snapshot store ONCE for the union of all their needed dates (projected to
+    # the 3 columns _mid_at touches) and share it across the per-model loop --
+    # was ~1 full read per model_id, the report render's dominant redundant I/O.
+    forecasts_by_model = {
+        model_id: [dict(r) for r in conn.execute(
             "SELECT ts, condition_id, model_id, p_yes, p_market_at_ts FROM forecasts "
             "WHERE model_id = ? ORDER BY ts DESC LIMIT 2000", (model_id,))]
-        clv_stats = clv_drift(forecasts, store, config["eval"]["clv_horizons_hours"],
-                              gap_windows=clv_gap_windows)
+        for model_id in model_ids
+    }
+    all_clv_dates: set[str] = set()
+    for forecasts in forecasts_by_model.values():
+        all_clv_dates |= clv_dates(forecasts, clv_horizons)
+    clv_snapshots = store.read_range(sorted(all_clv_dates), columns=CLV_SNAPSHOT_COLUMNS)
+    for model_id in model_ids:
+        clv_stats = clv_drift(forecasts_by_model[model_id], store, clv_horizons,
+                              gap_windows=clv_gap_windows, snapshots=clv_snapshots)
         for horizon, stats in clv_stats.items():
             clv_dropped_for_gap += stats.get("dropped_for_gap", 0)
             if stats["n"]:
