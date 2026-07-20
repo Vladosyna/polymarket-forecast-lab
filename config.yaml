@@ -220,9 +220,18 @@ schedule:
   forecast_cron: "0 2 * * *"    # nightly 02:00 UTC -> forecast, eval, report
   shadow_cron: "0 3 * * 0"      # weekly Sunday 03:00 UTC -> shadow portfolio
   learn_cron: "0 4 1 * *"       # monthly, 1st at 04:00 UTC -> learning loop
-  # Run one forecast/eval/report pass immediately on startup so the button
-  # produces visible results without waiting for the first cron fire.
-  run_on_start: true
+  # Disabled 2026-07-20 -- was the retry engine in a self-sustaining OOM crash
+  # loop on the VPS: report_job routinely fails to complete under memory
+  # pressure (src/lab/eval/report.py's redundant, unprojected full-history
+  # snapshot reads -- see CLAUDE.md-adjacent investigation, 2026-07-20), and
+  # since a killed run never reaches record_job_run(), the bundle stays
+  # permanently "overdue" -- so every restart (including the OOM-triggered
+  # ones) unconditionally re-ran the exact operation that just got killed,
+  # with zero backoff. Once report_job's memory footprint is fixed (real
+  # follow-up), this can safely go back to true; until then the nightly cron
+  # (forecast_cron above) and the hourly overdue-catch-up are the only
+  # triggers, both already backed by their own age-threshold gating.
+  run_on_start: false
   # Missed-run catch-up. If a service's last successful run is older than its
   # control time (max allowed age), the orchestrator runs it immediately -- on
   # startup and again whenever the hourly health check notices a window was missed.
