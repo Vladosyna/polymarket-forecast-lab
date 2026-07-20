@@ -225,18 +225,29 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-07-13T08:56:24+00:00'
-proposed:
 - condition_id: '0xe0173375b7eaccb836f7b92d28a9a2d1cc69e54e5a65fae89a5d7e49aadd332e'
   question: Will Nikki Haley win the 2028 US Presidential Election?
   venue: kalshi
   external_id: KXPRESPERSON-28-NHAL
   external_question: Who will win the next presidential election?
-  rationale: Both markets ask who will win the next US presidential election (2028),
-    and the resolution criteria align on the winner being determined by standard election
-    outcomes. The high tool confidence is justified as the event and question are
-    effectively identical.
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-15T08:48:27+00:00'
+proposed:
+- condition_id: '0x7ad403c3508f8e3912940fd1a913f227591145ca0614074208e0b962d5fcc422'
+  question: Will JD Vance win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-JVAN
+  external_question: Who will win the next presidential election?
+  rationale: Both markets ask who will win the next U.S. presidential election (2028).
+    Polymarket specifies the election date and resolution sources, while Kalshi's
+    phrasing is generic but refers to the same upcoming presidential race. The high
+    confidence from the third-party tool aligns with the clear identity in subject
+    matter and resolution timeframe.
   confidence: 0.95
-  proposed_ts: '2026-07-14T18:00:01+00:00'
+  proposed_ts: '2026-07-18T18:00:05+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
