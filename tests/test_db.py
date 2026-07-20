@@ -172,6 +172,66 @@ def test_universe_log_table_exists_and_accepts_rows(conn):
     assert row["reason_code"] == "low_liquidity"
 
 
+# --- 2026-07-20 universe_log dedup migration --------------------------------
+
+def test_migrate_universe_log_dedup_is_idempotent(conn):
+    # db.connect() (the `conn` fixture) already ran the migration once, so the
+    # unique index already exists -- a second call must be a full no-op (in
+    # particular it must NOT attempt CREATE UNIQUE INDEX again and error).
+    applied_again = db.migrate_universe_log_dedup(conn)
+    assert applied_again == {"deduped_existing_rows": False, "unique_index": False}
+    assert db._index_exists(conn, "idx_universe_log_dedup")
+
+
+def test_migrate_universe_log_dedup_collapses_pre_existing_duplicates(tmp_path):
+    """The realistic legacy scenario: a database created before this fix has
+    ~20x same-day duplicate rows already on disk (one per hourly sync). The
+    migration must collapse each (venue, venue_native_id, reason_code, day)
+    group to exactly one row -- keeping the earliest (lowest id) -- without
+    touching rows that differ in venue, market, reason, or day."""
+    import sqlite3
+
+    path = tmp_path / "legacy.db"
+    raw = sqlite3.connect(path)
+    raw.execute(
+        "CREATE TABLE universe_log (id INTEGER PRIMARY KEY, ts TEXT NOT NULL, "
+        "venue TEXT NOT NULL, venue_native_id TEXT NOT NULL, reason_code TEXT NOT NULL)"
+    )
+    # Three same-day duplicate syncs for 0x1/low_liquidity...
+    for hour in ("00", "01", "02"):
+        raw.execute(
+            "INSERT INTO universe_log (ts, venue, venue_native_id, reason_code) VALUES (?,?,?,?)",
+            (f"2026-07-19T{hour}:00:00+00:00", "polymarket", "0x1", "low_liquidity"),
+        )
+    # ...a genuinely different day for the same market/reason...
+    raw.execute(
+        "INSERT INTO universe_log (ts, venue, venue_native_id, reason_code) VALUES (?,?,?,?)",
+        ("2026-07-20T00:00:00+00:00", "polymarket", "0x1", "low_liquidity"),
+    )
+    # ...and one unrelated row (different market) that must survive untouched.
+    raw.execute(
+        "INSERT INTO universe_log (ts, venue, venue_native_id, reason_code) VALUES (?,?,?,?)",
+        ("2026-07-19T00:30:00+00:00", "polymarket", "0x2", "no_orderbook"),
+    )
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(path)  # connect() runs the migration as part of its chain
+    rows = conn.execute(
+        "SELECT ts, venue_native_id, reason_code FROM universe_log ORDER BY id"
+    ).fetchall()
+    assert len(rows) == 3  # 3 same-day dupes -> 1, plus the distinct day, plus the other market
+    by_native_id_and_date = {(r["venue_native_id"], r["ts"][:10]) for r in rows}
+    assert by_native_id_and_date == {
+        ("0x1", "2026-07-19"),  # the 3 same-day dupes, collapsed to the earliest (00:00)
+        ("0x1", "2026-07-20"),  # a genuinely different day -- untouched
+        ("0x2", "2026-07-19"),  # a different market -- untouched
+    }
+    kept = next(r for r in rows if r["venue_native_id"] == "0x1" and r["ts"][:10] == "2026-07-19")
+    assert kept["ts"] == "2026-07-19T00:00:00+00:00"  # earliest (lowest id) of the 3 dupes
+    conn.close()
+
+
 def test_venue_condition_id():
     assert db.venue_condition_id("polymarket", "0xabc") == "0xabc"
     assert db.venue_condition_id("kalshi", "KXFOO-26") == "kalshi:KXFOO-26"

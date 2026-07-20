@@ -189,10 +189,18 @@ def _mid_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> dict
 def log_universe_exclusion(conn, venue: str, venue_native_id: str, reason_code: str) -> None:
     """Record a market excluded from -- or never granted forecast-target
     status in -- the universe, with why (Phase 15's universe_log, brief
-    section 5/15). One row per occurrence, not deduplicated (repeated
-    exclusion across syncs is itself a useful signal); caller commits."""
+    section 5/15). One row per (venue, venue_native_id, reason_code, day) --
+    a market re-excluded for the same reason on the same UTC day across
+    multiple hourly syncs is a no-op (INSERT OR IGNORE against the unique
+    index db.migrate_universe_log_dedup adds), not a fresh row. Revised
+    2026-07-20: the original "one row per occurrence" design produced ~20x
+    same-day duplication with no consumer that ever read it (the report's
+    universe_exclusion_counts only ever GROUP BY date(ts)) -- see
+    db.migrate_universe_log_dedup's docstring for the full reasoning. Caller
+    commits."""
     conn.execute(
-        "INSERT INTO universe_log (ts, venue, venue_native_id, reason_code) VALUES (?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO universe_log (ts, venue, venue_native_id, reason_code) "
+        "VALUES (?, ?, ?, ?)",
         (now_utc_iso(), venue, venue_native_id, reason_code),
     )
 

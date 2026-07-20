@@ -207,6 +207,35 @@ def test_log_universe_exclusion_writes_row(tmp_path):
     conn.close()
 
 
+def test_log_universe_exclusion_dedups_same_day_same_reason(tmp_path):
+    """2026-07-20 fix: repeated logging of the same (venue, venue_native_id,
+    reason_code) on the same UTC day -- e.g. one call per hourly sync -- is
+    now a no-op, not a fresh row (the table's only consumer only ever reads a
+    daily count; the prior one-row-per-occurrence design produced ~20x
+    same-day duplication with nothing reading the extra rows)."""
+    conn = db.connect(tmp_path / "lab.db")
+    log_universe_exclusion(conn, "polymarket", "0x1", "low_liquidity")
+    log_universe_exclusion(conn, "polymarket", "0x1", "low_liquidity")
+    log_universe_exclusion(conn, "polymarket", "0x1", "low_liquidity")
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) AS n FROM universe_log").fetchone()["n"] == 1
+    conn.close()
+
+
+def test_log_universe_exclusion_does_not_dedup_across_reason_market_or_venue(tmp_path):
+    """The dedup key is the full (venue, venue_native_id, reason_code, day)
+    tuple -- a different reason, a different market, or a different venue
+    each still gets its own row."""
+    conn = db.connect(tmp_path / "lab.db")
+    log_universe_exclusion(conn, "polymarket", "0x1", "low_liquidity")
+    log_universe_exclusion(conn, "polymarket", "0x1", "no_orderbook")     # different reason
+    log_universe_exclusion(conn, "polymarket", "0x2", "low_liquidity")   # different market
+    log_universe_exclusion(conn, "kalshi", "0x1", "low_liquidity")       # different venue
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) AS n FROM universe_log").fetchone()["n"] == 4
+    conn.close()
+
+
 def test_sync_universe_logs_exclusions_with_reason_codes(tmp_path):
     """End-to-end: a non-binary market, a sub-24h crypto pulse, and a
     low-liquidity market each land in universe_log with the right reason,

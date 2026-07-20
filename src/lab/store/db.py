@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "9"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -222,6 +222,12 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return any(r[1] == column for r in conn.execute(f"PRAGMA table_info({table})"))
 
 
+def _index_exists(conn: sqlite3.Connection, index_name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?", (index_name,)
+    ).fetchone() is not None
+
+
 def migrate_multi_venue(conn: sqlite3.Connection) -> dict[str, bool]:
     """Idempotent v1.9 migration (Phase 10): ALTER `markets` with venue columns
     (CREATE TABLE IF NOT EXISTS above can't add columns to a table that already
@@ -355,6 +361,56 @@ def migrate_shadow_fees(conn: sqlite3.Connection) -> dict[str, bool]:
     return applied
 
 
+def migrate_universe_log_dedup(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Idempotent 2026-07-20 migration: collapse `universe_log` to one row per
+    (venue, venue_native_id, reason_code, day) and enforce it with a UNIQUE
+    index, so `log_universe_exclusion`'s insert can become INSERT OR IGNORE.
+
+    The table's only consumer (`eval/report.py`'s `universe_exclusion_counts`)
+    has only ever read `GROUP BY date(ts), reason_code, COUNT(*)` -- a daily
+    count, never an individual row -- but the write path logged one row per
+    currently-excluded market on EVERY hourly sync, unconditionally. On the
+    live VPS this produced ~21.7x same-day duplication (measured 2026-07-20)
+    and grew universe_log to ~90% of the database (2.5GB), independently
+    costing the nightly report render ~38s just to GROUP BY it. Collapsing to
+    one row per excluded-market-reason-day preserves everything the report
+    (or any future consumer doing "was X excluded, when, and why") can read
+    -- day-level was always the table's actual working resolution, just
+    recorded with ~20x redundant noise on top. Confirmed against the PAP and
+    the paper draft's own referee-objection table (`universe_log` "records
+    every exclusion with a reason code" -- an existence claim about markets,
+    not a claim about raw sync-occurrence counts): this does not touch the
+    forecast/resolution ledger, the exclusion RULE in collect/universe.py
+    (unchanged), or any primary-hypothesis scoring path.
+
+    This is the one migration in this file that deletes existing rows rather
+    than only adding columns. On a bloated production table the one-time
+    cleanup can take real time; run it with the service stopped and VACUUM
+    separately afterward -- DELETE alone does not shrink the file on disk
+    (see docs/VPS_OPERATIONS.md). A fresh or already-deduped database just
+    finds the index already present and returns instantly.
+    """
+    applied = {"deduped_existing_rows": False, "unique_index": False}
+    if not _index_exists(conn, "idx_universe_log_dedup"):
+        cur = conn.execute(
+            """
+            DELETE FROM universe_log
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM universe_log
+                GROUP BY venue, venue_native_id, reason_code, date(ts)
+            )
+            """
+        )
+        applied["deduped_existing_rows"] = cur.rowcount > 0
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_universe_log_dedup "
+            "ON universe_log(venue, venue_native_id, reason_code, date(ts))"
+        )
+        applied["unique_index"] = True
+    conn.commit()
+    return applied
+
+
 class ForecastLedgerViolation(RuntimeError):
     """Raised on any attempt to UPDATE or DELETE a forecast row."""
 
@@ -384,6 +440,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     migrate_distributional_scoring(conn)
     migrate_m3_boundary_randomization(conn)
     migrate_shadow_fees(conn)
+    migrate_universe_log_dedup(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )
