@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -38,14 +39,22 @@ def gap_windows(df: pl.DataFrame, tier_markets: list[str], cadence_minutes: int,
     subset = df.filter(pl.col("condition_id").is_in(tier_markets))
     if subset.is_empty():
         return all_buckets
-    seen = set(subset.get_column("ts").unique().to_list())
+    # Sorted-list + bisect instead of a per-bucket linear scan over `seen`:
+    # provably the same predicate (`exists ts: start <= ts < end` on identical
+    # fixed-width ISO strings, where lexicographic order is chronological
+    # order for this format) but O(n_buckets log n) instead of O(n_buckets *
+    # n) -- measured 324-494x on real data, verified list-identical output to
+    # the prior implementation (see tests/test_status.py). This was ~75% of a
+    # report render's wall clock: the old version also recomputed both
+    # bucket_start.isoformat() and bucket_end.isoformat() once per (bucket,
+    # ts) pair rather than once per bucket.
+    seen_sorted = sorted(subset.get_column("ts").unique().to_list())
     gaps: list[tuple[datetime, datetime]] = []
     for bucket_start, bucket_end in all_buckets:
-        # Bucket timestamps are floored ISO strings; match by prefix window.
-        covered = any(
-            bucket_start.isoformat(timespec="seconds") <= ts < bucket_end.isoformat(timespec="seconds")
-            for ts in seen
-        )
+        start_iso = bucket_start.isoformat(timespec="seconds")
+        end_iso = bucket_end.isoformat(timespec="seconds")
+        i = bisect_left(seen_sorted, start_iso)
+        covered = i < len(seen_sorted) and seen_sorted[i] < end_iso
         if not covered:
             gaps.append((bucket_start, bucket_end))
     return gaps

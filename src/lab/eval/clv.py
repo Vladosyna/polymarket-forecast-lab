@@ -8,6 +8,7 @@ Positive mean drift = the model tends to be early, not wrong.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -16,23 +17,55 @@ import polars as pl
 
 from lab.store.snapshots import SnapshotStore, utc_date_str
 
+# condition_id -> (sorted ts strings, parallel mid values). Built once per
+# snapshot frame by `_build_mid_index` and reused across every `_mid_at` call
+# against that frame -- was a fresh `df.filter(condition_id ==)` linear scan
+# per call (up to ~30k calls/report render); a report-scale frame made this
+# the single largest cost after gap_windows. See tests/test_clv.py for the
+# differential proof against the prior per-call-filter implementation.
+_MidIndex = dict[str, tuple[list[str], list[float]]]
 
-def _mid_at(df: pl.DataFrame, condition_id: str, target_ts: datetime,
+
+def _build_mid_index(df: pl.DataFrame) -> _MidIndex:
+    if df.is_empty():
+        return {}
+    grouped = df.sort("ts").group_by("condition_id").agg([pl.col("ts"), pl.col("mid")])
+    return {row["condition_id"]: (row["ts"], row["mid"]) for row in grouped.iter_rows(named=True)}
+
+
+def _mid_at(index: _MidIndex, condition_id: str, target_ts: datetime,
             tolerance_hours: float = 3.0) -> float | None:
-    subset = df.filter(pl.col("condition_id") == condition_id)
-    if subset.is_empty():
+    entry = index.get(condition_id)
+    if entry is None:
         return None
+    ts_list, mid_list = entry
     target = target_ts.isoformat(timespec="seconds")
     lo = (target_ts - timedelta(hours=tolerance_hours)).isoformat(timespec="seconds")
     hi = (target_ts + timedelta(hours=tolerance_hours)).isoformat(timespec="seconds")
-    window = subset.filter((pl.col("ts") >= lo) & (pl.col("ts") <= hi))
-    if window.is_empty():
+    # [i, j) = indices with lo <= ts <= hi (ts_list is sorted, per-market
+    # timestamps are unique -- SnapshotStore.append dedups on (ts, condition_id)).
+    i = bisect_left(ts_list, lo)
+    j = bisect_right(ts_list, hi)
+    if i >= j:
         return None
-    closest = window.with_columns(
-        (pl.col("ts").str.to_datetime(time_zone="UTC")
-         - pl.lit(target_ts)).abs().alias("_dist")
-    ).sort("_dist")
-    return float(closest["mid"][0])
+    # The minimizer of |ts - target| within a sorted range is always the
+    # insertion point or its immediate predecessor -- no need to scan the rest.
+    k = bisect_left(ts_list, target, i, j)
+    best_idx, best_dist = None, None
+    for idx in (k - 1, k):
+        if i <= idx < j:
+            ts_dt = datetime.fromisoformat(ts_list[idx])
+            if ts_dt.tzinfo is None:
+                ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+            dist = abs((ts_dt - target_ts).total_seconds())
+            # Strict '<': on an exact tie, keep the earlier (lower idx)
+            # candidate -- k-1 is tried first, so this prefers it. The prior
+            # per-call implementation used polars' unstable sort here, whose
+            # tie-break was already undefined; this makes it deterministic
+            # rather than changing any currently-reproducible output.
+            if best_dist is None or dist < best_dist:
+                best_idx, best_dist = idx, dist
+    return float(mid_list[best_idx]) if best_idx is not None else None
 
 
 def _overlaps_gap(window_start: datetime, window_end: datetime,
@@ -95,6 +128,7 @@ def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[
     else:
         df = store.read_range(sorted(clv_dates(forecasts, horizons_hours)),
                               columns=CLV_SNAPSHOT_COLUMNS)
+    mid_index = _build_mid_index(df)
 
     out: dict[int, dict[str, float]] = {}
     for h in horizons_hours:
@@ -108,7 +142,7 @@ def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[
             if gaps and _overlaps_gap(ts, window_end, gaps):
                 dropped_for_gap += 1
                 continue
-            later_mid = _mid_at(df, f["condition_id"], window_end)
+            later_mid = _mid_at(mid_index, f["condition_id"], window_end)
             if later_mid is None:
                 continue
             drifts.append(float(np.sign(disagreement)) * (later_mid - f["p_market_at_ts"]))
@@ -163,6 +197,7 @@ def clv_validity_check(conn, config: dict[str, Any], store: SnapshotStore) -> di
         all_dates.add(utc_date_str(ts + timedelta(hours=horizon)))
         all_dates.add(utc_date_str(ts + timedelta(hours=horizon) - timedelta(days=1)))
     df = store.read_range(sorted(all_dates), columns=CLV_SNAPSHOT_COLUMNS)
+    mid_index = _build_mid_index(df)
 
     drifts: list[float] = []
     skills: list[float] = []
@@ -170,7 +205,7 @@ def clv_validity_check(conn, config: dict[str, Any], store: SnapshotStore) -> di
         disagreement = f["p_yes"] - f["p_market_at_ts"]
         if abs(disagreement) < 1e-9:
             continue
-        later_mid = _mid_at(df, f["condition_id"], ts + timedelta(hours=horizon))
+        later_mid = _mid_at(mid_index, f["condition_id"], ts + timedelta(hours=horizon))
         if later_mid is None:
             continue
         y = f["payout_yes"]

@@ -66,6 +66,60 @@ def test_no_tracked_markets_reports_zero():
                          datetime(2026, 7, 2, 1, tzinfo=timezone.utc)) == 0
 
 
+def test_gap_windows_empty_window_returns_empty():
+    """window_end <= window_start (n_buckets <= 0) -- no buckets to report."""
+    start = datetime(2026, 7, 2, 12, 0, tzinfo=timezone.utc)
+    assert gap_windows(_frame(["2026-07-02T12:00:00+00:00"]), ["a"], 5, start, start) == []
+
+
+def test_gap_windows_fully_uncovered_window():
+    """Tracked markets exist but none has any row in range: every bucket gaps."""
+    start = datetime(2026, 7, 2, 12, 0, tzinfo=timezone.utc)
+    end = start + timedelta(minutes=15)  # 3 buckets at 5-min cadence
+    df = _frame(["2026-07-01T00:00:00+00:00"])  # real data, but outside [start, end)
+    windows = gap_windows(df, ["a"], 5, start, end)
+    assert windows == [
+        (start, start + timedelta(minutes=5)),
+        (start + timedelta(minutes=5), start + timedelta(minutes=10)),
+        (start + timedelta(minutes=10), start + timedelta(minutes=15)),
+    ]
+
+
+def test_gap_windows_matches_naive_reference_on_random_coverage():
+    """Differential check: the sorted+bisect implementation against a
+    deliberately naive, obviously-correct-by-inspection reference (the same
+    predicate gap_windows itself documents: exists ts with
+    bucket_start &lt;= ts &lt; bucket_end), across many random coverage patterns.
+    Guards the exact optimization this test suite would otherwise only cover
+    by hand-picked cases."""
+    import random
+
+    def naive_gap_windows(seen_iso, all_buckets):
+        out = []
+        for bstart, bend in all_buckets:
+            s, e = bstart.isoformat(timespec="seconds"), bend.isoformat(timespec="seconds")
+            if not any(s <= ts < e for ts in seen_iso):
+                out.append((bstart, bend))
+        return out
+
+    rng = random.Random(20260720)
+    start = datetime(2026, 7, 2, 0, 0, tzinfo=timezone.utc)
+    for trial in range(30):
+        n_buckets = rng.randint(1, 60)
+        end = start + timedelta(minutes=5 * n_buckets)
+        all_buckets = [
+            (start + timedelta(minutes=5 * i), start + timedelta(minutes=5 * (i + 1)))
+            for i in range(n_buckets)
+        ]
+        present_idx = [i for i in range(n_buckets) if rng.random() < 0.6]
+        present_iso = [floor_ts_bucket(start + timedelta(minutes=5 * i), 5) for i in present_idx]
+        df = _frame(present_iso)
+
+        got = gap_windows(df, ["a"], 5, start, end)
+        want = naive_gap_windows(set(present_iso), all_buckets)
+        assert got == want, f"trial {trial}: present_idx={present_idx}"
+
+
 # --- per-venue status lines (Phase 10) --------------------------------------
 
 def test_gather_status_reports_per_venue_health(tmp_path):

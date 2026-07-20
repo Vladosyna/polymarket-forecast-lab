@@ -9,8 +9,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import polars as pl
+
 from lab.eval.clv import (
     CLV_SNAPSHOT_COLUMNS,
+    _build_mid_index,
+    _mid_at,
     clv_dates,
     clv_drift,
     clv_validity_check,
@@ -70,6 +74,96 @@ def test_clv_drift_excludes_and_counts_windows_overlapping_a_gap(tmp_path):
     out_no_gap = clv_drift(forecasts, store, [24])
     assert out_no_gap[24]["n"] == 2
     assert out_no_gap[24]["dropped_for_gap"] == 0
+
+
+# --- _mid_at / _build_mid_index (Phase 20 perf rewrite) --------------------
+# _mid_at used to `df.filter(condition_id ==)` per call; it now looks up a
+# pre-built per-market sorted-ts index via bisect. These tests pin the exact
+# tolerance-window and closest-match semantics the docstring/investigation
+# claims are preserved, plus a differential check against a naive reference.
+
+def _mid_frame(rows: list[tuple[str, str, float]]) -> pl.DataFrame:
+    """rows: (ts_iso, condition_id, mid)."""
+    return pl.DataFrame([{"ts": r[0], "condition_id": r[1], "mid": r[2]} for r in rows])
+
+
+def test_mid_at_exact_match():
+    idx = _build_mid_index(_mid_frame([("2026-07-01T12:00:00+00:00", "a", 0.4)]))
+    target = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    assert _mid_at(idx, "a", target) == 0.4
+
+
+def test_mid_at_picks_closer_of_two_candidates():
+    idx = _build_mid_index(_mid_frame([
+        ("2026-07-01T10:00:00+00:00", "a", 0.3),   # 2h before target
+        ("2026-07-01T12:30:00+00:00", "a", 0.7),   # 30min after target -> closer
+    ]))
+    target = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    assert _mid_at(idx, "a", target) == 0.7
+
+
+def test_mid_at_exact_tie_prefers_earlier_snapshot():
+    """Documented, deterministic resolution of a case the prior polars-sort
+    implementation left unstable/undefined (see clv.py module note)."""
+    idx = _build_mid_index(_mid_frame([
+        ("2026-07-01T09:00:00+00:00", "a", 0.1),   # 3h before target
+        ("2026-07-01T15:00:00+00:00", "a", 0.9),   # 3h after target -- exact tie
+    ]))
+    target = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    assert _mid_at(idx, "a", target, tolerance_hours=3.0) == 0.1
+
+
+def test_mid_at_outside_tolerance_returns_none():
+    idx = _build_mid_index(_mid_frame([("2026-07-01T00:00:00+00:00", "a", 0.5)]))
+    target = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    assert _mid_at(idx, "a", target, tolerance_hours=3.0) is None
+
+
+def test_mid_at_unknown_market_returns_none():
+    idx = _build_mid_index(_mid_frame([("2026-07-01T12:00:00+00:00", "a", 0.5)]))
+    assert _mid_at(idx, "does-not-exist", datetime(2026, 7, 1, 12, tzinfo=timezone.utc)) is None
+
+
+def test_mid_at_matches_naive_reference_on_random_data():
+    """Differential check against the deliberately naive, obviously-correct
+    filter+sort approach the prior implementation used (per-call
+    df.filter(condition_id ==) then sort by distance), across many random
+    (snapshots, target) combinations. Exact ties are excluded here (their
+    resolution is intentionally different, per the dedicated tie test above)."""
+    import random
+
+    rng = random.Random(20260720)
+    markets = ["a", "b", "c"]
+    base = datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc)
+    rows = []
+    for m in markets:
+        for i in range(40):
+            ts = base + timedelta(minutes=15 * i + rng.randint(0, 14))
+            rows.append((ts.isoformat(timespec="seconds"), m, round(rng.random(), 4)))
+    df = _mid_frame(rows)
+    idx = _build_mid_index(df)
+
+    def naive_mid_at(condition_id, target_ts, tolerance_hours=3.0):
+        subset = df.filter(pl.col("condition_id") == condition_id)
+        lo = (target_ts - timedelta(hours=tolerance_hours)).isoformat(timespec="seconds")
+        hi = (target_ts + timedelta(hours=tolerance_hours)).isoformat(timespec="seconds")
+        window = subset.filter((pl.col("ts") >= lo) & (pl.col("ts") <= hi))
+        if window.is_empty():
+            return None
+        best_dist, best_mid = None, None
+        for ts_s, mid in zip(window["ts"].to_list(), window["mid"].to_list()):
+            ts_dt = datetime.fromisoformat(ts_s)
+            dist = abs((ts_dt - target_ts).total_seconds())
+            if best_dist is None or dist < best_dist:  # strict '<' -> earlier wins ties too
+                best_dist, best_mid = dist, mid
+        return best_mid
+
+    for trial in range(50):
+        m = rng.choice(markets)
+        target = base + timedelta(minutes=rng.randint(-60, 60 * 11))
+        got = _mid_at(idx, m, target)
+        want = naive_mid_at(m, target)
+        assert got == want, f"trial {trial}: market={m} target={target}"
 
 
 def test_clv_drift_shared_snapshots_matches_internal_read(tmp_path):
