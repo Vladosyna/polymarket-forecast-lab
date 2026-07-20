@@ -383,29 +383,58 @@ def migrate_universe_log_dedup(conn: sqlite3.Connection) -> dict[str, bool]:
     forecast/resolution ledger, the exclusion RULE in collect/universe.py
     (unchanged), or any primary-hypothesis scoring path.
 
-    This is the one migration in this file that deletes existing rows rather
+    This is the one migration in this file that removes existing rows rather
     than only adding columns. On a bloated production table the one-time
-    cleanup can take real time; run it with the service stopped and VACUUM
-    separately afterward -- DELETE alone does not shrink the file on disk
-    (see docs/VPS_OPERATIONS.md). A fresh or already-deduped database just
-    finds the index already present and returns instantly.
+    cleanup rebuilds the table (bulk-copy the ~5% of rows that survive into a
+    fresh, index-free table, then build indexes once at the end) rather than
+    deleting the ~95% that don't in place -- a first attempt using plain
+    `DELETE ... WHERE id NOT IN (...)` didn't finish in 15 minutes against
+    the VPS's 8M-row table, because every one of those millions of deletes
+    had to maintain the table's 3 existing indexes individually; the rebuild
+    touches the surviving rows once and defers all index-building to the end,
+    the same technique VACUUM itself uses. Original `id` values are preserved
+    (explicit column list, not auto-assigned) -- nothing else in this codebase
+    references a universe_log id, but there's no reason to renumber history
+    for a mechanical rebuild. Run it with the service stopped and VACUUM
+    separately afterward -- neither this rebuild nor a plain DELETE shrinks
+    the file on disk by itself (see docs/VPS_OPERATIONS.md). A fresh or
+    already-deduped database just finds the index already present and
+    returns instantly.
     """
     applied = {"deduped_existing_rows": False, "unique_index": False}
     if not _index_exists(conn, "idx_universe_log_dedup"):
-        cur = conn.execute(
+        before = conn.execute("SELECT COUNT(*) FROM universe_log").fetchone()[0]
+        conn.execute(
+            "CREATE TABLE universe_log_dedup_tmp ("
+            "  id INTEGER PRIMARY KEY, ts TEXT NOT NULL,"
+            "  venue TEXT NOT NULL, venue_native_id TEXT NOT NULL, reason_code TEXT NOT NULL)"
+        )
+        conn.execute(
             """
-            DELETE FROM universe_log
-            WHERE id NOT IN (
+            INSERT INTO universe_log_dedup_tmp (id, ts, venue, venue_native_id, reason_code)
+            SELECT id, ts, venue, venue_native_id, reason_code FROM universe_log
+            WHERE id IN (
                 SELECT MIN(id) FROM universe_log
                 GROUP BY venue, venue_native_id, reason_code, date(ts)
             )
             """
         )
-        applied["deduped_existing_rows"] = cur.rowcount > 0
+        conn.execute("DROP TABLE universe_log")
+        conn.execute("ALTER TABLE universe_log_dedup_tmp RENAME TO universe_log")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_universe_log_ts ON universe_log(ts)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_universe_log_reason ON universe_log(reason_code)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_universe_log_venue_native "
+            "ON universe_log(venue, venue_native_id)"
+        )
         conn.execute(
             "CREATE UNIQUE INDEX idx_universe_log_dedup "
             "ON universe_log(venue, venue_native_id, reason_code, date(ts))"
         )
+        after = conn.execute("SELECT COUNT(*) FROM universe_log").fetchone()[0]
+        applied["deduped_existing_rows"] = after < before
         applied["unique_index"] = True
     conn.commit()
     return applied
