@@ -235,19 +235,31 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-07-15T08:48:27+00:00'
-proposed:
 - condition_id: '0x7ad403c3508f8e3912940fd1a913f227591145ca0614074208e0b962d5fcc422'
   question: Will JD Vance win the 2028 US Presidential Election?
   venue: kalshi
   external_id: KXPRESPERSON-28-JVAN
   external_question: Who will win the next presidential election?
-  rationale: Both markets ask who will win the next U.S. presidential election (2028).
-    Polymarket specifies the election date and resolution sources, while Kalshi's
-    phrasing is generic but refers to the same upcoming presidential race. The high
-    confidence from the third-party tool aligns with the clear identity in subject
-    matter and resolution timeframe.
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-19T16:56:00+00:00'
+proposed:
+- condition_id: '0xae70ab9bf1c3726fe430a2ba8b517697ae24e0f0ab554b876a5b521153068882'
+  question: Will Tim Walz win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-TWAL
+  external_question: Who will win the next presidential election?
+  rationale: 'Both markets refer to the same event: the winner of the 2028 US Presidential
+    Election. The Polymarket question specifically names Tim Walz as a candidate,
+    but the resolution criteria define the winner of the general election, not a primary;
+    thus, the market resolves to whoever wins the presidency, not necessarily Walz.
+    Kalshi''s ''next presidential election'' also refers to the 2028 election. The
+    third-party tool''s high confidence aligns with this identity match, as both describe
+    the same outcome with compatible resolution timelines.'
   confidence: 0.95
-  proposed_ts: '2026-07-18T18:00:05+00:00'
+  proposed_ts: '2026-07-23T18:00:12+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
