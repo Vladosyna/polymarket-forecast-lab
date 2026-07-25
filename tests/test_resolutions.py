@@ -35,3 +35,131 @@ def test_open_dispute_blocks_recording():
 
     disputed_final = _market(umaResolutionStatuses='["disputed", "resolved"]')
     assert extract_final_payout(disputed_final) == (1.0, True)
+
+
+# --- watcher scan ordering (2026-07-25 stall) -------------------------------
+
+import asyncio
+
+import pytest
+
+from lab.collect.resolutions import (
+    resolution_backlog_size,
+    unresolved_closed_markets,
+    watch_resolutions,
+)
+from lab.store import db
+
+
+@pytest.fixture()
+def conn(tmp_path):
+    c = db.connect(tmp_path / "lab.db")
+    yield c
+    c.close()
+
+
+def _add_market(conn, cid, closed=1, end="2026-01-01T00:00:00+00:00"):
+    conn.execute(
+        "INSERT INTO markets (condition_id, category, tier, active, closed, end_date_iso) "
+        "VALUES (?, 'politics', 'liquid', 0, ?, ?)", (cid, closed, end))
+
+
+class _NeverFinalGamma:
+    """Gamma that reports every market as closed but never with a final
+    payout -- the exact population that had wedged the head of the scan."""
+
+    def __init__(self):
+        self.fetched = []
+
+    async def market_by_condition(self, condition_id):
+        self.fetched.append(condition_id)
+        return None
+
+
+def test_scan_advances_instead_of_rescanning_the_same_head(conn):
+    """THE regression test. Before the fix the query had no ORDER BY, so every
+    cycle returned the same `limit` rows in scan order; markets Gamma never
+    finalizes sat permanently at the head and nothing behind them was ever
+    reached."""
+    for i in range(10):
+        _add_market(conn, f"0x{i}")
+    conn.commit()
+
+    gamma = _NeverFinalGamma()
+    asyncio.run(watch_resolutions(gamma, conn, limit=3))
+    first = list(gamma.fetched)
+
+    gamma2 = _NeverFinalGamma()
+    asyncio.run(watch_resolutions(gamma2, conn, limit=3))
+    second = list(gamma2.fetched)
+
+    assert len(first) == 3 and len(second) == 3
+    assert not set(first) & set(second), (
+        f"watcher re-scanned the same markets: {first} then {second}"
+    )
+
+
+def test_whole_backlog_is_swept_not_just_the_head(conn):
+    """Repeated cycles must eventually reach every candidate -- the property
+    that actually keeps the paper's scored sample unbiased."""
+    for i in range(9):
+        _add_market(conn, f"0x{i}")
+    conn.commit()
+
+    seen = set()
+    for _ in range(3):
+        gamma = _NeverFinalGamma()
+        asyncio.run(watch_resolutions(gamma, conn, limit=3))
+        seen.update(gamma.fetched)
+    assert len(seen) == 9, f"only reached {len(seen)}/9 markets"
+
+
+def test_failed_fetch_still_rotates_to_the_back(conn):
+    """A market that always errors must not re-wedge the head -- stamping only
+    on success would rebuild the bug with a different population."""
+    class _AlwaysFails:
+        def __init__(self):
+            self.fetched = []
+
+        async def market_by_condition(self, condition_id):
+            self.fetched.append(condition_id)
+            raise RuntimeError("gamma down")
+
+    for i in range(6):
+        _add_market(conn, f"0x{i}")
+    conn.commit()
+
+    g1 = _AlwaysFails()
+    asyncio.run(watch_resolutions(g1, conn, limit=2))
+    g2 = _AlwaysFails()
+    asyncio.run(watch_resolutions(g2, conn, limit=2))
+    assert not set(g1.fetched) & set(g2.fetched)
+
+
+def test_fresh_closure_jumps_ahead_of_the_old_backlog(conn):
+    """NULL resolution_checked_ts sorts first, so a newly-closed market is
+    picked up on the next cycle rather than waiting out a full sweep."""
+    for i in range(5):
+        _add_market(conn, f"old{i}")
+    conn.commit()
+    asyncio.run(watch_resolutions(_NeverFinalGamma(), conn, limit=5))  # stamp them all
+
+    _add_market(conn, "brand_new")
+    conn.commit()
+
+    gamma = _NeverFinalGamma()
+    asyncio.run(watch_resolutions(gamma, conn, limit=1))
+    assert gamma.fetched == ["brand_new"]
+
+
+def test_backlog_size_counts_the_watchers_real_working_set(conn):
+    """`lab status` reported only the closed=1 half (17k of a real 42k), which
+    is why the stall stayed invisible. This counts what the watcher selects."""
+    _add_market(conn, "closed_one", closed=1)
+    _add_market(conn, "past_end_not_closed", closed=0, end="2020-01-01T00:00:00+00:00")
+    _add_market(conn, "still_running", closed=0, end="2099-01-01T00:00:00+00:00")
+    conn.commit()
+
+    assert resolution_backlog_size(conn) == 2
+    assert set(unresolved_closed_markets(conn, limit=10)) == {
+        "closed_one", "past_end_not_closed"}

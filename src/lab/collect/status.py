@@ -109,7 +109,33 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
             "gaps_7d": snapshot_gaps(df7, markets, cadence[tier], now - timedelta(days=7), now),
         }
 
-    # Resolution-watcher lag: closed markets still awaiting a resolution row.
+    # Resolution-watcher lag. `backlog` is the watcher's OWN working set, not
+    # just the closed=1 subset: reporting only the latter (17k of a real 42k)
+    # is part of why the 2026-07-25 scan stall hid for weeks -- the number on
+    # the dashboard was not the number the watcher was working through.
+    # `oldest_check_age_h` is the direct stall signal: with the round-robin
+    # cursor it should stay near one full sweep, and grow without bound if the
+    # watcher ever wedges again.
+    from lab.collect.resolutions import resolution_backlog_size
+
+    oldest = conn.execute(
+        """
+        SELECT MIN(m.resolution_checked_ts) AS t FROM markets m
+        LEFT JOIN resolutions r ON r.condition_id = m.condition_id
+        WHERE r.condition_id IS NULL AND m.resolution_checked_ts IS NOT NULL
+          AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        """,
+        (now.isoformat(timespec="seconds"),),
+    ).fetchone()["t"]
+    unchecked = conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM markets m
+        LEFT JOIN resolutions r ON r.condition_id = m.condition_id
+        WHERE r.condition_id IS NULL AND m.resolution_checked_ts IS NULL
+          AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        """,
+        (now.isoformat(timespec="seconds"),),
+    ).fetchone()["n"]
     out["resolution_watcher"] = {
         "closed_unresolved": conn.execute(
             """
@@ -117,7 +143,14 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
             LEFT JOIN resolutions r ON r.condition_id = m.condition_id
             WHERE m.closed = 1 AND r.condition_id IS NULL
             """
-        ).fetchone()["n"]
+        ).fetchone()["n"],
+        "backlog": resolution_backlog_size(conn),
+        "never_checked": unchecked,
+        "oldest_check_age_h": (
+            round((now - datetime.fromisoformat(oldest).replace(tzinfo=timezone.utc))
+                  .total_seconds() / 3600, 1)
+            if oldest else None
+        ),
     }
 
     # Per-venue collector health (Phase 10). Kalshi/Metaculus run a snapshot
@@ -182,7 +215,12 @@ def format_status(status: dict[str, Any]) -> str:
             f"last_snapshot_age={age_str} "
             f"gaps_24h={s['gaps_24h']} gaps_7d={s['gaps_7d']}"
         )
-    lines.append(f"  resolution watcher: {status['resolution_watcher']['closed_unresolved']} closed markets unresolved")
+    rw = status["resolution_watcher"]
+    lines.append(
+        f"  resolution watcher: backlog={rw['backlog']} "
+        f"(closed={rw['closed_unresolved']}, never_checked={rw['never_checked']}) "
+        f"oldest_check={rw['oldest_check_age_h']}h"
+    )
     for venue, v in status.get("venues", {}).items():
         if "last_snapshot_age_min" in v:
             age = v["last_snapshot_age_min"]

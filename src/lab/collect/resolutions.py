@@ -20,17 +20,53 @@ log = logging.getLogger(__name__)
 
 
 def unresolved_closed_markets(conn, limit: int = 200) -> list[str]:
+    """Least-recently-checked candidates first.
+
+    The ORDER BY is load-bearing, not tidiness (2026-07-25). Without it SQLite
+    returned the same `limit` rows in scan order on every cycle, and the head
+    of that scan had filled with markets Gamma never reports as `closed` whose
+    end dates are long past -- unresolvable, and permanently first in line. The
+    watcher re-fetched those same few hundred every 30 minutes and never
+    reached anything behind them: a ~42k working set draining at a few dozen a
+    day while ~600 markets closed daily. Half of all forecast weather markets
+    (the fastest-resolving category, and one carrying a primary hypothesis)
+    were sitting unscoreable behind it.
+
+    NULLs sort first on ASC in SQLite, which is exactly the priority wanted: a
+    market never checked yet -- a fresh closure -- goes to the front, while the
+    old backlog sweeps steadily behind it rather than blocking it.
+    """
     rows = conn.execute(
         """
         SELECT m.condition_id FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
         WHERE r.condition_id IS NULL
           AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        ORDER BY m.resolution_checked_ts ASC
         LIMIT ?
         """,
         (now_utc_iso(), limit),
     ).fetchall()
     return [r["condition_id"] for r in rows]
+
+
+def resolution_backlog_size(conn) -> int:
+    """The watcher's ACTUAL working set -- the same predicate
+    unresolved_closed_markets selects on.
+
+    `lab status` used to report only the `closed = 1` half of this (17k of a
+    real 42k), which is part of why the stall above went unnoticed for weeks:
+    the number on the dashboard was not the number the watcher was working
+    through."""
+    return conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM markets m
+        LEFT JOIN resolutions r ON r.condition_id = m.condition_id
+        WHERE r.condition_id IS NULL
+          AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        """,
+        (now_utc_iso(),),
+    ).fetchone()["n"]
 
 
 def extract_final_payout(m: GammaMarket) -> tuple[float, bool] | None:
@@ -53,6 +89,16 @@ async def watch_resolutions(gamma: GammaClient, conn, limit: int = 200) -> int:
     """One poll round. Returns number of resolutions recorded."""
     recorded = 0
     for condition_id in unresolved_closed_markets(conn, limit=limit):
+        # Stamp first, and unconditionally. A market whose fetch fails, or one
+        # Gamma simply never finalizes, still has to rotate to the back of the
+        # queue -- stamping only on success would rebuild the same head-of-scan
+        # wedge the ordering exists to prevent, just with a different
+        # population sitting in the head.
+        conn.execute(
+            "UPDATE markets SET resolution_checked_ts = ? WHERE condition_id = ?",
+            (now_utc_iso(), condition_id),
+        )
+        conn.commit()
         try:
             m = await gamma.market_by_condition(condition_id)
         except Exception:

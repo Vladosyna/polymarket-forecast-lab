@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "9"
+SCHEMA_VERSION = "10"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -361,6 +361,38 @@ def migrate_shadow_fees(conn: sqlite3.Connection) -> dict[str, bool]:
     return applied
 
 
+def migrate_resolution_checked_ts(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Idempotent 2026-07-25 migration: give the resolution watcher a cursor.
+
+    Its candidate query took `LIMIT n` with no ORDER BY, so SQLite handed back
+    the same n rows in scan order every 30-minute cycle. The head of that scan
+    had filled with markets Gamma reports as never `closed` whose end dates are
+    long past -- permanently unresolvable, permanently first -- so the watcher
+    re-fetched the same few hundred hopeless markets forever and never reached
+    the rest. The working set had grown to ~42k markets draining at a few dozen
+    a day while ~600 closed daily.
+
+    `resolution_checked_ts` turns that scan into a round-robin: order by it
+    ascending and each cycle takes the least-recently-checked markets. SQLite
+    sorts NULLs first on ASC, which gives exactly the priority we want for
+    free -- a market that has never been checked (a fresh closure) jumps ahead
+    of the old sludge, while the backlog still sweeps steadily in the
+    background instead of blocking it.
+    """
+    applied = {"resolution_checked_ts_column": False, "index": False}
+    if not _column_exists(conn, "markets", "resolution_checked_ts"):
+        conn.execute("ALTER TABLE markets ADD COLUMN resolution_checked_ts TEXT")
+        applied["resolution_checked_ts_column"] = True
+    if not _index_exists(conn, "idx_markets_resolution_checked"):
+        conn.execute(
+            "CREATE INDEX idx_markets_resolution_checked "
+            "ON markets(resolution_checked_ts)"
+        )
+        applied["index"] = True
+    conn.commit()
+    return applied
+
+
 def migrate_universe_log_dedup(conn: sqlite3.Connection) -> dict[str, bool]:
     """Idempotent 2026-07-20 migration: collapse `universe_log` to one row per
     (venue, venue_native_id, reason_code, day) and enforce it with a UNIQUE
@@ -479,6 +511,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     migrate_m3_boundary_randomization(conn)
     migrate_shadow_fees(conn)
     migrate_universe_log_dedup(conn)
+    migrate_resolution_checked_ts(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )
