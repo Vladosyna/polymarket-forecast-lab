@@ -310,7 +310,7 @@ async def run_collect(config: dict[str, Any]) -> None:
         log.exception("instance guard failed at collector startup")
 
     stop = asyncio.Event()
-    _install_signal_handlers(config, stop.set)
+    _install_signal_handlers(stop.set)
 
     scheduler = AsyncIOScheduler(timezone="UTC")
     ctx = register_collect_jobs(scheduler, config)
@@ -604,7 +604,7 @@ async def _idle_until_stopped(stop: asyncio.Event, on_tick: Callable[[], None] |
             continue
 
 
-def _install_signal_handlers(config: dict[str, Any], request_stop: Callable[[], None]) -> None:
+def _install_signal_handlers(request_stop: Callable[[], None]) -> None:
     """Ask the run loop to shut down cleanly, and log *why* it is stopping.
 
     Two things this has to get right, the first of them learned the hard way
@@ -675,7 +675,7 @@ async def run_orchestrator(config: dict[str, Any]) -> None:
     """One-button entry point: collector + scheduled analytics in one process."""
     _checkpoint(config, "A: entered run_orchestrator")
     stop = asyncio.Event()
-    _install_signal_handlers(config, stop.set)
+    _install_signal_handlers(stop.set)
     asyncio.get_running_loop().set_exception_handler(
         lambda loop, context: _loop_exception_handler(config, loop, context))
     guard = _enforce_instance_guard(config, "orchestrator")
