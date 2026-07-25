@@ -65,10 +65,20 @@ collect:
   # within ~1.5h, so back to a normal cadence -- no reason to keep hammering
   # Gamma once there's no backlog left to work through.
   resolution_poll_minutes: 30
-  # Candidates checked per watch_resolutions() cycle. Modest headroom over the
-  # old hardcoded 200 in case of a future gap, without re-scanning thousands
-  # of still-pending markets every cycle for no benefit.
-  resolution_backlog_limit: 300
+  # Candidates checked per watch_resolutions() cycle. Raised 300 -> 1000 on
+  # 2026-07-25, when the scan was found to be re-reading the same head every
+  # cycle (see resolutions.unresolved_closed_markets) and the working set had
+  # reached ~42k markets. The comment this replaces reasoned that a bigger
+  # batch would "re-scan thousands of still-pending markets every cycle for no
+  # benefit" -- true of the old no-ORDER-BY scan, which really did re-read the
+  # same rows; with the round-robin cursor a bigger batch instead sweeps the
+  # whole backlog proportionally faster. 1000/cycle at a 30-min cadence is a
+  # full sweep in ~21h (vs ~3 days at 300), and averages 0.55 req/s against a
+  # 10 req/s global budget, so it does not meaningfully compete with the
+  # snapshot loops for the token bucket. The watcher is also the ONLY thing
+  # that notices a market has closed -- sync_universe queries closed="false"
+  # and so never sees them -- which is why sweep latency is worth paying for.
+  resolution_backlog_limit: 1000
   # Order-book levels stored per side in snapshots (historical depth is
   # unrecoverable later; models don't consume it yet).
   book_depth_levels: 10
