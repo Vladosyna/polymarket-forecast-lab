@@ -309,16 +309,18 @@ async def run_collect(config: dict[str, Any]) -> None:
     except Exception:
         log.exception("instance guard failed at collector startup")
 
+    stop = asyncio.Event()
+    _install_signal_handlers(config, stop.set)
+
     scheduler = AsyncIOScheduler(timezone="UTC")
     ctx = register_collect_jobs(scheduler, config)
     scheduler.start()
 
     log.info("collector started")
-    await _startup_collection_cycle(ctx)
 
     try:
-        while True:
-            await asyncio.sleep(60)
+        await _startup_collection_cycle(ctx)
+        await _idle_until_stopped(stop)
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
@@ -586,32 +588,94 @@ def _loop_exception_handler(config: dict[str, Any], loop: asyncio.AbstractEventL
     loop.default_exception_handler(context)
 
 
-def _install_signal_handlers(config: dict[str, Any]) -> None:
-    """Log *why* the process is stopping before it stops.
+async def _idle_until_stopped(stop: asyncio.Event, on_tick: Callable[[], None] | None = None,
+                              interval: float = 60.0) -> None:
+    """Tick every `interval` seconds until `stop` is set, then return.
 
-    A future crash with no corresponding "received stop signal" line here,
-    but a heartbeat that still went stale, means something killed the process
-    outright (SIGKILL / TerminateProcess) rather than asking it to shut down
-    -- that distinction is the whole point, since a hard kill can never be
-    intercepted by any handler, Python or otherwise.
+    Deliberately NOT `while True: await asyncio.sleep(interval)`: that loop has
+    no way to observe a stop request, so the caller's `finally:` cleanup only
+    ever ran via cancellation or a hard kill (see _install_signal_handlers)."""
+    while not stop.is_set():
+        if on_tick is not None:
+            on_tick()
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except (asyncio.TimeoutError, TimeoutError):
+            continue
+
+
+def _install_signal_handlers(config: dict[str, Any], request_stop: Callable[[], None]) -> None:
+    """Ask the run loop to shut down cleanly, and log *why* it is stopping.
+
+    Two things this has to get right, the first of them learned the hard way
+    (2026-07-25, after `systemctl restart` was observed logging
+    "State 'stop-sigterm' timed out. Killing."):
+
+    1. **A handler that only logs silently disables the signal.** Installing
+       any Python handler REPLACES the signal's default disposition, and
+       SIGTERM's default is "terminate the process". The previous version of
+       this function logged and returned, which turned SIGTERM into a no-op:
+       the process ran on until systemd's TimeoutStopSec (90s by default)
+       expired and SIGKILL arrived, so the caller's `finally:` block never ran
+       and whatever was in flight was killed mid-write rather than finished.
+       A handler must therefore actively initiate shutdown, not merely narrate
+       it -- which is what `request_stop` is for.
+    2. **A second signal must still be able to kill a hung shutdown.** After
+       the first signal we restore the default disposition, so an operator
+       pressing Ctrl+C twice (or systemd escalating) is never trapped by a
+       cleanup path that itself wedged.
+
+    The original docstring's point still stands and is why the log line stays:
+    a crash with no "received stop signal" line, but a heartbeat that went
+    stale, means something killed the process outright rather than asking it
+    to stop -- a hard kill can never be intercepted by any handler.
     """
-    def _handler(signum, _frame):
-        log.warning("received stop signal", extra={"ctx": {"signal": signum}})
+    loop = asyncio.get_running_loop()
+    seen: set[int] = set()
+
+    def _restore_default(signum: int) -> None:
+        try:
+            loop.remove_signal_handler(signum)  # asyncio restores SIG_DFL itself
+            return
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass
+        try:
+            signal.signal(signum, signal.SIG_DFL)
+        except (ValueError, OSError):
+            pass
+
+    def _on_signal(signum: int) -> None:
+        if signum in seen:
+            return
+        seen.add(signum)
+        log.warning("received stop signal -- shutting down",
+                    extra={"ctx": {"signal": signum}})
+        _restore_default(signum)
+        request_stop()
 
     for name in ("SIGTERM", "SIGINT", "SIGBREAK"):  # SIGBREAK is Windows-only (Ctrl+Break)
         sig = getattr(signal, name, None)
         if sig is None:
             continue
         try:
-            signal.signal(sig, _handler)
-        except (ValueError, OSError):
-            pass  # e.g. not the main thread, or unsupported on this platform
+            loop.add_signal_handler(sig, _on_signal, sig)
+        except (NotImplementedError, RuntimeError, ValueError, OSError):
+            # Windows has no add_signal_handler. Fall back to the C-level hook,
+            # hopping back onto the loop thread -- request_stop touches asyncio
+            # state, which is not safe to poke from a signal handler directly.
+            def _thread_hop(signum, _frame, _loop=loop):
+                _loop.call_soon_threadsafe(_on_signal, signum)
+            try:
+                signal.signal(sig, _thread_hop)
+            except (ValueError, OSError):
+                pass  # e.g. not the main thread, or unsupported on this platform
 
 
 async def run_orchestrator(config: dict[str, Any]) -> None:
     """One-button entry point: collector + scheduled analytics in one process."""
     _checkpoint(config, "A: entered run_orchestrator")
-    _install_signal_handlers(config)
+    stop = asyncio.Event()
+    _install_signal_handlers(config, stop.set)
     asyncio.get_running_loop().set_exception_handler(
         lambda loop, context: _loop_exception_handler(config, loop, context))
     guard = _enforce_instance_guard(config, "orchestrator")
@@ -631,20 +695,26 @@ async def run_orchestrator(config: dict[str, Any]) -> None:
     _write_heartbeat(config)
     log.info("orchestrator started", extra={"ctx": {"pid": os.getpid()}})
     _checkpoint(config, "D: pid+heartbeat written, entering startup cycle")
-    await _startup_collection_cycle(ctx)
-    _checkpoint(config, "E: startup collection cycle done")
 
-    skip: set[str] = set()
-    if config.get("schedule", {}).get("run_on_start", True):
-        log.info("orchestrator startup analytics pass")
-        await actx.services["forecast"]()
-        skip.add("forecast")
-    await _run_overdue_services(config, actx, skip=skip)
-
+    # Startup lives inside the try so the cleanup below runs even when a stop
+    # arrives mid-startup -- these phases can take minutes, and before
+    # 2026-07-25 a SIGTERM during them was simply ignored (see
+    # _install_signal_handlers). A stop request cannot interrupt a job already
+    # in flight (cancelling one mid-write is the very failure this is meant to
+    # avoid), but it does stop us from starting further work.
     try:
-        while True:
-            _write_heartbeat(config)
-            await asyncio.sleep(60)
+        await _startup_collection_cycle(ctx)
+        _checkpoint(config, "E: startup collection cycle done")
+
+        if not stop.is_set():
+            skip: set[str] = set()
+            if config.get("schedule", {}).get("run_on_start", True):
+                log.info("orchestrator startup analytics pass")
+                await actx.services["forecast"]()
+                skip.add("forecast")
+            await _run_overdue_services(config, actx, skip=skip)
+
+        await _idle_until_stopped(stop, lambda: _write_heartbeat(config))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
