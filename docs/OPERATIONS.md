@@ -378,10 +378,46 @@ independently attributable and verifiable, not just push-authorized.
 |---|---|---|
 | `last_snapshot_age` far above the tier's configured cadence (liquid ~5 min, tail ~60 min) | The collector process is stalled, crashed, or the machine itself was asleep/off (see the past sleep incident above) | Check `data\logs\watchdog.log` first — is the watchdog even seeing the process as alive? Then check Windows Event Viewer's System log for sleep/wake events: `Get-WinEvent -FilterHashtable @{LogName='System';Id=42,506,507}`, and correlate against the last line in `data\logs\lab.jsonl` before the gap. |
 | `gaps_24h` / `gaps_7d` elevated | Intermittent connectivity or upstream rate-limiting, not necessarily a dead process | Watch for repeated 429/5xx entries in `data\logs\lab.jsonl` around the gap window. Check `last_snapshot_age` too, to tell "intermittent" apart from "dead." |
-| "resolution watcher: N closed markets unresolved" growing over time | Either a genuine UMA dispute-window backlog (expected, transient) or the resolution watcher itself falling behind its poll cadence | Check whether N is roughly stable (healthy — disputes resolve on their own schedule) or monotonically climbing (watcher problem — investigate). |
+| `resolution watcher: oldest_check=Nh` climbing past roughly one full sweep (~21h at the current 1000/cycle batch and 30-min cadence) | **The direct stall signal.** No candidate should go longer than one sweep without being looked at; if the oldest keeps ageing, the watcher is not getting through its queue | Check the backlog size and `never_checked` on the same line. If `never_checked` is large and static, the scan is not advancing — that is the 2026-07-25 failure mode (see below), and the ordering in `resolutions.unresolved_closed_markets` is the first thing to check. Otherwise consider raising `collect.resolution_backlog_limit`. |
+| `resolution watcher: backlog=N` growing over time | Either a genuine UMA dispute-window backlog (expected, transient) or the watcher falling behind | Check whether N is roughly stable (healthy — disputes resolve on their own schedule) or monotonically climbing (watcher problem). Note `backlog` is the watcher's real working set; the `closed=` figure beside it is only the already-closed subset and is always smaller. |
 | Per-venue `closed_unresolved` lines (Kalshi/Manifold) | Same read as above, scoped to that venue | Same action as above, per venue. |
 | `metaculus last_snapshot_age=never` | Expected and benign by design, until at least one Metaculus pair exists in `data\markets_map.yaml`'s confirmed list | No action — there is no broad Metaculus universe sync, only confirmed-pair snapshots. |
 | "LLM spend today: $X / cap $Y" near the cap | By design (guardrail 10): M3 and the weekly M7 propose job will start skipping remaining markets for the rest of the UTC day once the cap is hit | Not an error — just fewer forecasts/proposals until the cap resets at UTC midnight. No action needed. |
+
+### Incident: the resolution watcher stall (2026-07-02 → 2026-07-25)
+
+Worth recording because the failure was silent, lasted three weeks, and the
+dashboard actively hid it.
+
+`unresolved_closed_markets` took `LIMIT n` with **no `ORDER BY`**, so SQLite
+returned the same `n` rows in scan order every cycle. The head of that scan
+had filled with markets Gamma never reports as `closed` whose end dates were
+long past — permanently unresolvable, permanently first — so the watcher
+re-fetched the same few hundred hopeless markets every 30 minutes and never
+reached anything behind them. The working set reached ~42k markets draining at
+40–60/day while ~600 closed daily; 11,260 forecasts sat on markets that could
+never be scored, and half of all forecast *weather* markets (629 scored vs 630
+stuck) were affected — the category carrying a primary hypothesis.
+
+Two things kept it invisible, both now fixed:
+
+- `lab status` reported only the `closed = 1` subset (17k of a real 42k), so
+  the number on the dashboard was never the number the watcher was working
+  through. It now reports the watcher's own working set.
+- There was no staleness signal at all. `oldest_check_age_h` is now the
+  first-class one: it cannot stay flat while the scan is stuck.
+
+The glossary row above did say "monotonically climbing → watcher problem," and
+the number *was* climbing at every check. The lesson is not that the guidance
+was missing but that a slowly-growing number with a plausible benign reading
+("UMA disputes are backed up") gets explained away indefinitely. A signal that
+is *unambiguous* when broken — like `oldest_check_age_h` — is worth more than a
+signal that needs interpretation.
+
+No data was lost: the forecast ledger was never affected, and all 25 of the
+oldest stuck weather markets probed after the fix were still served by Gamma
+with final payouts available. The backlog is recoverable in full, and a single
+800-market sweep immediately after the fix recorded 356 resolutions.
 
 ---
 
