@@ -92,6 +92,51 @@ def test_fit_m4_weights_respects_floor_and_ceiling(conn):
     assert sum(weights.values()) == pytest.approx(1.0)
 
 
+def _seed_resolved_category(conn, n, category="politics"):
+    for i in range(n):
+        cid = f"0x{i}"
+        conn.execute(
+            "INSERT INTO markets (condition_id, category, tier, active, closed) "
+            "VALUES (?, ?, 'liquid', 1, 1)", (cid, category))
+        outcome = float(i % 2)
+        db.record_resolution(conn, cid, "2026-07-01T00:00:00+00:00", outcome, False, "gamma")
+        _add_forecast(conn, cid, "m0_market", 0.5)
+        _add_forecast(conn, cid, "m1_debiased", 0.8 if outcome else 0.2)
+    conn.commit()
+
+
+def test_min_resolved_threshold_reads_config_not_the_constant(conn):
+    """Regression guard: `learn.m4_min_resolved_per_category` must actually
+    drive the equal-weights gate. Until 2026-07-25 the gate used a hardcoded
+    module constant and this key was dead, so config and code could silently
+    disagree (the paper draft's S5.8 footnote flagged exactly this).
+
+    30 resolved markets seed total_n=60 (two POOLABLE members forecast each
+    one) -- below the shipped default (100), above a lowered value (50), so
+    the two configs must disagree here.
+    """
+    _seed_resolved_category(conn, 30)
+    config = load_config()
+
+    config["learn"]["m4_min_resolved_per_category"] = 100
+    assert fit_m4_weights(conn, config)["categories"] == {}
+
+    config["learn"]["m4_min_resolved_per_category"] = 50
+    assert "politics" in fit_m4_weights(conn, config)["categories"]
+
+
+def test_min_resolved_falls_back_to_constant_when_key_absent(conn):
+    """Removing the key entirely must not crash or silently admit every
+    category -- it falls back to the module default."""
+    from lab.models.m4_ensemble import MIN_RESOLVED_PER_CATEGORY
+
+    # total_n = 2 * markets, kept just under the default so the gate must bite.
+    _seed_resolved_category(conn, MIN_RESOLVED_PER_CATEGORY // 2 - 20)
+    config = load_config()
+    config["learn"].pop("m4_min_resolved_per_category", None)
+    assert fit_m4_weights(conn, config)["categories"] == {}
+
+
 # --- Phase 13: extremization applied at forecast time -----------------------
 
 def test_no_extremization_artifact_is_byte_identical_to_today(conn):

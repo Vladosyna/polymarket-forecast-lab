@@ -204,6 +204,27 @@ def _seed_m4_pool(conn, n=60, category="politics"):
     conn.commit()
 
 
+def test_mwu_min_resolved_threshold_reads_config_not_the_constant(config):
+    """The challenger's coverage gate must read the same config key the
+    incumbent fit reads (`learn.m4_min_resolved_per_category`), so the two
+    cannot silently diverge. Until 2026-07-25 both used a hardcoded constant
+    and the key was dead.
+
+    n=30 seeds total_n=60 across the two POOLABLE members -- below the
+    shipped default (100), above a lowered config value (50).
+    """
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_m4_pool(conn, n=30)
+    update_wealth_ledger(conn, config)
+
+    config["learn"]["m4_min_resolved_per_category"] = 100
+    assert fit_mwu_weights(conn, config)["categories"] == {}
+
+    config["learn"]["m4_min_resolved_per_category"] = 50
+    assert "politics" in fit_mwu_weights(conn, config)["categories"]
+    conn.close()
+
+
 def test_mwu_challenger_invisible_until_promoted(config):
     """Phase 14.1's literal acceptance criterion: the challenger is
     invisible to production forecasts until promoted -- here it's blocked

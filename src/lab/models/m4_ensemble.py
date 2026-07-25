@@ -2,8 +2,9 @@
 
 Weights are fit per category on resolved forecasts (inverse-Brier softmax
 over a rolling window) and stored as a versioned artifact; equal weights
-until a category has >= 100 resolved samples. M4 pools each market's latest
-same-day forecasts from the ledger, so it runs after the other models.
+until a category has at least `learn.m4_min_resolved_per_category` resolved
+samples. M4 pools each market's latest same-day forecasts from the ledger,
+so it runs after the other models.
 """
 
 from __future__ import annotations
@@ -25,6 +26,12 @@ log = logging.getLogger(__name__)
 
 POOLABLE = ("m0_market", "m1_debiased", "m2_baserate", "m3_evidence",
             "m5_nowcast", "m6_consistency", "m7_crossvenue")
+# Fallback only. The live value is `learn.m4_min_resolved_per_category` in
+# config.yaml, read by fit_m4_weights below and by economy/mwu.py's challenger
+# fit; this constant applies solely when that key is absent from the config.
+# (Until 2026-07-25 the constant WAS the live value and the config key was
+# dead -- the two could silently disagree, which is exactly the drift the
+# paper draft's own S5.8 footnote flagged.)
 MIN_RESOLVED_PER_CATEGORY = 100
 
 
@@ -38,6 +45,8 @@ def fit_m4_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
     learn_cfg = config.get("learn", {})
     floor = float(learn_cfg.get("m4_weight_floor", 0.02))
     ceiling = float(learn_cfg.get("m4_weight_ceiling", 0.60))
+    min_resolved = int(learn_cfg.get("m4_min_resolved_per_category",
+                                     MIN_RESOLVED_PER_CATEGORY))
 
     artifact: dict[str, Any] = {"kind": "m4_weights", "fitted_at": now_utc_iso(),
                                 "categories": {}}
@@ -58,7 +67,7 @@ def fit_m4_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
         by_cat.setdefault(r["category"], {})[r["model_id"]] = {"brier": r["brier"], "n": r["n"]}
     for cat, models in by_cat.items():
         total_n = sum(v["n"] for v in models.values())
-        if total_n < MIN_RESOLVED_PER_CATEGORY:
+        if total_n < min_resolved:
             continue
         briers = np.array([models[m]["brier"] for m in sorted(models)])
         # Softmax over negative Brier: better models earn weight through

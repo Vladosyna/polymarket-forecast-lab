@@ -76,6 +76,10 @@ def fit_mwu_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
     floor = float(learn_cfg.get("m4_weight_floor", 0.02))
     ceiling = float(learn_cfg.get("m4_weight_ceiling", 0.60))
     threshold = float(learn_cfg.get("mwu", {}).get("correlation_cluster_threshold", 0.8))
+    # Same config key the incumbent fit reads, so challenger and incumbent
+    # cannot diverge on coverage -- see m4_ensemble.MIN_RESOLVED_PER_CATEGORY.
+    min_resolved = int(learn_cfg.get("m4_min_resolved_per_category",
+                                     MIN_RESOLVED_PER_CATEGORY))
 
     by_cat: dict[str, dict[str, dict]] = {}
     for r in sleeping_expert_rankings(conn):
@@ -88,7 +92,7 @@ def fit_mwu_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
         if len(members) < 2:
             continue
         total_n = sum(v["n_forecasts"] for v in members.values())
-        if total_n < MIN_RESOLVED_PER_CATEGORY:
+        if total_n < min_resolved:
             continue
 
         avg_log_wealth = {m: v["avg_log_wealth"] for m, v in members.items()}
