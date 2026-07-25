@@ -11,6 +11,7 @@ shadow, and learn -- on the same event loop.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -318,9 +319,12 @@ async def run_collect(config: dict[str, Any]) -> None:
 
     log.info("collector started")
 
-    try:
+    async def _phases() -> None:
         await _startup_collection_cycle(ctx)
         await _idle_until_stopped(stop)
+
+    try:
+        await _run_until_stopped(_phases(), stop)
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
@@ -588,6 +592,36 @@ def _loop_exception_handler(config: dict[str, Any], loop: asyncio.AbstractEventL
     loop.default_exception_handler(context)
 
 
+async def _run_until_stopped(coro: Awaitable[None], stop: asyncio.Event) -> None:
+    """Run `coro`, abandoning it as soon as `stop` is set.
+
+    Needed because the startup phases are *long*: the tail-tier pass alone
+    walks ~13k markets at roughly a request every 0.2s, so simply checking
+    `stop` between phases (the 2026-07-25 first cut of this fix) still made a
+    stop wait tens of minutes -- far past any service manager's stop timeout,
+    which is the SIGKILL this whole change exists to avoid.
+
+    Abandoning means cancelling, and cancellation is safe here precisely
+    because asyncio can only deliver it at an `await`: a synchronous write
+    (polars' parquet write plus its atomic rename, a sqlite transaction) has
+    no await inside it and therefore always runs to completion. What gets
+    interrupted is the network wait around such a write, never the write.
+    """
+    task = asyncio.ensure_future(coro)
+    waiter = asyncio.ensure_future(stop.wait())
+    try:
+        await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        waiter.cancel()
+        if not task.done():
+            log.info("stop requested mid-startup -- abandoning in-flight collection")
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task  # let the cancellation land before clients are closed
+    if task.done() and not task.cancelled():
+        task.result()  # surface a genuine failure rather than swallowing it
+
+
 async def _idle_until_stopped(stop: asyncio.Event, on_tick: Callable[[], None] | None = None,
                               interval: float = 60.0) -> None:
     """Tick every `interval` seconds until `stop` is set, then return.
@@ -696,25 +730,25 @@ async def run_orchestrator(config: dict[str, Any]) -> None:
     log.info("orchestrator started", extra={"ctx": {"pid": os.getpid()}})
     _checkpoint(config, "D: pid+heartbeat written, entering startup cycle")
 
-    # Startup lives inside the try so the cleanup below runs even when a stop
-    # arrives mid-startup -- these phases can take minutes, and before
-    # 2026-07-25 a SIGTERM during them was simply ignored (see
-    # _install_signal_handlers). A stop request cannot interrupt a job already
-    # in flight (cancelling one mid-write is the very failure this is meant to
-    # avoid), but it does stop us from starting further work.
-    try:
+    # Startup runs under _run_until_stopped, and the whole thing sits inside
+    # the try, so a stop arriving mid-startup both takes effect promptly and
+    # still reaches the cleanup below. Before 2026-07-25 a SIGTERM here was
+    # ignored outright (see _install_signal_handlers).
+    async def _phases() -> None:
         await _startup_collection_cycle(ctx)
         _checkpoint(config, "E: startup collection cycle done")
 
-        if not stop.is_set():
-            skip: set[str] = set()
-            if config.get("schedule", {}).get("run_on_start", True):
-                log.info("orchestrator startup analytics pass")
-                await actx.services["forecast"]()
-                skip.add("forecast")
-            await _run_overdue_services(config, actx, skip=skip)
+        skip: set[str] = set()
+        if config.get("schedule", {}).get("run_on_start", True):
+            log.info("orchestrator startup analytics pass")
+            await actx.services["forecast"]()
+            skip.add("forecast")
+        await _run_overdue_services(config, actx, skip=skip)
 
         await _idle_until_stopped(stop, lambda: _write_heartbeat(config))
+
+    try:
+        await _run_until_stopped(_phases(), stop)
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:

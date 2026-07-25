@@ -27,9 +27,74 @@ import textwrap
 
 import pytest
 
-from lab.collect.runner import _idle_until_stopped, _install_signal_handlers
+from lab.collect.runner import (
+    _idle_until_stopped,
+    _install_signal_handlers,
+    _run_until_stopped,
+)
 
 _POSIX = os.name != "nt"
+
+
+# --- abandoning long startup work: portable ---------------------------------
+
+def test_run_until_stopped_abandons_long_work():
+    """A stop must not have to wait out the startup collection cycle -- the
+    tail-tier pass alone runs for tens of minutes, well past any service
+    manager's stop timeout."""
+    cancelled = []
+
+    async def scenario():
+        stop = asyncio.Event()
+
+        async def long_work():
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                cancelled.append(True)
+                raise
+
+        async def stop_soon():
+            await asyncio.sleep(0.05)
+            stop.set()
+
+        asyncio.ensure_future(stop_soon())
+        await asyncio.wait_for(_run_until_stopped(long_work(), stop), timeout=5)
+
+    asyncio.run(scenario())
+    assert cancelled == [True], "long-running startup work was not abandoned"
+
+
+def test_run_until_stopped_lets_work_finish_when_no_stop():
+    """No stop request -> the work runs to completion, untouched."""
+    done = []
+
+    async def scenario():
+        stop = asyncio.Event()
+
+        async def work():
+            await asyncio.sleep(0.01)
+            done.append(True)
+
+        await asyncio.wait_for(_run_until_stopped(work(), stop), timeout=5)
+
+    asyncio.run(scenario())
+    assert done == [True]
+
+
+def test_run_until_stopped_surfaces_a_genuine_failure():
+    """A real error must still propagate -- abandoning on stop must not turn
+    into swallowing every exception."""
+    async def scenario():
+        stop = asyncio.Event()
+
+        async def boom():
+            raise RuntimeError("collector blew up")
+
+        with pytest.raises(RuntimeError, match="collector blew up"):
+            await _run_until_stopped(boom(), stop)
+
+    asyncio.run(scenario())
 
 
 # --- the idle loop: portable, both platforms --------------------------------
@@ -86,14 +151,25 @@ def test_idle_loop_does_not_tick_when_already_stopped():
 
 _CHILD = """
 import asyncio, sys
-from lab.collect.runner import _idle_until_stopped, _install_signal_handlers
+from lab.collect.runner import (
+    _idle_until_stopped, _install_signal_handlers, _run_until_stopped)
+
+BUSY = {busy}
 
 async def main():
     stop = asyncio.Event()
     _install_signal_handlers(stop.set)
+
+    async def phases():
+        if BUSY:
+            # Stand in for _startup_collection_cycle: long, and reached before
+            # the idle loop -- the shape that made the first fix insufficient.
+            await asyncio.sleep(3600)
+        await _idle_until_stopped(stop, interval=3600)
+
     try:
         print("READY", flush=True)
-        await _idle_until_stopped(stop, interval=3600)
+        await _run_until_stopped(phases(), stop)
     finally:
         print("CLEANUP_RAN", flush=True)
 
@@ -101,12 +177,12 @@ asyncio.run(main())
 """
 
 
-def _spawn_child():
+def _spawn_child(busy: bool = False):
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
     env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
-        [sys.executable, "-c", textwrap.dedent(_CHILD)],
+        [sys.executable, "-c", textwrap.dedent(_CHILD).format(busy=busy)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
     )
     assert proc.stdout.readline().strip() == "READY", "child never started"
@@ -130,6 +206,26 @@ def test_sigterm_shuts_down_cleanly_end_to_end():
         pytest.fail("process ignored SIGTERM -- this is the bug systemd hit")
 
     assert proc.returncode == 0, f"unclean exit: {proc.returncode}"
+    assert "CLEANUP_RAN" in out, "process exited without running its finally block"
+
+
+@pytest.mark.skipif(not _POSIX, reason="needs real POSIX signal delivery")
+def test_sigterm_during_long_startup_still_exits_promptly():
+    """The second half of the bug, found on the VPS after the first fix:
+    the handler fired, but the process sat in _startup_collection_cycle --
+    tens of minutes of tail-tier collection -- and only checked the stop
+    request afterwards, so systemd still hit its timeout and SIGKILLed.
+
+    Shutdown must not be hostage to whatever startup phase is in flight."""
+    proc = _spawn_child(busy=True)
+    proc.send_signal(signal.SIGTERM)
+    try:
+        out, _ = proc.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        pytest.fail("SIGTERM during startup did not stop the process")
+
     assert "CLEANUP_RAN" in out, "process exited without running its finally block"
 
 
