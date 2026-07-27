@@ -15,6 +15,16 @@ uv run lab verify-ledger
 It exits non-zero only if some date has no valid commitment at all — the
 condition that would actually indicate an edited ledger.
 
+**Run it against the ledger of record.** Commitments are hashes over rows in
+one specific database, so verification is only meaningful against that
+database — currently the VPS's `data/lab.db`, mirrored to the private results
+repo and the published replication export. Against a divergent copy the output
+inverts and is badly misleading: run on the retired laptop database on
+2026-07-28, the same command reported 7 of 21 dates verified and flagged the
+*VPS's* records as the superseded ones. Nothing was wrong with either the
+ledger or the tool; it was answering a question about the wrong database.
+Expected output on the ledger of record is `verified` equal to `dates`.
+
 ---
 
 ## 2026-07-10 → 2026-07-14: duplicate records from a two-host cutover
