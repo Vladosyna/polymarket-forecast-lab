@@ -55,6 +55,21 @@ def _hash_rows(rows: list[sqlite3.Row]) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
+def _ledger_id(conn: sqlite3.Connection) -> str:
+    """Short, stable identifier for the database a commitment was computed on.
+
+    Derived from `meta.created_at`, which is written once with INSERT OR
+    IGNORE when a database is first created and never changes afterwards --
+    so two hosts running their own DB produce two different ids, while the
+    same DB always produces the same one across restarts, backups and
+    restores. Opaque on purpose: it exists to answer "same ledger or not,"
+    not to identify a machine.
+    """
+    row = conn.execute("SELECT value FROM meta WHERE key = 'created_at'").fetchone()
+    created = row[0] if row else ""
+    return hashlib.sha256(created.encode("utf-8")).hexdigest()[:8]
+
+
 def _query_day(conn: sqlite3.Connection, date_str: str) -> list[sqlite3.Row]:
     cols = ", ".join(_FORECAST_COLUMNS)
     return conn.execute(
@@ -118,6 +133,14 @@ def commit_pending_days(conn: sqlite3.Connection, ledger_path: Path) -> list[dic
                 "sha256": _hash_rows(rows),
                 "committed_ts": committed_ts,
                 "prospective": (today - d).days <= 1,
+                # Which database produced this record (2026-07-28). During the
+                # 2026-07-10 laptop-to-VPS cutover two hosts ran this job
+                # against their own separate DBs and pushed to this same file;
+                # the resulting duplicate-date records were indistinguishable
+                # from tampering by inspection alone, and took a deliberate
+                # investigation to explain. A ledger identifier makes a
+                # dual-host write self-evident from the record itself.
+                "ledger_id": _ledger_id(conn),
             })
         d += timedelta(days=1)
 
@@ -148,6 +171,49 @@ def verify_commitment(conn: sqlite3.Connection, record: dict[str, Any]) -> bool:
     if len(rows) != record["row_count"]:
         return False
     return _hash_rows(rows) == record["sha256"]
+
+
+def verify_ledger(conn: sqlite3.Connection, ledger_path: Path) -> dict[str, Any]:
+    """Verify every commitment in the file, grouped by date.
+
+    Exists because the paper's verifiability claim is only as good as someone
+    actually running it: the procedure was prose-only until 2026-07-28, and a
+    real defect (below) sat unnoticed in the file for two weeks as a result.
+
+    The per-date grouping is the point. A date can legitimately carry more
+    than one record -- during the 2026-07-10 laptop-to-VPS cutover BOTH hosts
+    ran the nightly job for a few days against their own separate databases
+    and pushed to this same file, so 2026-07-10, -11 and -14 each got two
+    records with different id ranges. Since verification anchors to a
+    record's own id range, the record written against the other host's DB
+    cannot verify here, and never will. That is an artifact of dual-host
+    operation, not evidence of an edited ledger, and the distinction is
+    exactly what a reviewer needs: `dates_unverified` (a date with NO valid
+    commitment) is the fatal condition; `superseded` records are explainable
+    and enumerated so the explanation can be checked rather than trusted.
+    """
+    records = _read_ledger(ledger_path)
+    by_date: dict[str, list[tuple[dict[str, Any], bool]]] = {}
+    for r in records:
+        by_date.setdefault(r["date"], []).append((r, verify_commitment(conn, r)))
+
+    dates_ok = sorted(d for d, rs in by_date.items() if any(ok for _, ok in rs))
+    dates_unverified = sorted(d for d, rs in by_date.items() if not any(ok for _, ok in rs))
+    superseded = [
+        {"date": d, "first_id": r.get("first_id"), "last_id": r.get("last_id"),
+         "row_count": r.get("row_count"), "committed_ts": r.get("committed_ts")}
+        for d, rs in sorted(by_date.items())
+        for r, ok in rs
+        if not ok and any(o for _, o in rs)
+    ]
+    return {
+        "records": len(records),
+        "dates": len(by_date),
+        "dates_verified": len(dates_ok),
+        "dates_unverified": dates_unverified,
+        "superseded": superseded,
+        "ok": not dates_unverified,
+    }
 
 
 def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:

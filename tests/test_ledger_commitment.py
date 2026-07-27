@@ -332,3 +332,99 @@ def test_job_skipped_when_disabled(config):
     config["ledger"]["enabled"] = False
     result = jobs.run_ledger_commitment_job(config)
     assert result == {"skipped": "disabled"}
+
+
+# --- verify_ledger: per-date grouping and the dual-host case ---------------
+
+def test_verify_ledger_reports_all_dates_verified(conn, tmp_path):
+    _seed(conn, _iso(TODAY - timedelta(days=1)))
+    conn.commit()
+    path = tmp_path / "ledger.jsonl"
+    lc.commit_pending_days(conn, path)
+
+    result = lc.verify_ledger(conn, path)
+    assert result["ok"] is True
+    assert result["dates_unverified"] == []
+    assert result["superseded"] == []
+    assert result["dates_verified"] == result["dates"] == 1
+
+
+def test_verify_ledger_flags_a_date_with_no_valid_commitment(conn, tmp_path):
+    """The fatal condition: a committed date whose rows no longer hash the
+    same. This is what an edited ledger looks like, and it must not be
+    softened into the 'superseded' bucket."""
+    row_id = _seed(conn, _iso(TODAY - timedelta(days=1)))
+    conn.commit()
+    path = tmp_path / "ledger.jsonl"
+    lc.commit_pending_days(conn, path)
+
+    _raw_tamper(tmp_path, row_id, 0.99)
+
+    result = lc.verify_ledger(conn, path)
+    assert result["ok"] is False
+    assert result["dates_unverified"] == [(TODAY - timedelta(days=1)).isoformat()]
+    assert result["superseded"] == []
+
+
+def test_verify_ledger_classifies_a_duplicate_date_record_as_superseded(conn, tmp_path):
+    """The real 2026-07-10..07-14 shape: two records for one date, written by
+    two hosts against two different databases. One verifies here, the other
+    never can -- and that must read as explainable, not as a broken ledger."""
+    _seed(conn, _iso(TODAY - timedelta(days=1)))
+    conn.commit()
+    path = tmp_path / "ledger.jsonl"
+    lc.commit_pending_days(conn, path)
+
+    # A second record for the same date naming an id range from another DB.
+    import json
+
+    foreign = {
+        "date": (TODAY - timedelta(days=1)).isoformat(),
+        "row_count": 4242, "first_id": 900000, "last_id": 904241,
+        "sha256": "0" * 64, "committed_ts": "2026-07-10T13:37:00+00:00",
+        "prospective": True, "ledger_id": "deadbeef",
+    }
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(foreign, sort_keys=True, separators=(",", ":")) + "\n")
+
+    result = lc.verify_ledger(conn, path)
+    assert result["ok"] is True, "a date with one good record must not read as unverified"
+    assert result["dates_unverified"] == []
+    assert len(result["superseded"]) == 1
+    assert result["superseded"][0]["first_id"] == 900000
+    assert result["records"] == 2 and result["dates"] == 1
+
+
+def test_verify_ledger_on_empty_file_is_ok(conn, tmp_path):
+    result = lc.verify_ledger(conn, tmp_path / "nonexistent.jsonl")
+    assert result["ok"] is True and result["records"] == 0
+
+
+# --- ledger_id: makes a dual-host write self-evident -----------------------
+
+def test_commitment_records_carry_a_ledger_id(conn, tmp_path):
+    _seed(conn, _iso(TODAY - timedelta(days=1)))
+    conn.commit()
+    records = lc.commit_pending_days(conn, tmp_path / "ledger.jsonl")
+    assert records[0]["ledger_id"]
+    assert len(records[0]["ledger_id"]) == 8
+
+
+def test_ledger_id_is_stable_for_one_database(conn):
+    assert lc._ledger_id(conn) == lc._ledger_id(conn)
+
+
+def test_ledger_id_differs_between_databases(conn, tmp_path, monkeypatch):
+    """Two hosts running their own DB must produce visibly different ids --
+    the whole point of the field."""
+    other = db.connect(tmp_path / "other.db")
+    try:
+        # created_at is written once per database; force a distinct value so
+        # the test does not depend on the two files being created in
+        # different clock seconds.
+        other.execute("UPDATE meta SET value = ? WHERE key = 'created_at'",
+                      ("2020-01-01T00:00:00+00:00",))
+        other.commit()
+        assert lc._ledger_id(conn) != lc._ledger_id(other)
+    finally:
+        other.close()

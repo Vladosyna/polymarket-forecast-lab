@@ -257,6 +257,41 @@ def status() -> None:
     typer.echo(format_status(gather_status(load_config())))
 
 
+@app.command("verify-ledger")
+def verify_ledger_cmd() -> None:
+    """Recompute every ledger commitment's hash from the DB and report.
+
+    The independent-verifiability procedure the paper describes, made
+    runnable. Exits non-zero only when some date has NO valid commitment --
+    the condition that would actually mean the ledger was edited. Records
+    superseded during the 2026-07-10 dual-host cutover are listed separately
+    (see docs/ledger_commitment_incidents.md).
+    """
+    from lab.ledger_commitment import verify_ledger
+    from lab.store import db
+    from lab.util import PROJECT_ROOT
+
+    config = load_config()
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        path = PROJECT_ROOT / config.get("ledger", {}).get(
+            "commitments_path", "docs/ledger_commitments.jsonl")
+        result = verify_ledger(conn, path)
+    finally:
+        conn.close()
+
+    typer.echo(f"ledger: {path}")
+    typer.echo(f"  records={result['records']}  dates={result['dates']}  "
+               f"verified={result['dates_verified']}")
+    for s in result["superseded"]:
+        typer.echo(f"  superseded (dual-host cutover): {s['date']} "
+                   f"ids {s['first_id']}..{s['last_id']} n={s['row_count']}")
+    if result["dates_unverified"]:
+        typer.echo(f"  UNVERIFIED DATES: {', '.join(result['dates_unverified'])}")
+        raise typer.Exit(code=1)
+    typer.echo("  OK -- every date has a verifying commitment")
+
+
 @app.command()
 def bootstrap(
     source: str = typer.Option(
