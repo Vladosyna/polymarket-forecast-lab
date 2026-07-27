@@ -28,10 +28,27 @@ log = logging.getLogger(__name__)
 
 
 def null_control_ids(conn, config: dict[str, Any]) -> set[str]:
-    """Deterministic seeded sample of sports markets (the null control)."""
+    """Seeded sample of *currently forecastable* sports markets (the null control).
+
+    The eligibility filter here is load-bearing, and its absence was a silent
+    failure of the whole control (found 2026-07-28). This sampled from every
+    sports market ever seen -- 41k rows, ~80% of them already resolved and
+    ~93% in the `ignored` tier -- while the forecast loop only ever considers
+    `tier IN ('liquid','tail') AND active = 1 AND closed = 0`. Of the 30 ids
+    drawn, 27 were already closed and 0 survived the loop's filter, so across
+    the entire collection period the sports null control produced exactly zero
+    Polymarket forecasts. The placebo that §4.7 of the write-up leans on to
+    detect a broken harness was itself never running.
+
+    Sampling the eligible pool means the cohort turns over as markets resolve
+    and new ones list, which is why scoring must NOT try to reproduce it by
+    re-drawing -- see null_control_ids_by_venue.
+    """
     nc = config["universe"]["null_control"]
     rows = conn.execute(
-        "SELECT condition_id FROM markets WHERE category = ? ORDER BY condition_id",
+        "SELECT condition_id FROM markets WHERE category = ? "
+        "AND tier IN ('liquid','tail') AND active = 1 AND closed = 0 "
+        "ORDER BY condition_id",
         (nc["category"],),
     ).fetchall()
     ids = [r["condition_id"] for r in rows]
@@ -40,10 +57,25 @@ def null_control_ids(conn, config: dict[str, Any]) -> set[str]:
 
 
 def null_control_ids_by_venue(conn, config: dict[str, Any]) -> dict[str, set[str]]:
-    """Per-venue deterministic sports sample -- one seeded set per
-    forecastable venue (brief Phase 11: "extend the sports null control to
-    every forecastable venue"). Independent of `null_control_ids` above,
-    which is used for forecast *eligibility* and stays venue-agnostic."""
+    """Per-venue null-control membership for scoring: the sports markets that
+    were actually forecast.
+
+    Deliberately not a re-draw of `null_control_ids`'s sample. That sample is
+    over *currently eligible* markets, so it necessarily turns over -- a market
+    forecast as a null control in July has closed by September and can no
+    longer be drawn, yet its resolved forecasts are exactly the observations
+    the control exists to score. Re-sampling at eval time would therefore both
+    miss real null-control rows and admit markets never forecast at all.
+
+    Reading membership off the ledger instead is exact by construction: a
+    sports market carries forecasts only if it was in the eligible sample when
+    they were written (or via M6's negRisk sweep, the documented §3.5
+    exception, which is equally a placebo observation and belongs here too).
+    It is also stable under re-runs, which re-sampling was not.
+
+    Used for both directions in `run_eval`: excluding these from the primary
+    per-category analysis, and selecting them for the null_control window.
+    """
     nc = config["universe"]["null_control"]
     venues = [r["venue"] for r in conn.execute(
         "SELECT venue FROM venues WHERE forecastable = 1"
@@ -51,13 +83,12 @@ def null_control_ids_by_venue(conn, config: dict[str, Any]) -> dict[str, set[str
     out: dict[str, set[str]] = {}
     for venue in venues:
         rows = conn.execute(
-            "SELECT condition_id FROM markets WHERE category = ? AND venue = ? "
-            "ORDER BY condition_id",
+            "SELECT DISTINCT m.condition_id FROM markets m "
+            "JOIN forecasts f ON f.condition_id = m.condition_id "
+            "WHERE m.category = ? AND m.venue = ?",
             (nc["category"], venue),
         ).fetchall()
-        ids = [r["condition_id"] for r in rows]
-        rng = random.Random(nc["random_seed"])
-        out[venue] = set(rng.sample(ids, min(nc["sample_size"], len(ids))))
+        out[venue] = {r["condition_id"] for r in rows}
     return out
 
 
