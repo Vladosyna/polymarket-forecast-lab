@@ -227,9 +227,34 @@ learn:
 # The one-button process keeps the collector running and fires these analytics
 # jobs on cron triggers. All times are UTC (crontab syntax: m h dom mon dow).
 schedule:
+  # Spacing rationale (2026-07-28, after a 2026-07-27 incident): the six
+  # analytics jobs below (forecast bundle, shadow, learn, map_propose,
+  # pmxt_verify x2, paper_export) each run in their own asyncio.Lock, so two
+  # of them were always free to execute CONCURRENTLY on the same process --
+  # nothing serialized them, only the clock did, informally. On 2026-07-27
+  # lab-run was OOM-killed by the kernel with only a 3h margin between the
+  # nightly forecast bundle's old 02:00 slot and map_propose's old 05:00-
+  # Monday slot -- close enough in time to be a plausible collision (report
+  # rendering now runs over a much larger resolved-forecast set since the
+  # 2026-07-25 resolution-watcher fix started draining a 3-week backlog), but
+  # the process had gone quiet for over 2h before the kill, so the exact
+  # trigger was never confirmed from logs alone. It self-healed regardless
+  # (single restart, no crash loop -- the failure mode fixed 2026-07-20 --
+  # ~2h of missed snapshots, no data loss). Whether or not that specific
+  # overlap was the cause, nothing was stopping it, so the fix belongs at the
+  # schedule level rather than resting on the crash being survivable.
+  # Below, every job on the busiest possible day (a 1st-of-month that's also
+  # a Sunday or Monday) keeps a >=2h gap from its neighbors, and the daily
+  # forecast bundle -- the heaviest, most duration-variable job -- gets a
+  # >=5h head start over anything that could follow it same-day. This is
+  # belt; economy/analytics_lock.py's cross-service mutex (added the same day)
+  # is the suspenders -- it makes the actual guarantee (jobs never overlap)
+  # hold even if a job someday runs long enough to blow through this spacing.
+  # (The mutex lives in collect/runner.py's _build_analytics_services, next
+  # to the per-service locks it complements.)
   forecast_cron: "0 2 * * *"    # nightly 02:00 UTC -> forecast, eval, report
-  shadow_cron: "0 3 * * 0"      # weekly Sunday 03:00 UTC -> shadow portfolio
-  learn_cron: "0 4 1 * *"       # monthly, 1st at 04:00 UTC -> learning loop
+  shadow_cron: "0 7 * * 0"      # weekly Sunday 07:00 UTC -> shadow portfolio (was 03:00)
+  learn_cron: "0 14 1 * *"      # monthly, 1st at 14:00 UTC -> learning loop (was 04:00)
   # Disabled 2026-07-20 -- was the retry engine in a self-sustaining OOM crash
   # loop on the VPS: report_job routinely fails to complete under memory
   # pressure (src/lab/eval/report.py's redundant, unprojected full-history
@@ -294,10 +319,12 @@ cross_venue:
   # runs weekly (propose_cron below) and can afford to check more series per
   # priority category each time.
   propose_series_per_category: 40
-  propose_cron: "0 5 * * 1" # weekly, Monday 05:00 UTC -- orchestrator runs `lab map propose`
-                             # automatically. It only ever appends to `proposed`; a human still
-                             # must run `lab map confirm` before a pair feeds M7 (propose-then-
-                             # confirm is a hard requirement, not something automation may skip).
+  propose_cron: "0 9 * * 1" # weekly, Monday 09:00 UTC (was 05:00 -- see schedule.forecast_cron's
+                             # 2026-07-28 comment on the OOM this collided with) -- orchestrator
+                             # runs `lab map propose` automatically. It only ever appends to
+                             # `proposed`; a human still must run `lab map confirm` before a pair
+                             # feeds M7 (propose-then-confirm is a hard requirement, not something
+                             # automation may skip).
   # Phase 17 item 3: confirmed pairs only (the human-curated, already-rate-
   # limit-aware markets_map.yaml set) get a much tighter cadence than the
   # tier-wide 5/60-min loops -- the lead-lag hypothesis (PAP H3) is
@@ -311,7 +338,10 @@ cross_venue:
   # -- never imported into src/lab or called from this process. This job only
   # reads the plain data/pmxt_candidates.json that scan writes and runs our
   # own independent LLM check on each pair before it ever reaches `proposed`.
-  pmxt_verify_cron: "0 6,18 * * *"  # twice daily, 06:00 and 18:00 UTC
+  pmxt_verify_cron: "0 17,21 * * *"  # twice daily, 17:00 and 21:00 UTC (was 06:00/18:00 --
+                                      # moved clear of the 02:00-12:00 UTC morning cluster of
+                                      # forecast/shadow/paper_export/map_propose/learn, see
+                                      # schedule.forecast_cron's 2026-07-28 comment)
 
 # --- Multi-venue collectors (Phase 10, v1.9) -------------------------------
 # Each venue gets its OWN TokenBucket instance (per-host rate limiters, brief
@@ -418,9 +448,10 @@ ledger:
 paper_export:
   enabled: true
   dir: docs/paper_exports
-  cron: "0 5 * * 0"   # weekly, Sunday 05:00 UTC -- after the nightly bundle's
-                       # own ledger-commitment push (02:00) and the weekly
-                       # shadow job (03:00), so git pushes don't overlap
+  cron: "0 11 * * 0"  # weekly, Sunday 11:00 UTC (was 05:00) -- after the nightly bundle's
+                       # own ledger-commitment push (02:00) and the weekly shadow job
+                       # (now 07:00, see schedule.forecast_cron's 2026-07-28 comment),
+                       # so git pushes don't overlap
   push: true
 
 # --- Storage -------------------------------------------------------------

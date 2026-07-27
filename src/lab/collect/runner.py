@@ -361,13 +361,44 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
 
     A per-service asyncio.Lock ensures a service never runs concurrently with
     itself; on success each records its run time so overdue checks stay honest.
+
+    `analytics_run_lock` (2026-07-28) additionally serializes DIFFERENT
+    services against each other -- the per-service locks alone never did
+    that, so two heavy jobs could run at once purely because their cron times
+    happened to be close. This is the structural fix for a real gap that a
+    2026-07-27 OOM kill made visible: the nightly forecast bundle's old 02:00
+    slot and map_propose's old 05:00-Monday slot left only a 3h margin, and
+    the kill happened close enough to both in time to be a plausible
+    collision -- though the process had gone quiet for over 2h beforehand, so
+    the exact trigger was never nailed down from logs alone. Whether or not
+    that specific overlap was the cause, nothing was preventing it, and
+    nothing should be. schedule.forecast_cron's config comment spaces the six
+    cron times generously as the primary fix, but a
+    duration spike (a bigger dataset, a slow LLM call, upstream latency) can
+    erode any fixed gap over time -- the lock is what keeps "never overlap" an
+    actual guarantee rather than a schedule that happens to work today. It is
+    NOT held across the per-cycle collector jobs (snapshot/sync/resolution
+    polling) -- those stay on their own independent cadence; only the six
+    named SERVICE_NAMES batch jobs share it, since those are the ones with a
+    real per-run memory footprint and no latency requirement that would make
+    waiting for the lock costly.
     """
     from lab import jobs as analytics
     from lab.schedule_state import record_job_run
 
     locks = {name: asyncio.Lock() for name in SERVICE_NAMES}
+    analytics_run_lock = asyncio.Lock()
 
-    async def _run(name: str, body: Callable[[], Awaitable[None]]) -> None:
+    async def _run(name: str, body: Callable[[], Awaitable[None]],
+                   tail: Callable[[], Awaitable[None]] | None = None) -> None:
+        """`tail` runs inside the shared mutex like `body`, but unconditionally
+        and without gating the last-run bookkeeping -- the contract the
+        forecast bundle's publish/ledger-commitment steps need (their
+        success must not decide whether forecast/eval/report counts as done,
+        or a stalled git push would re-trigger and re-bill the whole bundle
+        hourly). They were previously called outside _run entirely, which also
+        put them outside the mutex: a multi-hundred-MB git push racing another
+        service is exactly the concurrency this lock exists to prevent."""
         if is_paused(config):
             return
         if locks[name].locked():
@@ -375,12 +406,21 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
                      extra={"ctx": {"service": name}})
             return
         async with locks[name]:
-            try:
-                await body()
-            except Exception:
-                log.exception("analytics service failed", extra={"ctx": {"service": name}})
-                return
-            await asyncio.to_thread(record_job_run, config, name)
+            if analytics_run_lock.locked():
+                log.info("waiting for another analytics service to finish",
+                         extra={"ctx": {"service": name}})
+            async with analytics_run_lock:
+                try:
+                    await body()
+                except Exception:
+                    log.exception("analytics service failed", extra={"ctx": {"service": name}})
+                    body_ok = False
+                else:
+                    body_ok = True
+                if tail is not None:
+                    await tail()
+            if body_ok:
+                await asyncio.to_thread(record_job_run, config, name)
 
     async def run_forecast_service() -> None:
         async def body() -> None:
@@ -388,15 +428,18 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
             await asyncio.to_thread(analytics.run_eval_job, config)
             await asyncio.to_thread(analytics.run_report_job, config)
 
-        await _run("forecast", body)
-        # Outside _run: run_publish_job never raises, and its own success/failure
-        # must not gate the forecast/eval/report age bookkeeping above -- a stalled
-        # git push should not re-trigger (and re-bill) the whole bundle hourly.
-        await asyncio.to_thread(analytics.run_publish_job, config)
-        # Same reasoning: a stalled ledger-commitment push targets a different
-        # repo (this one, not the results mirror) but must equally never gate
-        # or re-trigger the bundle above (Phase 15).
-        await asyncio.to_thread(analytics.run_ledger_commitment_job, config)
+        async def tail() -> None:
+            # run_publish_job never raises, and its own success/failure must not
+            # gate the forecast/eval/report age bookkeeping -- a stalled git push
+            # should not re-trigger (and re-bill) the whole bundle hourly. Same
+            # reasoning for the ledger-commitment push, which targets a different
+            # repo (this one, not the results mirror) but must equally never gate
+            # or re-trigger the bundle (Phase 15). `tail` gives them exactly that
+            # while keeping them inside the shared analytics mutex.
+            await asyncio.to_thread(analytics.run_publish_job, config)
+            await asyncio.to_thread(analytics.run_ledger_commitment_job, config)
+
+        await _run("forecast", body, tail=tail)
 
     async def run_shadow_service() -> None:
         await _run("shadow", lambda: asyncio.to_thread(analytics.run_shadow_job, config))
