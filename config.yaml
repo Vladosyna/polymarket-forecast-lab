@@ -401,7 +401,7 @@ venues:
 # bundle it follows on failure (e.g. no network) -- see jobs.run_publish_job.
 publish:
   enabled: true
-  results_dir: ../Polymarket-results   # sibling checkout of the private results repo
+  results_dir: /root/forecast-lab-results   # LOCAL-ONLY OVERRIDE (2026-07-10, never commit): correct absolute path for this host, ../Polymarket-results resolves wrong here
   # Raw-data backup to the private results repo (brief section 11: "the
   # historical order-book snapshots cannot be re-downloaded later"). Both
   # default OFF -- an operator who wants only the curated nightly mirror
