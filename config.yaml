@@ -252,7 +252,14 @@ schedule:
   # hold even if a job someday runs long enough to blow through this spacing.
   # (The mutex lives in collect/runner.py's _build_analytics_services, next
   # to the per-service locks it complements.)
-  forecast_cron: "0 2 * * *"    # nightly 02:00 UTC -> forecast, eval, report
+  forecast_cron: "0 2 * * *"    # nightly 02:00 UTC -> forecast, eval
+  # Weekly, not nightly, since 2026-07-28. The HTML report renders data the
+  # nightly bundle has already committed, so its freshness is an operator
+  # convenience rather than a research requirement -- while each render costs
+  # a ~834MB, ~3-minute child process on a 967MB host, and in-process it was
+  # taking the collector down with it. `lab report` stays available on demand
+  # whenever a fresher page is wanted.
+  report_cron: "0 6 * * 0"      # weekly Sunday 06:00 UTC -> render the report
   shadow_cron: "0 7 * * 0"      # weekly Sunday 07:00 UTC -> shadow portfolio (was 03:00)
   learn_cron: "0 14 1 * *"      # monthly, 1st at 14:00 UTC -> learning loop (was 04:00)
   # Disabled 2026-07-20 -- was the retry engine in a self-sustaining OOM crash

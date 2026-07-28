@@ -173,14 +173,40 @@ def test_success_is_recorded_before_the_tail_runs(tmp_path, monkeypatch):
     )
 
 
-def test_report_is_not_in_the_retriable_body():
-    """Guards the split itself: run_report_job must not sit in the path whose
-    failure marks the bundle unfinished."""
+def test_report_is_its_own_service_not_part_of_the_nightly_bundle():
+    """Guards the split: the nightly bundle writes research data, and nothing
+    in it renders. A failed render must cost a stale page, never a rebuild of
+    forecast+eval (an LLM-billed one) and never the collector."""
     import inspect
 
     from lab.collect import runner
 
+    assert "report" in runner.SERVICE_NAMES
     src = inspect.getsource(runner._build_analytics_services)
-    body_src = src.split("async def body() -> None:", 1)[1].split("async def tail()", 1)[0]
-    assert "run_forecast_job" in body_src and "run_eval_job" in body_src
-    assert "run_report_job" not in body_src, "report is back in the retriable body"
+    bundle = src.split("async def run_forecast_service", 1)[1].split("async def run_report_service", 1)[0]
+    assert "run_forecast_job" in bundle and "run_eval_job" in bundle
+    assert "run_report_job" not in bundle, "report is back inside the nightly bundle"
+
+
+def test_report_control_age_is_not_hourly():
+    """The catch-up must not re-run a failed render every hour: it is a ~834MB,
+    ~3-minute child, and retrying it buys nothing the data does not already
+    have."""
+    from lab.collect.runner import _control_max_ages
+
+    assert _control_max_ages({})["report"] >= 168
+
+
+def test_report_renders_out_of_process():
+    """The render's peak must belong to a process that exits -- in-process it
+    became the collector's own RSS, and an OOM kill took collection with it."""
+    import inspect
+
+    from lab.collect import runner
+
+    src = inspect.getsource(runner._render_report_out_of_process)
+    assert "create_subprocess_exec" in src
+    assert '"-m", "lab", "report"' in src
+    # A non-zero exit must propagate, or _run would record a success for a
+    # render that never produced a page.
+    assert "raise RuntimeError" in src

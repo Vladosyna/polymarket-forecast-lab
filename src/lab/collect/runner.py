@@ -333,7 +333,8 @@ async def run_collect(config: dict[str, Any]) -> None:
         log.info("collector stopped")
 
 
-SERVICE_NAMES = ("forecast", "shadow", "learn", "map_propose", "pmxt_verify", "paper_export")
+SERVICE_NAMES = ("forecast", "report", "shadow", "learn", "map_propose", "pmxt_verify",
+                 "paper_export")
 
 
 @dataclass
@@ -348,12 +349,48 @@ def _control_max_ages(config: dict[str, Any]) -> dict[str, float]:
     control = config.get("schedule", {}).get("control", {})
     return {
         "forecast": control.get("forecast_max_age_hours", 24),
+        # Weekly, and deliberately NOT hourly-retried: the render is a
+        # rendering of data the forecast bundle already committed, so a
+        # failed one costs a stale page. Retrying it hourly costs a 3-minute
+        # 834MB child every hour for nothing.
+        "report": control.get("report_max_age_hours", 192),
         "shadow": control.get("shadow_max_age_hours", 168),
         "learn": control.get("learn_max_age_hours", 720),
         "map_propose": control.get("map_propose_max_age_hours", 168),
         "pmxt_verify": control.get("pmxt_verify_max_age_hours", 18),
         "paper_export": control.get("paper_export_max_age_hours", 192),
     }
+
+
+async def _render_report_out_of_process(config: dict[str, Any]) -> None:
+    """Render the report in a child process.
+
+    Measured on the production host (2026-07-28): a render peaks at ~834MB and
+    runs ~178s, while the collector alone holds ~565MB -- about 1.4GB against
+    967MB of RAM. In-process that peak became the orchestrator's own RSS, and
+    when the kernel picked a victim it took collection down with it.
+
+    In a child, two things change. The peak belongs to a process that exits,
+    so the memory returns to the OS instead of staying resident in the
+    collector for the rest of the day; and an OOM kill lands on the child,
+    leaving the collector running. Raising on a non-zero exit is deliberate:
+    `_run` then declines to record a success, so the render is retried on its
+    own (weekly) control age rather than pretending it produced a page.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "lab", "report",
+        cwd=str(PROJECT_ROOT),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    out, _ = await proc.communicate()
+    tail = (out or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"report render exited {proc.returncode} (a negative code is a signal, "
+            f"e.g. -9 = OOM-killed): {' | '.join(tail)}"
+        )
+    log.info("report rendered out-of-process", extra={"ctx": {"tail": tail}})
 
 
 def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], Awaitable[None]]]:
@@ -441,28 +478,18 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
             await asyncio.to_thread(analytics.run_eval_job, config)
 
         async def tail() -> None:
-            # Steps whose failure must not re-trigger the bundle. The report is
-            # here as of 2026-07-28: it is a rendering of data already committed
-            # by body, so a failed render costs a stale HTML page, while
-            # retrying it costs a full forecast+eval rebuild -- and, at the
-            # memory this render now needs, the collector process with it.
-            # Same long-standing reasoning for the two git pushes: a stalled
+            # Steps whose failure must not re-trigger the bundle: a stalled git
             # push should not re-run (and re-bill) the whole bundle hourly, and
             # the ledger commitment targets this repo rather than the results
-            # mirror. `tail` keeps all three inside the shared analytics mutex
+            # mirror. `tail` keeps them inside the shared analytics mutex
             # without letting them gate the last-run bookkeeping.
-            # Guarded individually: unlike run_publish_job, run_report_job does
-            # raise, and a failed render must not also cost us the publish and
-            # the ledger commitment that follow it.
-            try:
-                await asyncio.to_thread(analytics.run_report_job, config)
-            except Exception:
-                log.exception("report render failed -- eval data is committed, "
-                              "the rendered page is stale")
             await asyncio.to_thread(analytics.run_publish_job, config)
             await asyncio.to_thread(analytics.run_ledger_commitment_job, config)
 
         await _run("forecast", body, tail=tail)
+
+    async def run_report_service() -> None:
+        await _run("report", lambda: _render_report_out_of_process(config))
 
     async def run_shadow_service() -> None:
         await _run("shadow", lambda: asyncio.to_thread(analytics.run_shadow_job, config))
@@ -481,6 +508,7 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
 
     return {
         "forecast": run_forecast_service,
+        "report": run_report_service,
         "shadow": run_shadow_service,
         "learn": run_learn_service,
         "map_propose": run_map_propose_service,
@@ -519,6 +547,7 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
     """Schedule forecast/eval/report, shadow, and learn on cron triggers (UTC)."""
     sched = config.get("schedule", {})
     forecast_cron = sched.get("forecast_cron", "0 2 * * *")   # nightly 02:00
+    report_cron = sched.get("report_cron", "0 6 * * 0")       # weekly Sun 06:00
     shadow_cron = sched.get("shadow_cron", "0 3 * * 0")       # weekly Sun 03:00
     learn_cron = sched.get("learn_cron", "0 4 1 * *")         # monthly 1st 04:00
     map_propose_cron = config.get("cross_venue", {}).get(
@@ -532,6 +561,14 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
 
     scheduler.add_job(services["forecast"], CronTrigger.from_crontab(forecast_cron, timezone="UTC"),
                       id="nightly", max_instances=1, coalesce=True)
+    # Weekly, not nightly, and out-of-process (see
+    # _render_report_out_of_process): the HTML report renders data the
+    # nightly bundle already committed, so its cadence is an operator
+    # convenience, not a research requirement -- while each render costs a
+    # ~834MB, ~3-minute child on a 967MB host. `lab report` stays available
+    # on demand for a fresher page at any time.
+    scheduler.add_job(services["report"], CronTrigger.from_crontab(report_cron, timezone="UTC"),
+                      id="report_weekly", max_instances=1, coalesce=True)
     scheduler.add_job(services["shadow"], CronTrigger.from_crontab(shadow_cron, timezone="UTC"),
                       id="weekly", max_instances=1, coalesce=True)
     scheduler.add_job(services["learn"], CronTrigger.from_crontab(learn_cron, timezone="UTC"),
@@ -549,7 +586,7 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
     scheduler.add_job(services["paper_export"], CronTrigger.from_crontab(paper_export_cron, timezone="UTC"),
                       id="paper_export_weekly", max_instances=1, coalesce=True)
     log.info("analytics scheduled",
-             extra={"ctx": {"nightly": forecast_cron, "weekly": shadow_cron,
+             extra={"ctx": {"nightly": forecast_cron, "report": report_cron, "weekly": shadow_cron,
                             "monthly": learn_cron, "map_propose": map_propose_cron,
                             "pmxt_verify": pmxt_verify_cron, "paper_export": paper_export_cron,
                             "control": actx.max_age_hours}})
