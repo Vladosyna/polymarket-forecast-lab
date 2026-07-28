@@ -560,6 +560,11 @@ def _pmxt_verify_prompt(poly_question: str, poly_description: str | None, kalshi
         "NOTE: a Kalshi market's title is often the broad EVENT question while the"
         " specific outcome it resolves on is identified by the ticker suffix and the"
         " outcome labels above. Judge the pair on the specific outcome, not the title alone.",
+        "NOTE: symmetrically, a Polymarket market in a negRisk set carries the whole"
+        " SET's resolution text (e.g. 'resolves to the amount of basis points changed')"
+        " while the market itself is one leg of it, named by its own question (e.g. 'No"
+        " change ...'). Judge the leg named in the question, not the set the criteria"
+        " describe.",
         "",
         f"THIRD-PARTY TOOL'S OWN VERDICT: relation_type={relation_type}, confidence={pmxt_confidence}",
     ]
