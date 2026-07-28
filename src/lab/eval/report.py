@@ -298,13 +298,34 @@ def universe_inclusion_counts(conn, days: int = 30) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _phase(name: str) -> None:
+    """Log a render phase with current RSS.
+
+    A render takes ~12 minutes on the production host and used to emit nothing
+    at all for the whole span. When it started being OOM-killed (2026-07-28,
+    after the resolution backlog drained and peak RSS reached ~815MB against
+    967MB of RAM) that silence was the main obstacle to diagnosing it -- three
+    separate hypotheses had to be measured and discarded before the real cost
+    centres were found. A phase line costs nothing and turns the next failure
+    into an attribution instead of a guess."""
+    try:
+        import psutil
+
+        rss_mb = psutil.Process().memory_info().rss / 1e6
+    except Exception:
+        rss_mb = -1.0
+    log.info("report phase", extra={"ctx": {"phase": name, "rss_mb": round(rss_mb)}})
+
+
 def render_report(conn, store, config: dict[str, Any]) -> Path:
     reports = Path(config["storage"]["reports_dir"])
     reports = reports if reports.is_absolute() else PROJECT_ROOT / reports
     reports.mkdir(parents=True, exist_ok=True)
 
+    _phase("start")
     from lab.collect.status import format_status
     health = format_status(gather_status(config))
+    _phase("status")
 
     universe_log_days = 30
     universe_exclusion_rows = universe_exclusion_counts(conn, universe_log_days)
@@ -392,6 +413,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         "skill_rps": r["rps_market"] - r["rps"],
     } for r in latest_eval_rows(conn) if r["rps"] is not None]
 
+    _phase("eval_tables")
     calibration_plot = None
     if bins_by_model:
         plot_path = plot_reliability(bins_by_model, reports / "reliability.png")
@@ -400,6 +422,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
     # Phase 17 item 4: sticky lab-wide distrust flag -- set by the nightly
     # eval job's clv_validity_check(); persists across report renders until a
     # later check (with enough data to actually re-verify) clears it.
+    _phase("calibration_plot")
     from lab.store.db import get_meta
     clv_trusted = get_meta(conn, "clv_trusted") != "0"
 
@@ -414,6 +437,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         [utc_date_str(now - timedelta(days=d)) for d in range(clv_lookback_days + 1)],
         columns=["ts", "condition_id"],
     )
+    _phase("gap_df_read")
     cadence = config["collect"]["snapshot_interval_minutes"]
     clv_gap_windows: list[tuple] = []
     for tier in ("liquid", "tail"):
@@ -422,6 +446,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         clv_gap_windows.extend(compute_gap_windows(
             gap_df, tier_ids, cadence[tier], now - timedelta(days=clv_lookback_days), now))
 
+    _phase("gap_windows")
     clv_rows = []
     clv_dropped_for_gap = 0
     clv_horizons = config["eval"]["clv_horizons_hours"]
@@ -440,6 +465,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
     for forecasts in forecasts_by_model.values():
         all_clv_dates |= clv_dates(forecasts, clv_horizons)
     clv_snapshots = store.read_range(sorted(all_clv_dates), columns=CLV_SNAPSHOT_COLUMNS)
+    _phase("clv_snapshots_read")
     for model_id in model_ids:
         clv_stats = clv_drift(forecasts_by_model[model_id], store, clv_horizons,
                               gap_windows=clv_gap_windows, snapshots=clv_snapshots)
@@ -449,6 +475,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
                 clv_rows.append({"model_id": model_id, "horizon": horizon,
                                  "n": stats["n"], "drift": stats["mean_signed_drift"]})
 
+    _phase("clv")
     from lab.eval.wealth_plots import (
         m4_attribution_snapshot,
         plot_wealth_curves,
@@ -470,6 +497,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
     # Phase 15: shadow-portfolio section -- the net-of-cost skill line
     # (brief section 8/15). Gated on any trade ever existing; portfolio_summary
     # itself is safe to call on an empty shadow_trades table (COALESCE(...,0)).
+    _phase("wealth_plots")
     from lab.shadow.portfolio import portfolio_summary as _shadow_portfolio_summary
 
     shadow_summary = _shadow_portfolio_summary(conn, store, config)
@@ -482,6 +510,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
 
     from lab.learn.postmortem import lessons_digest
 
+    _phase("shadow")
     html = Environment().from_string(TEMPLATE).render(
         generated_at=now_utc_iso(),
         lessons=lessons_digest(conn),
