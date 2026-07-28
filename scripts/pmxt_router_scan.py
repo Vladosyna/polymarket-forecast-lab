@@ -118,16 +118,26 @@ def _query_terms(config: dict) -> list[str]:
     taxonomy = load_categories()
     priority = set(config["universe"]["priority_categories"])
     terms = sorted({v for v in taxonomy.get("kalshi_series", {}).values() if v in priority})
-    # A handful of concrete seed queries per category reads better to pmxt's
-    # search than the bare category slug (e.g. "economics" alone) --
-    # adjust/extend this list based on what the first real run actually
-    # surfaces.
+    # Tuned 2026-07-28 against a real diagnostic sweep, replacing the original
+    # speculative phrases this comment used to ask someone to revisit. Measured
+    # with no updated_since filter, so the counts are the honest ceiling:
+    #
+    #   'fed rate decision'    0     'inflation'  1     'CPI'   1
+    #   'cpi inflation report' 0     'snow'       1
+    #   'gdp growth'           0     'presidential election'   20
+    #   'temperature record'   0
+    #   'hurricane landfall'   0
+    #
+    # Eleven of the twelve original phrases returned nothing at all. pmxt's
+    # search responds to short topical terms, not descriptive phrases -- 'CPI'
+    # matches where 'cpi inflation report' does not. Keep entries here SHORT;
+    # a phrase that reads well to a human is the failure mode.
     seed_queries = {
-        "economics": ["fed rate decision", "cpi inflation report", "gdp growth"],
-        "weather": ["temperature record", "hurricane landfall"],
-        "politics": ["presidential election", "senate control", "governor race"],
-        "geopolitics": ["ceasefire agreement", "central bank decision"],
-        "entertainment": ["academy awards", "box office"],
+        "economics": ["inflation", "CPI", "GDP", "fed", "rates", "jobs"],
+        "weather": ["snow", "temperature", "hurricane", "rain"],
+        "politics": ["presidential election", "senate", "governor", "election"],
+        "geopolitics": ["ceasefire", "war", "sanctions"],
+        "entertainment": ["oscars", "grammys", "box office"],
     }
     queries: list[str] = []
     for cat in terms:
@@ -263,11 +273,25 @@ def main() -> None:
                 # focused on genuinely new suggestions.
                 skipped_known += 1
                 continue
+            # Kalshi's market-level `title` is the broad EVENT question
+            # ("Who will win the next presidential election?"); the outcome it
+            # actually resolves on lives in the ticker suffix and the outcome
+            # labels ("Nikki Haley" / "Not Nikki Haley"). Sending the title
+            # alone made the downstream LLM check reject every candidate it
+            # ever saw -- correctly, on the evidence it was given (2026-07-28).
+            kalshi_outcomes = [
+                lbl for lbl in (
+                    _attr(o, "label", "name", "title")
+                    for o in (_attr(kalshi, "outcomes", default=[]) or [])
+                ) if lbl
+            ]
             candidates.append({
                 "poly_condition_id": str(poly_condition_id),
                 "poly_question": poly_question,
                 "kalshi_ticker": str(kalshi_ticker),
                 "kalshi_title": kalshi_title,
+                "kalshi_outcomes": kalshi_outcomes,
+                "kalshi_description": _attr(kalshi, "description", default=None),
                 "relation_type": "identity",
                 "confidence": float(confidence),
                 "scanned_ts": now_iso,

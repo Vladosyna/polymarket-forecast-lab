@@ -527,15 +527,43 @@ Be conservative: a wrong match is worse than a missed one."""
 
 
 def _pmxt_verify_prompt(poly_question: str, poly_description: str | None, kalshi_title: str,
-                        relation_type: str, pmxt_confidence: float) -> str:
-    return "\n".join([
+                        relation_type: str, pmxt_confidence: float,
+                        kalshi_ticker: str | None = None,
+                        kalshi_outcomes: list[str] | None = None,
+                        kalshi_description: str | None = None) -> str:
+    """Kalshi's identity is carried by the ticker and outcome labels, not the title.
+
+    Passing the title alone made this check reject everything (2026-07-28: six
+    of six, and five of five the day before). A Kalshi per-candidate market
+    like KXPRESPERSON-28-NHAL reports its market-level `title` as the generic
+    *event* question -- "Who will win the next presidential election?" -- while
+    the candidate it actually resolves on lives in the ticker suffix and in the
+    outcome labels ("Nikki Haley" / "Not Nikki Haley"). Shown only that title
+    against "Will Nikki Haley win the 2028 US Presidential Election?", the
+    verifier rightly said these are different questions: on the evidence it was
+    given, they were. The judgement was never the problem; the evidence was.
+    """
+    lines = [
         f"POLYMARKET QUESTION: {poly_question}",
         f"POLYMARKET RESOLUTION CRITERIA: {poly_description or '(none on file)'}",
         "",
         f"SUGGESTED KALSHI MATCH: {kalshi_title}",
+    ]
+    if kalshi_ticker:
+        lines.append(f"KALSHI TICKER: {kalshi_ticker}")
+    if kalshi_outcomes:
+        lines.append(f"KALSHI OUTCOMES: {' | '.join(kalshi_outcomes)}")
+    if kalshi_description:
+        lines.append(f"KALSHI RESOLUTION CRITERIA: {kalshi_description}")
+    lines += [
+        "",
+        "NOTE: a Kalshi market's title is often the broad EVENT question while the"
+        " specific outcome it resolves on is identified by the ticker suffix and the"
+        " outcome labels above. Judge the pair on the specific outcome, not the title alone.",
         "",
         f"THIRD-PARTY TOOL'S OWN VERDICT: relation_type={relation_type}, confidence={pmxt_confidence}",
-    ])
+    ]
+    return "\n".join(lines)
 
 
 def load_pmxt_candidates(path: Path | None = None) -> list[dict[str, Any]]:
@@ -594,7 +622,10 @@ def verify_pmxt_candidates(conn, config: dict[str, Any], llm,
         text, _usage = llm.complete(
             PMXT_VERIFY_SYSTEM,
             _pmxt_verify_prompt(question, description, c.get("kalshi_title", ""),
-                                c.get("relation_type", "unknown"), float(c.get("confidence", 0.0))),
+                                c.get("relation_type", "unknown"), float(c.get("confidence", 0.0)),
+                                kalshi_ticker=kalshi_ticker,
+                                kalshi_outcomes=c.get("kalshi_outcomes"),
+                                kalshi_description=c.get("kalshi_description")),
             purpose="m7_pmxt_verify",
         )
         try:

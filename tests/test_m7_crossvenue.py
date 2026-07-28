@@ -934,3 +934,43 @@ def test_run_pmxt_verify_job_commits_when_it_produces_new_proposals(config, tmp_
     log = subprocess.run(["git", "log", "--name-only", "-1"], cwd=repo, capture_output=True, text=True)
     assert "data/markets_map.yaml" in log.stdout
     assert len(load_markets_map(map_path)["proposed"]) == 1
+
+
+# --- pmxt verify prompt: Kalshi identity lives in ticker + outcomes --------
+
+def test_pmxt_prompt_carries_ticker_and_outcomes():
+    """The 2026-07-28 defect: the prompt showed only Kalshi's market-level
+    title, which for a per-candidate market is the broad EVENT question. The
+    verifier then rejected every candidate -- correctly, on that evidence.
+    Ticker and outcome labels are what actually identify the market."""
+    from lab.models.m7_crossvenue import _pmxt_verify_prompt
+
+    prompt = _pmxt_verify_prompt(
+        "Will Nikki Haley win the 2028 US Presidential Election?",
+        "Resolves YES if Haley is inaugurated in 2029.",
+        "Who will win the next presidential election?",
+        "identity", 0.95,
+        kalshi_ticker="KXPRESPERSON-28-NHAL",
+        kalshi_outcomes=["Nikki Haley", "Not Nikki Haley"],
+        kalshi_description="If Nikki Haley is the next person inaugurated...",
+    )
+
+    assert "KXPRESPERSON-28-NHAL" in prompt
+    assert "Nikki Haley" in prompt and "Not Nikki Haley" in prompt
+    assert "If Nikki Haley is the next person inaugurated" in prompt
+    # The disambiguating instruction must be present, or the title still
+    # dominates the judgement.
+    assert "ticker suffix" in prompt
+
+
+def test_pmxt_prompt_omits_absent_optional_fields():
+    """Older candidate files carry no ticker/outcomes; the prompt must stay
+    well-formed rather than emitting empty labelled sections."""
+    from lab.models.m7_crossvenue import _pmxt_verify_prompt
+
+    prompt = _pmxt_verify_prompt("Q?", None, "K title", "identity", 0.5)
+
+    assert "KALSHI TICKER:" not in prompt
+    assert "KALSHI OUTCOMES:" not in prompt
+    assert "KALSHI RESOLUTION CRITERIA:" not in prompt
+    assert "SUGGESTED KALSHI MATCH: K title" in prompt
