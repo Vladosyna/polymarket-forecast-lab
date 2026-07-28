@@ -976,3 +976,98 @@ def test_pmxt_prompt_omits_absent_optional_fields():
     assert "KALSHI OUTCOMES:" not in prompt
     assert "KALSHI RESOLUTION CRITERIA:" not in prompt
     assert "SUGGESTED KALSHI MATCH: K title" in prompt
+
+
+# --- confirmed pairs must be auditable: Kalshi metadata backfill -----------
+
+@pytest.fixture()
+def backfill_conn(tmp_path):
+    from lab.store import db as dbmod
+
+    c = dbmod.connect(tmp_path / "lab.db")
+    yield c
+    c.close()
+
+
+def test_backfill_populates_an_empty_placeholder(backfill_conn, monkeypatch):
+    """db.link_event leaves a bare placeholder for a side the venue collector
+    hasn't synced, and for confirmed pairs it never syncs them -- 24 of 26 sat
+    with question=NULL for three weeks. An empty row makes the pair
+    unauditable: there is no resolution text to compare against."""
+    from lab.models import m7_crossvenue as m7
+    from lab.store import db as dbmod
+
+    class _Market:
+        title = "Will Xavier Becerra win the California governorship?"
+        rules_primary = "If Xavier Becerra is elected..."
+        close_time = "2027-11-03T15:00:00Z"
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def market(self, ticker):
+            return _Market()
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", _Client)
+    cid = dbmod.venue_condition_id("kalshi", "KXGOVCA-26-XBEC")
+    backfill_conn.execute(
+        "INSERT INTO markets (condition_id, venue, venue_native_id, tier, active, closed) "
+        "VALUES (?, 'kalshi', 'KXGOVCA-26-XBEC', 'ignored', 0, 0)", (cid,))
+    backfill_conn.commit()
+
+    assert m7.backfill_kalshi_metadata(backfill_conn, "KXGOVCA-26-XBEC") is True
+    row = backfill_conn.execute(
+        "SELECT question, description FROM markets WHERE condition_id = ?", (cid,)).fetchone()
+    assert row["question"] == _Market.title
+    assert "Xavier Becerra is elected" in row["description"]
+
+
+def test_backfill_never_overwrites_a_collected_row(backfill_conn, monkeypatch):
+    """The venue collector is authoritative where it has run."""
+    from lab.models import m7_crossvenue as m7
+    from lab.store import db as dbmod
+
+    def _boom(*a, **k):
+        raise AssertionError("network hit despite the row already being populated")
+
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", _boom)
+    cid = dbmod.venue_condition_id("kalshi", "KXFEDDECISION-26SEP-H25")
+    backfill_conn.execute(
+        "INSERT INTO markets (condition_id, venue, venue_native_id, question, tier, active, closed) "
+        "VALUES (?, 'kalshi', 'KXFEDDECISION-26SEP-H25', 'real question', 'tail', 1, 0)", (cid,))
+    backfill_conn.commit()
+
+    assert m7.backfill_kalshi_metadata(backfill_conn, "KXFEDDECISION-26SEP-H25") is False
+    assert backfill_conn.execute(
+        "SELECT question FROM markets WHERE condition_id = ?", (cid,)
+    ).fetchone()["question"] == "real question"
+
+
+def test_backfill_failure_does_not_break_confirmation(backfill_conn, monkeypatch):
+    """Guardrail 9: a confirmation must not fail because Kalshi is briefly
+    unreachable -- the placeholder just stays empty."""
+    from lab.models import m7_crossvenue as m7
+    from lab.store import db as dbmod
+
+    class _Failing:
+        def __init__(self, *a, **k):
+            pass
+
+        async def market(self, ticker):
+            raise RuntimeError("kalshi down")
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", _Failing)
+    cid = dbmod.venue_condition_id("kalshi", "KXTEST-1")
+    backfill_conn.execute(
+        "INSERT INTO markets (condition_id, venue, venue_native_id, tier, active, closed) "
+        "VALUES (?, 'kalshi', 'KXTEST-1', 'ignored', 0, 0)", (cid,))
+    backfill_conn.commit()
+
+    assert m7.backfill_kalshi_metadata(backfill_conn, "KXTEST-1") is False
