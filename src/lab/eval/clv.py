@@ -18,22 +18,22 @@ import polars as pl
 from lab.store.snapshots import SnapshotStore, utc_date_str
 
 # condition_id -> (sorted ts strings, parallel mid values). Built once per
-# snapshot frame by `_build_mid_index` and reused across every `_mid_at` call
+# snapshot frame by `build_mid_index` and reused across every `_mid_at` call
 # against that frame -- was a fresh `df.filter(condition_id ==)` linear scan
 # per call (up to ~30k calls/report render); a report-scale frame made this
 # the single largest cost after gap_windows. See tests/test_clv.py for the
 # differential proof against the prior per-call-filter implementation.
-_MidIndex = dict[str, tuple[list[str], list[float]]]
+MidIndex = dict[str, tuple[list[str], list[float]]]
 
 
-def _build_mid_index(df: pl.DataFrame) -> _MidIndex:
+def build_mid_index(df: pl.DataFrame) -> MidIndex:
     if df.is_empty():
         return {}
     grouped = df.sort("ts").group_by("condition_id").agg([pl.col("ts"), pl.col("mid")])
     return {row["condition_id"]: (row["ts"], row["mid"]) for row in grouped.iter_rows(named=True)}
 
 
-def _mid_at(index: _MidIndex, condition_id: str, target_ts: datetime,
+def _mid_at(index: MidIndex, condition_id: str, target_ts: datetime,
             tolerance_hours: float = 3.0) -> float | None:
     entry = index.get(condition_id)
     if entry is None:
@@ -98,6 +98,7 @@ def clv_dates(forecasts: list[dict], horizons_hours: list[int]) -> set[str]:
 def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[int],
               gap_windows: list[tuple[datetime, datetime]] | None = None,
               snapshots: pl.DataFrame | None = None,
+              mid_index: "MidIndex | None" = None,
               ) -> dict[int, dict[str, float]]:
     """forecasts: rows with ts, condition_id, model_id, p_yes, p_market_at_ts.
 
@@ -113,6 +114,16 @@ def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[
     is skipped -- callers scoring many models over one window read once and
     share it (see `clv_dates`). A superset frame is fine: `_mid_at` filters by
     condition_id and ts, so extra rows are simply ignored.
+
+    `mid_index`: the sorted lookup structure `build_mid_index` derives from
+    that frame. Sharing the FRAME across models was not enough -- the index
+    was still rebuilt per call, and rebuilding it is a full sort plus group_by
+    plus per-market list materialisation over the whole frame. On the
+    production host that was 10.5 minutes of a 12-minute render (measured
+    2026-07-28: nine of the ten render phases finished in 31s, this loop took
+    the rest) and the source of its sawtooth 290MB-815MB memory profile, since
+    each rebuild allocated and freed the same large structure. Callers scoring
+    many models over one window should build it once and pass it here.
     """
     if not forecasts:
         return {}
@@ -123,12 +134,13 @@ def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
         parsed.append((f, ts))
-    if snapshots is not None:
-        df = snapshots
-    else:
-        df = store.read_range(sorted(clv_dates(forecasts, horizons_hours)),
-                              columns=CLV_SNAPSHOT_COLUMNS)
-    mid_index = _build_mid_index(df)
+    if mid_index is None:
+        if snapshots is not None:
+            df = snapshots
+        else:
+            df = store.read_range(sorted(clv_dates(forecasts, horizons_hours)),
+                                  columns=CLV_SNAPSHOT_COLUMNS)
+        mid_index = build_mid_index(df)
 
     out: dict[int, dict[str, float]] = {}
     for h in horizons_hours:
@@ -197,7 +209,7 @@ def clv_validity_check(conn, config: dict[str, Any], store: SnapshotStore) -> di
         all_dates.add(utc_date_str(ts + timedelta(hours=horizon)))
         all_dates.add(utc_date_str(ts + timedelta(hours=horizon) - timedelta(days=1)))
     df = store.read_range(sorted(all_dates), columns=CLV_SNAPSHOT_COLUMNS)
-    mid_index = _build_mid_index(df)
+    mid_index = build_mid_index(df)
 
     drifts: list[float] = []
     skills: list[float] = []

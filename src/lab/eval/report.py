@@ -14,7 +14,7 @@ from jinja2 import Environment
 from lab.collect.status import gap_windows as compute_gap_windows
 from lab.collect.status import gather_status
 from lab.eval.calibration import plot_reliability
-from lab.eval.clv import CLV_SNAPSHOT_COLUMNS, clv_dates, clv_drift
+from lab.eval.clv import CLV_SNAPSHOT_COLUMNS, build_mid_index, clv_dates, clv_drift
 from lab.eval.scoring import honesty_tier
 from lab.store.snapshots import utc_date_str
 from lab.util import PROJECT_ROOT, now_utc, now_utc_iso
@@ -466,9 +466,16 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         all_clv_dates |= clv_dates(forecasts, clv_horizons)
     clv_snapshots = store.read_range(sorted(all_clv_dates), columns=CLV_SNAPSHOT_COLUMNS)
     _phase("clv_snapshots_read")
+    # Build the lookup index ONCE for the shared frame. Passing only the frame
+    # still had every model rebuild it -- a full sort + group_by + per-market
+    # list materialisation each time -- which measured as 10.5 minutes of a
+    # 12-minute render and drove its 290MB-815MB memory sawtooth.
+    clv_mid_index = build_mid_index(clv_snapshots)
+    del clv_snapshots  # the index is what the loop reads; drop the frame
+    _phase("clv_index_built")
     for model_id in model_ids:
         clv_stats = clv_drift(forecasts_by_model[model_id], store, clv_horizons,
-                              gap_windows=clv_gap_windows, snapshots=clv_snapshots)
+                              gap_windows=clv_gap_windows, mid_index=clv_mid_index)
         for horizon, stats in clv_stats.items():
             clv_dropped_for_gap += stats.get("dropped_for_gap", 0)
             if stats["n"]:

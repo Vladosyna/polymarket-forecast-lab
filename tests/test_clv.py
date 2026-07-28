@@ -5,6 +5,8 @@ and counted, not silently treated as ordinary missing data).
 
 from __future__ import annotations
 
+import math
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,7 +15,7 @@ import polars as pl
 
 from lab.eval.clv import (
     CLV_SNAPSHOT_COLUMNS,
-    _build_mid_index,
+    build_mid_index,
     _mid_at,
     clv_dates,
     clv_drift,
@@ -76,7 +78,7 @@ def test_clv_drift_excludes_and_counts_windows_overlapping_a_gap(tmp_path):
     assert out_no_gap[24]["dropped_for_gap"] == 0
 
 
-# --- _mid_at / _build_mid_index (Phase 20 perf rewrite) --------------------
+# --- _mid_at / build_mid_index (Phase 20 perf rewrite) --------------------
 # _mid_at used to `df.filter(condition_id ==)` per call; it now looks up a
 # pre-built per-market sorted-ts index via bisect. These tests pin the exact
 # tolerance-window and closest-match semantics the docstring/investigation
@@ -88,13 +90,13 @@ def _mid_frame(rows: list[tuple[str, str, float]]) -> pl.DataFrame:
 
 
 def test_mid_at_exact_match():
-    idx = _build_mid_index(_mid_frame([("2026-07-01T12:00:00+00:00", "a", 0.4)]))
+    idx = build_mid_index(_mid_frame([("2026-07-01T12:00:00+00:00", "a", 0.4)]))
     target = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
     assert _mid_at(idx, "a", target) == 0.4
 
 
 def test_mid_at_picks_closer_of_two_candidates():
-    idx = _build_mid_index(_mid_frame([
+    idx = build_mid_index(_mid_frame([
         ("2026-07-01T10:00:00+00:00", "a", 0.3),   # 2h before target
         ("2026-07-01T12:30:00+00:00", "a", 0.7),   # 30min after target -> closer
     ]))
@@ -105,7 +107,7 @@ def test_mid_at_picks_closer_of_two_candidates():
 def test_mid_at_exact_tie_prefers_earlier_snapshot():
     """Documented, deterministic resolution of a case the prior polars-sort
     implementation left unstable/undefined (see clv.py module note)."""
-    idx = _build_mid_index(_mid_frame([
+    idx = build_mid_index(_mid_frame([
         ("2026-07-01T09:00:00+00:00", "a", 0.1),   # 3h before target
         ("2026-07-01T15:00:00+00:00", "a", 0.9),   # 3h after target -- exact tie
     ]))
@@ -114,13 +116,13 @@ def test_mid_at_exact_tie_prefers_earlier_snapshot():
 
 
 def test_mid_at_outside_tolerance_returns_none():
-    idx = _build_mid_index(_mid_frame([("2026-07-01T00:00:00+00:00", "a", 0.5)]))
+    idx = build_mid_index(_mid_frame([("2026-07-01T00:00:00+00:00", "a", 0.5)]))
     target = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
     assert _mid_at(idx, "a", target, tolerance_hours=3.0) is None
 
 
 def test_mid_at_unknown_market_returns_none():
-    idx = _build_mid_index(_mid_frame([("2026-07-01T12:00:00+00:00", "a", 0.5)]))
+    idx = build_mid_index(_mid_frame([("2026-07-01T12:00:00+00:00", "a", 0.5)]))
     assert _mid_at(idx, "does-not-exist", datetime(2026, 7, 1, 12, tzinfo=timezone.utc)) is None
 
 
@@ -141,7 +143,7 @@ def test_mid_at_matches_naive_reference_on_random_data():
             ts = base + timedelta(minutes=15 * i + rng.randint(0, 14))
             rows.append((ts.isoformat(timespec="seconds"), m, round(rng.random(), 4)))
     df = _mid_frame(rows)
-    idx = _build_mid_index(df)
+    idx = build_mid_index(df)
 
     def naive_mid_at(condition_id, target_ts, tolerance_hours=3.0):
         subset = df.filter(pl.col("condition_id") == condition_id)
@@ -290,3 +292,73 @@ def test_update_clv_trust_flag_persists_and_abstention_does_not_clear_it(tmp_pat
     assert "correlation" not in abstained
     assert get_meta(conn, "clv_trusted") == "0"
     conn.close()
+
+
+# --- index reuse across models (2026-07-28 render blow-up) -----------------
+
+def test_clv_drift_uses_a_supplied_index_without_rebuilding(monkeypatch):
+    """Sharing the snapshot FRAME across models was not enough: every
+    clv_drift call still rebuilt the index from it -- a full sort + group_by +
+    per-market list materialisation. On the production host that measured as
+    10.5 minutes of a 12-minute render and drove its 290MB-815MB memory
+    sawtooth, because each rebuild allocated and freed the same structure."""
+    import lab.eval.clv as clv_mod
+
+    df = _mid_frame([
+        ("2026-07-01T12:00:00+00:00", "a", 0.4),
+        ("2026-07-02T12:00:00+00:00", "a", 0.6),
+    ])
+    index = clv_mod.build_mid_index(df)
+
+    def _boom(_df):
+        raise AssertionError("index rebuilt despite one being supplied")
+
+    monkeypatch.setattr(clv_mod, "build_mid_index", _boom)
+
+    forecasts = [{"ts": "2026-07-01T12:00:00+00:00", "condition_id": "a",
+                  "model_id": "m0_market", "p_yes": 0.7, "p_market_at_ts": 0.4}]
+    out = clv_mod.clv_drift(forecasts, None, [24], mid_index=index)
+    assert out[24]["n"] == 1
+
+
+def test_clv_drift_still_builds_its_own_index_when_none_given():
+    """The standalone path (a single caller, no shared frame) must keep
+    working -- the parameter is an optimisation, not a new requirement."""
+    df = _mid_frame([
+        ("2026-07-01T12:00:00+00:00", "a", 0.4),
+        ("2026-07-02T12:00:00+00:00", "a", 0.6),
+    ])
+    forecasts = [{"ts": "2026-07-01T12:00:00+00:00", "condition_id": "a",
+                  "model_id": "m0_market", "p_yes": 0.7, "p_market_at_ts": 0.4}]
+    out = clv_drift(forecasts, None, [24], snapshots=df)
+    assert out[24]["n"] == 1
+
+
+def test_supplied_index_and_frame_give_identical_results():
+    """The optimisation must not change a single reported number."""
+    df = _mid_frame([
+        ("2026-07-01T12:00:00+00:00", "a", 0.40),
+        ("2026-07-02T12:00:00+00:00", "a", 0.62),
+        ("2026-07-01T12:00:00+00:00", "b", 0.30),
+        ("2026-07-02T12:00:00+00:00", "b", 0.25),
+    ])
+    forecasts = [
+        {"ts": "2026-07-01T12:00:00+00:00", "condition_id": "a",
+         "model_id": "m0_market", "p_yes": 0.7, "p_market_at_ts": 0.40},
+        {"ts": "2026-07-01T12:00:00+00:00", "condition_id": "b",
+         "model_id": "m0_market", "p_yes": 0.1, "p_market_at_ts": 0.30},
+    ]
+    via_frame = clv_drift(forecasts, None, [24, 72], snapshots=df)
+    via_index = clv_drift(forecasts, None, [24, 72], mid_index=build_mid_index(df))
+
+    assert via_frame.keys() == via_index.keys()
+    for h in via_frame:
+        a, b = via_frame[h], via_index[h]
+        assert a.keys() == b.keys()
+        for k in a:
+            # An empty horizon reports mean drift as NaN, which never compares
+            # equal to itself -- match on NaN-ness there rather than value.
+            if isinstance(a[k], float) and math.isnan(a[k]):
+                assert math.isnan(b[k]), f"{h}/{k}: NaN vs {b[k]}"
+            else:
+                assert a[k] == b[k], f"{h}/{k}: {a[k]} vs {b[k]}"
