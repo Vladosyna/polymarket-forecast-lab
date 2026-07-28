@@ -237,7 +237,985 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-07-24T11:11:33+00:00'
-proposed: []
+proposed:
+- condition_id: '0xf4a457c3a455917897fd89aa7d1cea256a8b325eded3c05c7ff771c948fbeaad'
+  question: Will inflation reach more than 4.5% in 2026?
+  venue: kalshi
+  external_id: KXHIGHINFLATION-26DEC-T4.5
+  external_question: How high will CPI get this year?
+  rationale: 'Both markets resolve to ''Yes'' if any monthly CPI YoY reading in 2026
+    exceeds 4.5%, using the same BLS data source and precision. The Polymarket question
+    specifies ''more than 4.5%'' and the Kalshi ticker explicitly targets the 4.5%
+    threshold with outcome ''Above 4.5%''. The resolution criteria are functionally
+    identical: checking monthly CPI for 2026 against the 4.5% barrier.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:46:44+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x598654e5e8ad06b44107cb541773c459580dfc208fc74e4694d1ada41d679c1d'
+  question: Will the Pittsburgh Pirates win the 2026 World Series?
+  venue: kalshi
+  external_id: KXMLB-26-PIT
+  external_question: Will Pittsburgh win the 2026 Pro Baseball Championship?
+  rationale: 'Both markets are binary outcome markets on the same event: whether the
+    Pittsburgh Pirates win the 2026 MLB World Series (Pro Baseball Championship).
+    The Polymarket question explicitly asks about the Pirates winning the 2026 World
+    Series, with resolution criteria specifying the 2026 MLB World Series winner.
+    The Kalshi market''s ticker KXMLB-26-PIT and outcome labels ''Not Pittsburgh''
+    / ''Pittsburgh'', combined with resolution criteria confirming resolution to Yes
+    if Pittsburgh wins the 2026 Pro Baseball Championship, directly align. The third-party
+    tool''s high confidence of 0.95 is appropriate given the clear match in team,
+    year, and championship. No significant discrepancies in resolution criteria or
+    definitions are present.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:46:47+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x1be0f71067ed32e0979046ce7d95db47326b95625926c8bd9bfcc868dd0cbe23'
+  question: Will Pittsburgh Pirates win the 2026 NL Central title?
+  venue: kalshi
+  external_id: KXMLBNLCENT-26-PIT
+  external_question: Will Pittsburgh be the 2026 NL Central Division Winner
+  rationale: Both markets ask whether the Pittsburgh Pirates will win the 2026 National
+    League Central division title. Polymarket's resolution criteria specify the winner
+    of that division, with tiebreakers and fallback rules. Kalshi's ticker (KXMLBNLCENT-26-PIT)
+    and outcome 'Pittsburgh' resolve to Yes if Pittsburgh is the 2026 NL Central Division
+    Winner. The event, outcome, and timing are identical. The third-party tool's high
+    confidence matches a direct reading of the market specifications.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:46:49+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x32903694997a5c09afee30904970f9fab2a5fb4ec45f572f194341185574f1a4'
+  question: Will Thomas Massie win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-TMAS
+  external_question: Who will win the next presidential election?
+  rationale: 'Both markets resolve to the same event: whether Thomas Massie will be
+    the winner of the 2028 U.S. presidential election (inaugurated in January 2029).
+    Polymarket asks directly, and Kalshi''s outcome ''Thomas Massie'' aligns with
+    the same condition. Resolution sources and criteria are consistent: Polymarket
+    uses AP, Fox, NBC calls or inauguration; Kalshi uses inauguration. The third-party
+    tool''s high confidence is corroborated.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:46:51+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x01dffa7abae7e5d9b7fb44b06d537c5ac932e2ca422ab4b53366672f5e2dc7d6'
+  question: Will Greg Abbott win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-GABB
+  external_question: Who will win the next presidential election?
+  rationale: 'Both markets resolve to ''Yes'' if Greg Abbott is the winner of the
+    2028 US presidential election and is inaugurated as President for the term beginning
+    in 2029. The Polymarket question explicitly asks if Greg Abbott wins that election,
+    and the Kalshi market''s specific outcome (ticker KXPRESPERSON-28-GABB) is labeled
+    ''Greg Abbott'' with resolution criteria that It resolves to Yes if Greg Abbott
+    is the next president inaugurated in 2029. The resolution criteria are functionally
+    identical: both depend on Abbott being the certified winner/inaugurated president
+    for the 2028 election. The third-party tool''s high confidence aligns with this.
+    No material mismatch in timing, candidate, or event is present, and both are binary
+    outcome markets on the same real-world proposition.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:46:53+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xf232b565995e4b3a3e7fa6cef775eeff1cecd20ad7c013cb9fc8dadabfe279a9'
+  question: Will Alexandria Ocasio-Cortez win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-AOCA
+  external_question: Who will win the next presidential election?
+  rationale: 'Both markets resolve to the same binary outcome: whether Alexandria
+    Ocasio-Cortez wins the 2028 US presidential election (i.e., is inaugurated as
+    president in January 2029). The Polymarket question and criteria directly address
+    this, and the Kalshi market''s specific outcome labeled ''Alexandria Ocasio-Cortez''
+    with resolution criteria referencing her being inaugurated for the term beginning
+    in 2029 matches exactly. The third-party tool''s high confidence aligns with this
+    clear identity match.'
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:46:55+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0xca0329cd4392d91e39df0702949229573d2415ae4a37b0103d0c6e9d03b8dd44'
+  question: Will Abdul El-Sayed win the 2026 Michigan Democratic Primary?
+  venue: kalshi
+  external_id: KXSENATEMID-26-AELS
+  external_question: Will Abdul El-Sayed be the Democratic nominee for the Senate
+    in Michigan?
+  rationale: 'Both markets ask whether Abdul El-Sayed will win the 2026 Michigan Democratic
+    Senate primary (Polymarket) or become the Democratic nominee for the Senate in
+    Michigan (Kalshi), which are equivalent outcomes. The resolution criteria align:
+    Polymarket resolves to ''yes'' if he wins the primary, and Kalshi resolves to
+    ''yes'' if he wins the nomination (which is the result of winning the primary).
+    Both reference the same election, candidate, party, and year. The third-party
+    tool''s high confidence is consistent with this identity match.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:46:57+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x0bde18e0a0220d1f97173850504a1ed4fa90ef2c6a7bc0932952790053ca0c0e'
+  question: Will Haley Stevens win the 2026 Michigan Democratic Primary?
+  venue: kalshi
+  external_id: KXSENATEMID-26-HSTE
+  external_question: Will Haley Stevens be the Democratic nominee for the Senate in
+    Michigan?
+  rationale: 'Both markets resolve on whether Haley Stevens wins the Democratic primary
+    for the 2026 Michigan Senate seat. The Polymarket question, resolution criteria,
+    and Kalshi outcome all specify the same event: Stevens being the Democratic nominee
+    for that Senate race. The third-party tool''s high confidence aligns with this
+    clear correspondence.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:46:59+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xeb44a06c677ce7a47e5fd2007182e020a577395dc3613ad55d3d576e33964c3d'
+  question: Will Mallory McMorrow win the 2026 Michigan Democratic Primary?
+  venue: kalshi
+  external_id: KXSENATEMID-26-MMCM
+  external_question: Will Mallory McMorrow be the Democratic nominee for the Senate
+    in Michigan?
+  rationale: "Both questions ask whether Mallory McMorrow will win the Michigan Democratic\
+    \ primary to be the Democratic nominee for the 2026 U.S. Senate election, and\
+    \ both resolution criteria specify the same standard: the winner of the Democratic\
+    \ primary for Michigan's Class II Senate seat. The Polymarket question phrases\
+    \ it as 'win the ... Primary' and the Kalshi market resolves on 'Mallory McMorrow\
+    \ wins the nomination' \u2014 these are identical outcome events. The high third-party\
+    \ confidence aligns with this clear conceptual overlap."
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:01+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x86bfb53af7250a40928975c551d12c185b762fa4ce0b40c6a64a50c946d72587'
+  question: Will the Republican Party control the Senate after the 2026 Midterm elections?
+  venue: kalshi
+  external_id: CONTROLS-2026-R
+  external_question: Will Republicans win the U.S. Senate in 2026?
+  rationale: "Both markets describe the same event: whether the Republican Party will\
+    \ control the U.S. Senate after the 2026 midterm elections. The Polymarket question\
+    \ explicitly asks about Republican control post-2026 elections, and the Kalshi\
+    \ market resolves to 'Yes' if the Republican Party wins control. The resolution\
+    \ criteria are functionally identical\u2014both rely on having a majority of Senate\
+    \ seats (or tie-breaking via Vice Presidency for Polymarket, which is standard\
+    \ for control). The minor procedural details in Polymarket's criteria (e.g., ambiguous\
+    \ outcomes resolved by Majority Leader) are consistent with standard Senate control\
+    \ definitions and do not conflict with Kalshi's simpler phrasing. No substantive\
+    \ differences exist, so a match is certain."
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:04+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x5f5cf92636c3644a6221fba15d00e8aab9d539c17a0d25d8ae8d15220cbd2cb9'
+  question: Blue tsunami in 2026?
+  venue: kalshi
+  external_id: KXBLUETSUNAMICOMBO-27FEB
+  external_question: Will Democrats hold 235 or more seats in the House after the
+    2026 midterms AND hold 51 or more seats in the Senate after the 2026 midterms?
+  rationale: Both markets resolve to 'Yes' if and only if Democrats hold at least
+    235 House seats and at least 51 Senate seats after the 2026 midterm elections.
+    The wording, outcome definitions, and resolution criteria are identical. The Kalshi
+    ticker (KXBLUETSUNAMICOMBO) confirms it is the exact same combined condition.
+    The third-party tool's identity assessment with 0.95 confidence is consistent
+    with this analysis, and I find no discrepancy.
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:06+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x307a1ed89d60b61002dd5bbf00e1408c5ed2ab3fcdb056191ca7ef9bc34d38f3'
+  question: Will the Democratic Party control the Senate after the 2026 Midterm elections?
+  venue: kalshi
+  external_id: CONTROLS-2026-D
+  external_question: Will Democrats win the U.S. Senate in 2026?
+  rationale: "Both markets resolve to 'Yes' if the Democratic Party controls the U.S.\
+    \ Senate after the 2026 elections. The Polymarket definition specifies control\
+    \ as > half of voting Senate members (or half plus Vice President), and Kalshi's\
+    \ criteria reference 'won control,' which aligns with the same standard. Both\
+    \ use the same election and post-election confirmation. There is no meaningful\
+    \ discrepancy in resolution \u2014 they describe the identical binary outcome."
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:08+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xed4fd09a24f20a3afc1d722ace811fffff3cffd9a56a3fbffc47f4d3d47a88ed'
+  question: Blue wave in 2026?
+  venue: kalshi
+  external_id: KXBLUEWAVECOMBO-27FEB
+  external_question: Will Democrats hold 218 or more seats in the House after the
+    2026 midterms AND hold 49 or more seats in the Senate after the 2026 midterms?
+  rationale: "Both markets resolve to Yes if and only if Democrats hold \u2265218\
+    \ House seats and \u226549 Senate seats after the 2026 midterms, with identical\
+    \ conditions and opposite outcomes. The Polymarket resolution criteria explicitly\
+    \ match the Kalshi criteria, and the tool's high confidence is correct."
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:10+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0x741bb46008b72234857c5118c8365ab3c2f69dbf28b30b59de04f173b8a778de'
+  question: Will Dan Sullivan win the Alaska Senate race in 2026?
+  venue: kalshi
+  external_id: KXAKSENATE-26NOV03-DSUL
+  external_question: Will Dan Sullivan win the 2026 Alaska Senate race?
+  rationale: Both markets resolve on whether Dan Sullivan wins the 2026 Alaska Senate
+    election, inclusive of run-offs. The resolution sources differ slightly but are
+    consistent in outcome; the Polymarket criteria additionally handle delayed certification
+    but do not change the core event. The ticker and outcome labels confirm alignment
+    on the same specific candidate and election.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:12+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x19d2ff72e389d190c183e6b114817301d29eba651d67d75a38ee201a05188fd9'
+  question: Will Mary Peltola win the Alaska Senate race in 2026?
+  venue: kalshi
+  external_id: KXAKSENATE-26NOV03-MPEL
+  external_question: Will Mary Peltola win the 2026 Alaska Senate race?
+  rationale: Both markets directly ask whether Mary Peltola will win the 2026 Alaska
+    Senate race, with resolution criteria that match on the same outcome (Peltola
+    winning the general election, inclusive of run-offs). The Polymarket criteria
+    specify AP, Fox News, and NBC as sources and include a fallback date, but the
+    core condition is identical. The ticker suffix and outcome labels on Kalshi confirm
+    the specific yes/no outcome. The high third-party confidence aligns with my assessment.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:15+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x2e6cabf7962e7a826926f15a86f53c4355284b7007e0d8b74dc5654e938db465'
+  question: Will Adam Schwarze be the Republican nominee for Senate in Minnesota?
+  venue: kalshi
+  external_id: KXSENATEMNR-26-ASCH
+  external_question: Will Adam Schwarze be the Republican nominee for the Senate in
+    Minnesota?
+  rationale: "Both markets resolve to the same outcome: whether Adam Schwarze becomes\
+    \ the Republican nominee for Senate in Minnesota in 2026. The Polymarket resolution\
+    \ criteria specify the winner of the Minnesota Republican Senate Primary, and\
+    \ the Kalshi criteria explicitly state 'If Adam Schwarze wins the nomination\u2026\
+    \ for the 2026 Senate Minnesota Senate seat, then the market resolves to Yes.'\
+    \ The slight difference in phrasing\u2014Polymarket's 'winner of the primary'\
+    \ vs. Kalshi's 'wins the nomination'\u2014is semantically identical. The third-party\
+    \ tool's high confidence (0.95) is well-founded, and I find no discrepancy that\
+    \ would justify rejecting the match."
+  confidence: 0.98
+  proposed_ts: '2026-07-28T12:47:17+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xb73f32c2884c65f5dae192c33bef3f7ce3faeec4ad313d2d3a6ad62ea2c95caf'
+  question: Will Alexander Vindman be the Democratic nominee for Senate in Florida?
+  venue: kalshi
+  external_id: KXSENATEFLD-26-AVIN
+  external_question: Will Alexander Vindman be the Democratic nominee for the Senate
+    in Florida?
+  rationale: "Both markets explicitly ask the exact same question: whether Alexander\
+    \ Vindman will be the Democratic nominee for Senate in Florida in 2026. The resolution\
+    \ criteria are functionally identical \u2013 both refer to winning the Democratic\
+    \ primary for the Florida Senate seat (specifically the Class III special election\
+    \ in Kalshi). Polymarket adds a fallback for no primary occurring (resolves to\
+    \ 'Other'), while Kalshi implicitly would treat that as 'Not Alexander Vindman'\
+    \ (since no nomination occurs), but this difference does not affect the core identity\
+    \ of the event. The third-party tool's high confidence aligns with my assessment.\
+    \ No material divergence exists in the described real-world event or the resolution\
+    \ conditions."
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:19+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xafab12a935c3816aee7f912b20f16f2d564a2260991fb779fa6ce49acac4a5da'
+  question: Will Michele Tafoya be the Republican nominee for Senate in Minnesota?
+  venue: kalshi
+  external_id: KXSENATEMNR-26-MTAF
+  external_question: Will Michele Tafoya be the Republican nominee for the Senate
+    in Minnesota?
+  rationale: 'Both the Polymarket question and the Kalshi market explicitly ask whether
+    Michele Tafoya will be the Republican nominee for the U.S. Senate in Minnesota
+    in 2026. The resolution criteria align: both resolve based on her winning the
+    Republican primary (or nomination) for that seat. The Polymarket criteria mention
+    a primary and credible reporting; the Kalshi criteria state ''wins the nomination
+    for the Republican Party to contest the 2026 Senate Minnesota Senate seat.'' There
+    is no substantive difference in the event or outcome definition. The only minor
+    discrepancy is the Polymarket ''Other'' fallback if no primary occurs, but that
+    does not affect the identity of the underlying question during normal conditions,
+    and Kalshi would logically resolve to ''No'' in such a scenario (since she couldn''t
+    be the nominee). This does not break the match. The third-party tool''s high confidence
+    aligns with this assessment.'
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:22+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xbfdfc3203db5e82c5f9d8c051cb620e377238116e31d4fe7f3346dec4a02b66b'
+  question: Will Jared Moskowitz be the Democratic nominee for Senate in Florida?
+  venue: kalshi
+  external_id: KXSENATEFLD-26-JM
+  external_question: Will Jared Moskowitz be the Democratic nominee for the Senate
+    in Florida?
+  rationale: "Both markets ask whether Jared Moskowitz will be the Democratic nominee\
+    \ for the U.S. Senate in Florida, specifically for the 2026 special election.\
+    \ Polymarket specifies the Democratic primary winner, and Kalshi\u2019s ticker\
+    \ and outcome labels confirm the same: 'Jared Moskowitz' winning the Democratic\
+    \ nomination for the 2026 Class III special election Florida Senate seat. The\
+    \ resolution criteria are equivalent \u2014 both rely on the primary outcome (or\
+    \ its equivalent nomination process). The only minor difference is Polymarket's\
+    \ fallback to 'Other' if no primary occurs, but Kalshi's 'Not Jared Moskowitz'\
+    \ outcome functionally covers that. The match is exact, with no substantive divergence."
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:25+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x91f7e7f2d3727a5abca7eb77827355f9a968f6636606c3f47f35ce2c23c91cbc'
+  question: Will Matt Sahr win the 2026 Michigan Democratic Primary?
+  venue: kalshi
+  external_id: KXSENATEMID-26-MSAH
+  external_question: Will Matt Sahr be the Democratic nominee for the Senate in Michigan?
+  rationale: Both markets resolve to whether Matt Sahr becomes the Democratic nominee
+    for the U.S. Senate in Michigan's 2026 election. Polymarket specifies the 'winner
+    of the Democratic Primary,' which is equivalent to the Democratic nominee. Kalshi
+    asks directly if he will be the nominee. Resolution sources differ slightly but
+    both rely on authoritative party or election announcements. The high third-party
+    confidence aligns with my assessment, and there is no substantive mismatch.
+  confidence: 0.99
+  proposed_ts: '2026-07-28T12:47:27+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x3af7fbb58a66ab5d543f964fd5dcb9f08cd393a6e03a354fe425adbd85d37c7c'
+  question: Will Julia Coleman be the Republican nominee for Senate in Minnesota?
+  venue: kalshi
+  external_id: KXSENATEMNR-26-JCOL
+  external_question: Will Julia Coleman be the Republican nominee for the Senate in
+    Minnesota?
+  rationale: 'Both markets ask the identical question about Julia Coleman becoming
+    the Republican Senate nominee in Minnesota for 2026, and their resolution criteria
+    are fully aligned: they both reference the Republican primary winner and note
+    that credible reporting can serve as resolution source. The slight wording differences
+    are immaterial. The third-party tool''s high confidence is well supported.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:29+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x80d59bfc57c5a430a8b44d2240a1baf1ec25f32681af2bef8c2d91d18394c21c'
+  question: Will David Hann be the Republican nominee for Senate in Minnesota?
+  venue: kalshi
+  external_id: KXSENATEMNR-26-DHAN
+  external_question: Will David Hann be the Republican nominee for the Senate in Minnesota?
+  rationale: 'Both markets ask the identical question about David Hann becoming the
+    Republican Senate nominee in Minnesota, reference the same event (the 2026 Minnesota
+    Republican Senate primary), and define a ''Yes'' outcome the same way. The resolution
+    criteria align: Polymarket resolves to the primary winner (or ''Other'' if no
+    primary) and Kalshi resolves to ''Yes'' if Hann wins the nomination. Despite minor
+    wording differences, the core event and resolution conditions are equivalent,
+    making this a strong match.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:31+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xd67ede2a8455cba13920d995ff5570a40146c6970e6e0a21174682c934c38d29'
+  question: Will Royce White be the Republican nominee for Senate in Minnesota?
+  venue: kalshi
+  external_id: KXSENATEMNR-26-RWHI
+  external_question: Will Royce White be the Republican nominee for the Senate in
+    Minnesota?
+  rationale: Both questions and resolution criteria identically ask whether Royce
+    White will be the Republican nominee for the Senate in Minnesota in the 2026 election.
+    The Polymarket resolution specifies the winner of the Republican primary, and
+    the Kalshi resolution states it resolves to Yes if White wins the nomination.
+    The phrasing is nearly identical, and the third-party tool's high confidence aligns
+    with my assessment. The event, participants, and outcome are the same.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:33+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xd9e428d3af0ece1d660b4e3e68f556c4a36c63aaef509c00aca5cfcbcccd984c'
+  question: Will Angie Nixon be the Democratic nominee for Senate in Florida?
+  venue: kalshi
+  external_id: KXSENATEFLD-26-ANIX
+  external_question: Will Angie Nixon be the Democratic nominee for the Senate in
+    Florida?
+  rationale: 'Both markets resolve on the same event: whether Angie Nixon will be
+    the Democratic nominee for the U.S. Senate seat in Florida in 2026. The resolution
+    criteria align on the Democratic primary winner, and the third-party tool''s high
+    confidence is consistent with the identical event description and ticker specificity.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:35+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x472a52fcd256f343c5e0c8ecc6afd074b15a7b8c0c7a8397b6e30e30564b6734'
+  question: Will Bernie endorse Dan Osborn for NE-Sen by Nov 2 2026 ET?
+  venue: kalshi
+  external_id: KXBERNIEENDORSE-26NOV03-DOSB
+  external_question: Will Bernie Sanders endorse Dan Osborn in the 2026 United States
+    Senate election in Nebraska before Nov 3, 2026?
+  rationale: Both markets ask whether Bernie Sanders will endorse Dan Osborn in the
+    2026 Nebraska Senate race. Polymarket uses 'by Nov 2 2026 ET' (day before election
+    day Nov 3 2026) and Kalshi uses 'before Nov 3, 2026'. These are functionally identical
+    given that both resolve negatively if no endorsement occurs by the deadline. The
+    candidates, office, and endorsement action match exactly. Resolution criteria
+    are consistent. Third-party tool's high confidence aligns with independent analysis.
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:37+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x9704885dedf3d624edb94829aae659f87deed3cff35369e64fba900267a9a64e'
+  question: Will Charlie Crist be the Democratic nominee for Senate in Florida?
+  venue: kalshi
+  external_id: KXSENATEFLD-26-CC
+  external_question: Will Charlie Crist be the Democratic nominee for the Senate in
+    Florida?
+  rationale: Both markets explicitly ask whether Charlie Crist will be the Democratic
+    nominee for the U.S. Senate seat in Florida in 2026, and their resolution criteria
+    align on the winner of the Democratic primary for that seat. Polymarket resolves
+    to the primary winner (or 'Other' if no primary occurs), while Kalshi resolves
+    to 'Yes' if Crist wins the nomination. The underlying event is identical, and
+    the third-party tool's high confidence is appropriate given the clear match in
+    question phrasing and outcome definitions.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:40+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xd8b94a79241263ba30e9cd7f58e88bf2a9013ce2ccdce73606916b2f53033466'
+  question: Will James Fishback be the Republican nominee for Florida Governor?
+  venue: kalshi
+  external_id: KXGOVFLNOMR-26-JFIS
+  external_question: Will James Fishback be the Republican nominee for Governor in
+    Florida?
+  rationale: Both markets explicitly ask whether James Fishback will be the Republican
+    nominee for Florida Governor, and their resolution criteria both specify that
+    a 'Yes' outcome requires his winning the 2026 Florida Republican gubernatorial
+    primary. The Polymarket criteria reference the primary date (August 18, 2026)
+    and contingency for no primary, while Kalshi similarly resolves on winning the
+    nomination. Despite minor phrasing differences, the core condition is identical.
+    The third-party tool's high confidence aligns with this assessment, and no substantive
+    mismatch exists.
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:42+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x568ef50047d16c3d071dfd22ddc06740f0d87b77769f6d9891a88490450bcc40'
+  question: Will Jay Collins be the Republican nominee for Florida Governor?
+  venue: kalshi
+  external_id: KXGOVFLNOMR-26-JCOL
+  external_question: Will Jay Collins be the Republican nominee for Governor in Florida?
+  rationale: 'Both markets ask the identical question about Jay Collins becoming the
+    Republican nominee for Florida Governor, and their resolution criteria are consistent:
+    a win in the Republican primary. The slight wording difference in the resolution
+    criteria (Polymarket mentions the primary date and source of results) does not
+    affect the event being predicted. The third-party tool''s high confidence is well-founded.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:44+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xd4a3de1964b1f3fa1edeca40dbc3ef6663a56fda84e804066c23096b615904f9'
+  question: Will Byron Donalds be the Republican nominee for Florida Governor?
+  venue: kalshi
+  external_id: KXGOVFLNOMR-26-BD
+  external_question: Will Byron Donalds be the Republican nominee for Governor in
+    Florida?
+  rationale: 'Both events ask precisely the same question: whether Byron Donalds will
+    be the Republican nominee for Florida Governor in the 2026 election. The Polymarket
+    resolution criteria reference the Republican Primary winner and the same 2026
+    Florida Governor race. The Kalshi ticker KXGOVFLNOMR-26-BD and its outcome labels
+    confirm the same specific outcome. Resolution dates and criteria are consistent,
+    and the third-party tool''s high confidence aligns with the clear identity match.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:47+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x119b6b3b744ac3239c7a71100165d254234eaecea401abde5a3d303bef21d19e'
+  question: Will Steve Hilton win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-SHIL
+  external_question: Who will win the governorship in California?
+  rationale: Both markets resolve to whether Steve Hilton wins the 2026 California
+    governorship election. The Polymarket question explicitly asks about Steve Hilton
+    winning, and the Kalshi market's specific outcome label 'Steve Hilton' matches
+    this resolution criteria. The minor difference in resolution sources and dates
+    does not affect the identity of the event.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:48+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xa5d79e71e66c9fe122f8b8b3ca6ab7a0e3048bd8508f130746944e92ed79ddf3'
+  question: Will Xavier Becerra win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-XBEC
+  external_question: Who will win the governorship in California?
+  rationale: Both markets specifically ask whether Xavier Becerra will win the 2026
+    California gubernatorial election, with identical resolution criteria (election
+    on November 3, 2026, and certification by July 31, 2027). The Kalshi ticker KXGOVCA-26-XBEC
+    confirms the specific outcome, and the Polymarket question matches exactly. The
+    third-party tool's high confidence aligns with the clear equivalence.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:50+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x00925aafdbb3fbec14b49f343eb430ddb9cc1f827e5934b5513703d13f2851de'
+  question: Will Francesca Hong win the 2026 Wisconsin Governor Democratic primary
+    election?
+  venue: kalshi
+  external_id: KXGOVWINOMD-26-FHON
+  external_question: Will Francesca Hong be the Democratic nominee for Governor in
+    Wisconsin?
+  rationale: 'Both markets resolve on the same binary outcome: whether Francesca Hong
+    wins the 2026 Wisconsin Democratic gubernatorial primary (i.e., becomes the Democratic
+    nominee). The Polymarket question explicitly asks if she will win the primary,
+    and the Kalshi question asks if she will be the nominee, which is equivalent.
+    The resolution criteria align: Polymarket uses the primary winner, and Kalshi
+    uses the nomination winner. The third-party tool''s high confidence matches a
+    straightforward identity.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:53+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x8d62f20324e9e7f1a3c663ab6aac9a2f6e7adb96c6a69ac2cea7e08a71a7f2ef'
+  question: Will Tom Steyer win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-TSTE
+  external_question: Who will win the governorship in California?
+  rationale: Both market questions and resolution criteria align precisely on the
+    specific outcome of Tom Steyer winning the 2026 California gubernatorial election.
+    The Polymarket question is explicit about Tom Steyer and the 2026 election; the
+    Kalshi market, despite a broader title, has the ticker suffix 'TSTE' and outcome
+    labels explicitly targeting Tom Steyer's victory. Resolution dates and sources
+    are consistent (November 2026 election, with conventions for delayed certification).
+    The third-party tool's high confidence of 0.95 is corroborated by direct reading
+    of both markets.
+  confidence: 0.98
+  proposed_ts: '2026-07-28T12:47:55+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x58b0474e74a03480c439d50e13dd0b75146c3596e5a475f95e70035c90cee4ca'
+  question: Will Matt Mahan win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-MMAH
+  external_question: Who will win the governorship in California?
+  rationale: Both markets resolve on whether Matt Mahan wins the 2026 California gubernatorial
+    election. Polymarket directly asks if he wins, Kalshi has outcome 'Matt Mahan'
+    vs 'Not Matt Mahan' for the same event. Resolution criteria are consistent, both
+    keyed to the 2026 election. The third-party tool's high confidence is correct.
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:47:57+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xf23716a3fdb338cdc046144994d9b451cc8d7a7a7d1d3296e4252499a2edc1f7'
+  question: Will David Crowley win the 2026 Wisconsin Governor Democratic primary
+    election?
+  venue: kalshi
+  external_id: KXGOVWINOMD-26-DCRO
+  external_question: Will David Crowley be the Democratic nominee for Governor in
+    Wisconsin?
+  rationale: Both markets ask whether David Crowley will be the Democratic primary
+    winner and therefore the Democratic nominee for Governor of Wisconsin in 2026,
+    with identical resolution criteria (the winner of the primary as officially announced).
+    The Polymarket question specifies 'win the...primary election' and the Kalshi
+    market resolves Yes if 'Crowley wins the nomination,' which is the same outcome.
+    The third-party tool's high confidence is justified.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:47:59+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x046941ddc09a5420aae85108b94bec3e1d7a3290b4144346cfc37e125282f958'
+  question: Will Rick Caruso win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-RCAR
+  external_question: Who will win the governorship in California?
+  rationale: Both markets resolve based on whether Rick Caruso wins the 2026 California
+    gubernatorial election. The Polymarket question explicitly asks about Rick Caruso
+    winning, and the Kalshi market's ticker KXGOVCA-26-RCAR and the outcome 'Rick
+    Caruso' directly match this. Resolution criteria are consistent (election results).
+    The slight confidence reduction is due to minor differences in resolution sources
+    (Polymarket lists AP, Fox, NBC; Kalshi may use canonical sources), but these are
+    not expected to diverge. High confidence in identity match.
+  confidence: 0.9
+  proposed_ts: '2026-07-28T12:48:01+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x709f7a236b27180f120a23913387e11d8bbaf2e59418dd2d9efd513276742bdf'
+  question: Will Ty Masterson win the 2026 Kansas Governor Republican primary election?
+  venue: kalshi
+  external_id: KXGOVKSNOMR-26-TM
+  external_question: Will Ty Masterson be the Republican nominee for Governor in Kansas?
+  rationale: 'Both markets address the same outcome: Ty Masterson winning the 2026
+    Kansas Republican gubernatorial primary/nomination. The Polymarket question explicitly
+    names the primary, and the Kalshi ticker and outcomes align (resolves Yes if Masterson
+    is the nominee). The resolution criteria are consistent: both rely on official
+    primary results or credible reporting. The tool''s high confidence is justified,
+    and no contradictions are present.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:03+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x555d4228698fed95802ef627c79ca8a16ff13680a7eef759311827f2c355fcf0'
+  question: Will Antonio Villaraigosa win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-AVIL
+  external_question: Who will win the governorship in California?
+  rationale: Both markets specifically ask about Antonio Villaraigosa winning the
+    2026 California gubernatorial election. The Polymarket question is exact, and
+    the Kalshi outcome 'Antonio Villaraigosa' in the same election context matches
+    perfectly. Resolution sources and timelines align (2026 election, certification
+    by mid-2027). The third-party tool's high confidence is consistent with the clear
+    identity match.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:05+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x5ff8465273252fdc32d12e91305d51133b87b5878464477141e2e6ca61b133e7'
+  question: Will Nicole Shanahan win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-NIC
+  external_question: Who will win the governorship in California?
+  rationale: Both markets resolve on the outcome 'Nicole Shanahan wins the 2026 California
+    gubernatorial election'. Polymarket's resolution criteria confirm the same event
+    (2026 California governor election) and the same candidate. Kalshi's specific
+    outcome label and ticker explicitly target Nicole Shanahan's election. The third-party
+    tool's high confidence aligns with the clear identity between the two markets.
+  confidence: 0.98
+  proposed_ts: '2026-07-28T12:48:07+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x45c0fbb37227cc6bc74b537aa1ed20c81990155f447cbaaa47514b6e90611288'
+  question: Will Scott Schwab win the 2026 Kansas Governor Republican primary election?
+  venue: kalshi
+  external_id: KXGOVKSNOMR-26-SS
+  external_question: Will Scott Schwab be the Republican nominee for Governor in Kansas?
+  rationale: 'Both markets explicitly resolve on whether Scott Schwab wins the 2026
+    Kansas Republican gubernatorial primary (Polymarket) or becomes the Republican
+    nominee for Kansas Governor (Kalshi). The outcomes are identical: the winner of
+    the primary is the nominee. The third-party tool''s high confidence is supported
+    by the aligned resolution criteria, dates, and candidate name.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:09+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x80c4071050deed492007cc230a0e8c913a876c6c54d87f0892c18a9d7517d2b2'
+  question: Will Kelda Roys win the 2026 Wisconsin Governor Democratic primary election?
+  venue: kalshi
+  external_id: KXGOVWINOMD-26-KROY
+  external_question: Will Kelda Roys be the Democratic nominee for Governor in Wisconsin?
+  rationale: 'Both markets ask whether Kelda Roys will win the Democratic primary
+    (Polymarket) / be the Democratic nominee (Kalshi) in the 2026 Wisconsin Governor
+    election. The resolution criteria are functionally identical: the Polymarket resolves
+    to the winner of the Democratic primary, and the Kalshi market resolves to Yes
+    if Roys wins the nomination. The dates and event align. The third-party tool''s
+    high confidence is well-founded.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:11+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xd482f14b4a09d5d554589e8049d4c8eb367bd5caf01c9cb6d45e058b73cf1835'
+  question: Will Philip Sarnecki win the 2026 Kansas Governor Republican primary election?
+  venue: kalshi
+  external_id: KXGOVKSNOMR-26-PS
+  external_question: Will Philip Sarnecki be the Republican nominee for Governor in
+    Kansas?
+  rationale: 'Both markets ask whether Philip Sarnecki will win the Kansas Republican
+    gubernatorial primary (Polymarket) / become the Republican nominee (Kalshi), which
+    are equivalent outcomes. Resolution criteria align: both rely on official primary
+    results. The tool''s high confidence is consistent with the clear identity match.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:14+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x6bb7b47236aafe3cde3389214c31055abaa815b7170d9c12dcbea43b8a884925'
+  question: Will Sara Rodriguez win the 2026 Wisconsin Governor Democratic primary
+    election?
+  venue: kalshi
+  external_id: KXGOVWINOMD-26-SROD
+  external_question: Will Sara Rodriguez be the Democratic nominee for Governor in
+    Wisconsin?
+  rationale: Both markets explicitly ask whether Sara Rodriguez will win the Democratic
+    primary/nomination for Governor of Wisconsin in 2026. The Polymarket question
+    specifies the primary election date and run-off possibilities, while Kalshi resolves
+    on her being the Democratic nominee. The resolution sources (official party announcement
+    or credible reporting) are consistent. The third-party tool's high confidence
+    aligns with this analysis.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:16+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xbb9450c639a6cff45852a72f736ad87bd7937bb6c32a5188951c384044db7a3e'
+  question: Will Cleitinho Azevedo win the 2026 Minas Gerais gubernatorial election?
+  venue: kalshi
+  external_id: KXMINASGOV-26OCT04-CAZE
+  external_question: Will Cleitinho Azevedo win the 2026 Minas Gerais gubernatorial
+    election?
+  rationale: 'Both markets ask exactly the same question: whether Cleitinho Azevedo
+    will win the 2026 Minas Gerais gubernatorial election. The resolution criteria
+    are consistent: Polymarket specifies the election date, interim governors excluded,
+    resolution via TSE results or credible reporting; Kalshi simply resolves to Yes
+    if he wins. The ticker and outcome labels confirm the specific outcome. The third-party
+    tool''s high confidence is justified; there is no ambiguity.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:18+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xad80f8a007ce2dad75754998cc72f162b2b2eef2c6b1017b47add4f01974a5e8'
+  question: Will Butch Ware win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-BWAR
+  external_question: Who will win the governorship in California?
+  rationale: Both markets resolve to whether Butch Ware wins the 2026 California gubernatorial
+    election, with identical resolution criteria and timing. The Polymarket question
+    directly asks about Butch Ware winning, and the Kalshi market's Yes outcome is
+    explicitly 'Butch Ware elected to the governorship'. The Kalshi title's broader
+    phrasing is clarified by the ticker and outcome labels, confirming the specific
+    outcome match. No material differences exist.
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:48:20+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x2885eec07b19eb19a7270fe529673097092e2f7e9a4b28676f41a3a1b8b708de'
+  question: Will Vicki Schmidt win the 2026 Kansas Governor Republican primary election?
+  venue: kalshi
+  external_id: KXGOVKSNOMR-26-VS
+  external_question: Will Vicki Schmidt be the Republican nominee for Governor in
+    Kansas?
+  rationale: Both markets ask whether Vicki Schmidt will win the Kansas Republican
+    gubernatorial primary/nomination, use the same candidate (Vicki Schmidt), same
+    office (Kansas Governor), same party (Republican), same election (2026 primary/nomination).
+    Polymarket resolves to the primary winner; Kalshi resolves to the nominee (which
+    is the same as primary winner, given that Kansas does not hold a separate nominating
+    convention after the primary). Resolution criteria are functionally identical,
+    referencing official results. The third-party tool's high confidence is justified;
+    no material divergence in scope or resolution source exists.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:23+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xadffc96f54f350b3655f72fe2853c81bfd705e9703f62469e6a14782ad5d4ec0'
+  question: Will Avigdor Lieberman be the next Prime Minister of Israel?
+  venue: kalshi
+  external_id: KXISRAELPM-26OCT27-ALIE
+  external_question: Will Avigdor Lieberman become Prime Minister of Israel following
+    the 2026 Israeli legislative election?
+  rationale: Both markets resolve on whether Avigdor Lieberman becomes Prime Minister
+    of Israel after the 2026 legislative election, with consistent timelines (by Oct
+    27, 2027 for Kalshi, by Dec 31, 2027 for Polymarket) and exclusion of interim/caretaker
+    PMs. The event, resolution date, and specific outcome are functionally identical.
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:48:25+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x4e4f77e7dbf4cab666e9a1943674d7ae66348e862df03ea6f44b11eb95731928'
+  question: Will the Republican Party control the House after the 2026 Midterm elections?
+  venue: kalshi
+  external_id: CONTROLH-2026-R
+  external_question: Will Republicans win the House in 2026?
+  rationale: Both markets resolve on whether the Republican Party will have more than
+    half the House seats after the 2026 U.S. House elections. The Polymarket definition
+    uses 'control' and the Kalshi resolution criteria explicitly refer to 'won control
+    of the House.' The timelines, election date (November 3, 2026), and fallback speaker-of-the-House
+    rule are consistent. No meaningful differences in resolution conditions.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:27+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x9ed0ecc8b8589e67967d44c4420944a41b6a6806419019a1581d514174eee9b1'
+  question: Will Naftali Bennett be the next Prime Minister of Israel?
+  venue: kalshi
+  external_id: KXISRAELPM-26OCT27-NBEN
+  external_question: Will Naftali Bennett become Prime Minister of Israel following
+    the 2026 Israeli legislative election?
+  rationale: 'Both markets unambiguously resolve to whether Naftali Bennett becomes
+    Prime Minister of Israel after the 2026 legislative election, with consistent
+    resolution dates (Polymarket by Dec 31, 2027; Kalshi by Oct 27, 2027) and criteria
+    (formally sworn in, excluding interim/caretaker). The slight date difference does
+    not conflict substantively: if Bennett is sworn in by Kalshi''s deadline, Polymarket
+    would also resolve identically; if sworn in after Oct 27 but before Dec 31, Polymarket
+    resolves Yes while Kalshi resolves No, but this edge case is extremely unlikely
+    given standard government formation timelines. The core event and outcome are
+    identical.'
+  confidence: 0.98
+  proposed_ts: '2026-07-28T12:48:30+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xd5d9fc47718bd553592d126b1fa5e87183d27f3936975b0c04cc0f2dec1f1bb4'
+  question: Will the Democratic Party control the House after the 2026 Midterm elections?
+  venue: kalshi
+  external_id: CONTROLH-2026-D
+  external_question: Will Democrats win the House in 2026?
+  rationale: Both markets ask whether the Democratic Party will win control of the
+    U.S. House of Representatives after the 2026 midterm elections. The Polymarket
+    resolution criteria define control as having more than half of voting members
+    and provide a fallback to the Speaker's party if results are ambiguous. The Kalshi
+    market's outcome label 'Democratic Party' and resolution criteria ('if the Democratic
+    Party has won control of the House in 2026, then the market resolves to Yes')
+    align perfectly with that event. The ticker CONTROLH-2026-D confirms the specific
+    outcome. There is no meaningful difference in the event or resolution standards;
+    both rely on official or consensus determinations. The third-party tool's high
+    confidence is consistent with this assessment.
+  confidence: 1.0
+  proposed_ts: '2026-07-28T12:48:33+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x673db99d92473e9ee854b8a0ec0cff15d156e5c33a13e1e12db7266d33fde4d3'
+  question: Will Moshe Feiglin be the next Prime Minister of Israel?
+  venue: kalshi
+  external_id: KXISRAELPM-26OCT27-MFEI
+  external_question: Will Moshe Feiglin become Prime Minister of Israel following
+    the 2026 Israeli legislative election?
+  rationale: 'Both markets ask whether Moshe Feiglin will become Prime Minister of
+    Israel after the 2026 Israeli legislative election. Their resolution criteria
+    align: both reference government formation following the 2026 election, require
+    official swearing-in, and have a deadline around October 2027. The third-party
+    tool''s high confidence is consistent with this analysis, and no material discrepancy
+    is evident.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:35+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x8cbdd0c4c6061c9e5c5a94d4a474c1880d0f2ab5ee4704a64af1e77c6d0e18d0'
+  question: Will Amir Ohana be the next Prime Minister of Israel?
+  venue: kalshi
+  external_id: KXISRAELPM-26OCT27-AOHA
+  external_question: Will Amir Ohana become Prime Minister of Israel following the
+    2026 Israeli legislative election?
+  rationale: Both markets specifically ask whether Amir Ohana will become Prime Minister
+    of Israel following the 2026 Israeli legislative election. The Polymarket resolution
+    criteria define the event as the next individual officially appointed and sworn
+    in after the 2026 election (or an early one), with interim/caretaker excluded,
+    and a deadline of Dec 31, 2027. The Kalshi criteria similarly require Ohana becoming
+    PM as a result of government formation after the 2026 election, meeting constitutional
+    requirements before Oct 27, 2027. The slight difference in the deadline (Dec 31,
+    2027 vs. Oct 27, 2027) is negligible because both cover the same post-election
+    formation window and the core event is identical. The third-party tool's high
+    confidence aligns with this assessment.
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:38+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x4bf44e9885ee8f43148458d5c9537d96c940cf48414557528358d65870131517'
+  question: Will Itamar Ben Gvir be the next Prime Minister of Israel?
+  venue: kalshi
+  external_id: KXISRAELPM-26OCT27-IGVI
+  external_question: Will Itamar Ben Gvir become Prime Minister of Israel following
+    the 2026 Israeli legislative election?
+  rationale: 'Both markets ask whether Itamar Ben Gvir will become Prime Minister
+    of Israel after the 2026 legislative election, with similar resolution criteria
+    focusing on official appointment/swearing-in following that election, and both
+    set a similar deadline (Polymarket: Dec 31, 2027; Kalshi: Oct 27, 2027). The minor
+    deadline difference does not alter the identical core event and outcome. The high
+    third-party confidence is well-supported.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:40+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xae5219cdb452fdf230b2bc579232df0085c130ce0776c23b6b29af32f9187034'
+  question: Will Tyler Glasnow win the 2026 NL Cy Young Award?
+  venue: kalshi
+  external_id: KXMLBNLCY-26-TGAS
+  external_question: Will Tyler Glasnow win NL Cy Young?
+  rationale: 'Both markets refer to the exact same event: Tyler Glasnow winning the
+    2026 National League Cy Young Award. The resolution criteria align (official MLB
+    outcome, tie-breaking rules, cancellation handling are compatible). The third-party
+    tool''s high confidence of 0.95 is consistent with the clear identity match.'
+  confidence: 0.95
+  proposed_ts: '2026-07-28T12:48:42+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
