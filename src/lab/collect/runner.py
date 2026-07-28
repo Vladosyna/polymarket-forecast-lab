@@ -417,25 +417,48 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
                     body_ok = False
                 else:
                     body_ok = True
+                # Record BEFORE the tail, not after (2026-07-28). A tail step
+                # that dies hard -- OOM-killed, not raising -- must not leave an
+                # already-finished body looking overdue, because the hourly
+                # catch-up then re-runs the whole bundle, dies in the same
+                # place, and loops. That is exactly what happened: the report
+                # render stopped fitting in memory once the resolution backlog
+                # drained (13k -> 57k resolved), and forecast+eval were rebuilt
+                # every ~3h for 28 hours without ever recording a success, each
+                # attempt taking the collector down with it.
+                if body_ok:
+                    await asyncio.to_thread(record_job_run, config, name)
                 if tail is not None:
                     await tail()
-            if body_ok:
-                await asyncio.to_thread(record_job_run, config, name)
 
     async def run_forecast_service() -> None:
         async def body() -> None:
+            # Only the steps that WRITE research data. Everything downstream of
+            # them renders or publishes what they produced, and re-running the
+            # ledger writer to recover a failed render is both pointless and
+            # (for the LLM-backed forecast step) billable.
             await asyncio.to_thread(analytics.run_forecast_job, config)
             await asyncio.to_thread(analytics.run_eval_job, config)
-            await asyncio.to_thread(analytics.run_report_job, config)
 
         async def tail() -> None:
-            # run_publish_job never raises, and its own success/failure must not
-            # gate the forecast/eval/report age bookkeeping -- a stalled git push
-            # should not re-trigger (and re-bill) the whole bundle hourly. Same
-            # reasoning for the ledger-commitment push, which targets a different
-            # repo (this one, not the results mirror) but must equally never gate
-            # or re-trigger the bundle (Phase 15). `tail` gives them exactly that
-            # while keeping them inside the shared analytics mutex.
+            # Steps whose failure must not re-trigger the bundle. The report is
+            # here as of 2026-07-28: it is a rendering of data already committed
+            # by body, so a failed render costs a stale HTML page, while
+            # retrying it costs a full forecast+eval rebuild -- and, at the
+            # memory this render now needs, the collector process with it.
+            # Same long-standing reasoning for the two git pushes: a stalled
+            # push should not re-run (and re-bill) the whole bundle hourly, and
+            # the ledger commitment targets this repo rather than the results
+            # mirror. `tail` keeps all three inside the shared analytics mutex
+            # without letting them gate the last-run bookkeeping.
+            # Guarded individually: unlike run_publish_job, run_report_job does
+            # raise, and a failed render must not also cost us the publish and
+            # the ledger commitment that follow it.
+            try:
+                await asyncio.to_thread(analytics.run_report_job, config)
+            except Exception:
+                log.exception("report render failed -- eval data is committed, "
+                              "the rendered page is stale")
             await asyncio.to_thread(analytics.run_publish_job, config)
             await asyncio.to_thread(analytics.run_ledger_commitment_job, config)
 

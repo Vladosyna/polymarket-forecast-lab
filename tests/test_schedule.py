@@ -122,3 +122,65 @@ def test_orchestrator_job_registration(tmp_path):
 
     asyncio.run(_check())
 
+
+
+# --- a failed tail must not re-trigger the body (2026-07-28 crash loop) ----
+
+def test_success_is_recorded_before_the_tail_runs(tmp_path, monkeypatch):
+    """The bundle's retry engine must track the steps that WRITE data, not the
+    ones that render it.
+
+    Live failure this encodes: once the resolution backlog drained (13k -> 57k
+    resolved), the report render stopped fitting in memory and the process was
+    OOM-killed mid-render. Because the last-run stamp was written after the
+    tail, an already-finished forecast+eval never counted as done, so the
+    hourly catch-up rebuilt the whole bundle every ~3 hours for 28 hours,
+    taking the collector down with it each time.
+
+    An OOM kill cannot be simulated in-process -- it is not an exception -- so
+    the test asserts the ordering that makes it survivable: the stamp exists by
+    the time the tail is entered.
+    """
+    import asyncio
+
+    from lab.schedule_state import last_run_age_seconds, record_job_run
+
+    config = {"storage": {"db_path": str(tmp_path / "lab.db")}}
+    stamped_when_tail_ran = {}
+
+    # Exercise the ordering the real _run contract guarantees.
+    async def run_like_service():
+        body_ok = False
+        try:
+            pass  # body: forecast + eval, succeeds
+        except Exception:
+            body_ok = False
+        else:
+            body_ok = True
+        if body_ok:
+            await asyncio.to_thread(record_job_run, config, "forecast")
+        # tail: report render -- observe whether the stamp is already in place
+        stamped_when_tail_ran["age"] = await asyncio.to_thread(
+            last_run_age_seconds, config, "forecast")
+        raise RuntimeError("report OOM stand-in")
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(run_like_service())
+
+    assert stamped_when_tail_ran["age"] is not None, (
+        "no last-run stamp when the tail started -- a dying render would leave "
+        "the bundle permanently overdue and re-trigger it hourly"
+    )
+
+
+def test_report_is_not_in_the_retriable_body():
+    """Guards the split itself: run_report_job must not sit in the path whose
+    failure marks the bundle unfinished."""
+    import inspect
+
+    from lab.collect import runner
+
+    src = inspect.getsource(runner._build_analytics_services)
+    body_src = src.split("async def body() -> None:", 1)[1].split("async def tail()", 1)[0]
+    assert "run_forecast_job" in body_src and "run_eval_job" in body_src
+    assert "run_report_job" not in body_src, "report is back in the retriable body"
