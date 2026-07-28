@@ -11,8 +11,12 @@ from typing import Any
 import numpy as np
 from jinja2 import Environment
 
-from lab.collect.status import gap_windows as compute_gap_windows
-from lab.collect.status import gather_status
+from lab.collect.status import (
+    cadence_buckets,
+    gaps_from_timestamps,
+    gather_status,
+    tier_snapshot_timestamps,
+)
 from lab.eval.calibration import plot_reliability
 from lab.eval.clv import CLV_SNAPSHOT_COLUMNS, build_mid_index, clv_dates, clv_drift
 from lab.eval.scoring import honesty_tier
@@ -430,27 +434,20 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
     # collection gap is excluded rather than silently folded into "no data".
     now = now_utc()
     clv_lookback_days = 30
-    # compute_gap_windows only inspects ts/condition_id -- project to those so a
-    # 31-day span (the single largest read in a report render) doesn't pull the
-    # order-book JSON blobs into memory on this memory-constrained host.
-    gap_df = store.read_range(
-        [utc_date_str(now - timedelta(days=d)) for d in range(clv_lookback_days + 1)],
-        columns=["ts", "condition_id"],
-    )
-    _phase("gap_df_read")
+    gap_dates = [utc_date_str(now - timedelta(days=d)) for d in range(clv_lookback_days + 1)]
     cadence = config["collect"]["snapshot_interval_minutes"]
     clv_gap_windows: list[tuple] = []
     for tier in ("liquid", "tail"):
         tier_ids = [r["condition_id"] for r in conn.execute(
             "SELECT condition_id FROM markets WHERE tier = ?", (tier,))]
-        clv_gap_windows.extend(compute_gap_windows(
-            gap_df, tier_ids, cadence[tier], now - timedelta(days=clv_lookback_days), now))
-    # Dead weight from here on, and the CLV read below is the next large
-    # allocation -- holding both frames at once is what put the render's peak
-    # at 833MB on a 967MB host (measured per-phase 2026-07-28: gap_df_read
-    # 498MB, gap_windows 692MB, clv_snapshots_read 811MB). Nothing downstream
-    # reads gap_df; only the windows derived from it.
-    del gap_df
+        # Per-day read: gap detection needs only this tier's sorted unique
+        # timestamps, so the 31-day span never exists in memory at once. It
+        # used to, at ~600MB, held right through the next large allocation.
+        seen = tier_snapshot_timestamps(store, gap_dates, tier_ids)
+        clv_gap_windows.extend(gaps_from_timestamps(
+            seen,
+            cadence_buckets(cadence[tier], now - timedelta(days=clv_lookback_days), now),
+        ))
 
     _phase("gap_windows")
     clv_rows = []

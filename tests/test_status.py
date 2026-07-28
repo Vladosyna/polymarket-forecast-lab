@@ -175,3 +175,77 @@ def test_gather_status_reports_per_venue_health(tmp_path):
     assert status["venues"]["metaculus"]["last_snapshot_age_min"] is None
     assert status["venues"]["manifold"]["markets"] == 1
     assert "last_snapshot_age_min" not in status["venues"]["manifold"]
+
+
+# --- streaming gap detection (2026-07-28 render memory) --------------------
+
+def test_streaming_gap_path_matches_the_whole_frame_path(tmp_path):
+    """The report render used to materialise a 31-day (ts, condition_id) span
+    -- ~600MB on the production host -- to derive what gap_windows actually
+    needs: this tier's sorted unique timestamps. Reading day by day must give
+    byte-identical windows, or the memory fix would have changed a reported
+    number."""
+    from datetime import datetime, timedelta, timezone
+
+    from lab.collect.status import (
+        cadence_buckets,
+        gap_windows,
+        gaps_from_timestamps,
+        tier_snapshot_timestamps,
+    )
+    from lab.store.snapshots import SnapshotStore, utc_date_str
+
+    store = SnapshotStore(tmp_path / "snapshots")
+    start = datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc)
+    end = start + timedelta(days=3)
+    rows = []
+    # Cover most 60-min buckets but deliberately leave two days with holes.
+    for hour in range(72):
+        if hour in (5, 6, 30, 31, 32, 60):
+            continue
+        ts = start + timedelta(hours=hour)
+        rows.append({"ts": ts.isoformat(timespec="seconds"), "condition_id": "0x1",
+                     "token_id_yes": "t", "best_bid": 0.4, "best_ask": 0.6,
+                     "mid": 0.5, "spread": 0.2})
+    rows.append({"ts": (start + timedelta(hours=5)).isoformat(timespec="seconds"),
+                 "condition_id": "other", "token_id_yes": "t", "best_bid": 0.4,
+                 "best_ask": 0.6, "mid": 0.5, "spread": 0.2})  # different tier
+    store.append(rows)
+
+    dates = sorted({utc_date_str(start + timedelta(hours=h)) for h in range(73)})
+    whole_frame = store.read_range(dates, columns=["ts", "condition_id"])
+
+    via_frame = gap_windows(whole_frame, ["0x1"], 60, start, end)
+    via_stream = gaps_from_timestamps(
+        tier_snapshot_timestamps(store, dates, ["0x1"]),
+        cadence_buckets(60, start, end),
+    )
+
+    assert via_stream == via_frame
+    assert via_frame, "fixture produced no gaps -- the test would prove nothing"
+
+
+def test_tier_snapshot_timestamps_filters_to_the_tier():
+    """A market outside the tier must not mask that tier's gap."""
+    from datetime import datetime, timedelta, timezone
+
+    from lab.collect.status import tier_snapshot_timestamps
+    from lab.store.snapshots import SnapshotStore, utc_date_str
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        store = SnapshotStore(d)
+        ts = datetime(2026, 7, 1, 3, 0, tzinfo=timezone.utc)
+        store.append([{"ts": ts.isoformat(timespec="seconds"), "condition_id": "other",
+                       "token_id_yes": "t", "best_bid": 0.4, "best_ask": 0.6,
+                       "mid": 0.5, "spread": 0.2}])
+        dates = [utc_date_str(ts)]
+        assert tier_snapshot_timestamps(store, dates, ["0x1"]) == []
+        assert tier_snapshot_timestamps(store, dates, ["other"]) == [
+            ts.isoformat(timespec="seconds")]
+
+
+def test_tier_snapshot_timestamps_empty_tier_is_empty():
+    from lab.collect.status import tier_snapshot_timestamps
+
+    assert tier_snapshot_timestamps(None, ["2026-07-01"], []) == []

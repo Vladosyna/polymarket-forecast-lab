@@ -49,8 +49,17 @@ def gap_windows(df: pl.DataFrame, tier_markets: list[str], cadence_minutes: int,
     # bucket_start.isoformat() and bucket_end.isoformat() once per (bucket,
     # ts) pair rather than once per bucket.
     seen_sorted = sorted(subset.get_column("ts").unique().to_list())
+    return gaps_from_timestamps(seen_sorted, all_buckets)
+
+
+def gaps_from_timestamps(
+    seen_sorted: list[str], buckets: list[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
+    """The bucket-coverage half of `gap_windows`, split out so a caller that
+    already has the tier's sorted timestamps need not hold a frame to get
+    them (see `tier_snapshot_timestamps`)."""
     gaps: list[tuple[datetime, datetime]] = []
-    for bucket_start, bucket_end in all_buckets:
+    for bucket_start, bucket_end in buckets:
         start_iso = bucket_start.isoformat(timespec="seconds")
         end_iso = bucket_end.isoformat(timespec="seconds")
         i = bisect_left(seen_sorted, start_iso)
@@ -58,6 +67,41 @@ def gap_windows(df: pl.DataFrame, tier_markets: list[str], cadence_minutes: int,
         if not covered:
             gaps.append((bucket_start, bucket_end))
     return gaps
+
+
+def cadence_buckets(cadence_minutes: int, window_start: datetime,
+                    window_end: datetime) -> list[tuple[datetime, datetime]]:
+    n_buckets = int((window_end - window_start).total_seconds() // (cadence_minutes * 60))
+    return [
+        (window_start + timedelta(minutes=i * cadence_minutes),
+         window_start + timedelta(minutes=(i + 1) * cadence_minutes))
+        for i in range(max(0, n_buckets))
+    ]
+
+
+def tier_snapshot_timestamps(store, dates: list[str], tier_markets: list[str]) -> list[str]:
+    """Sorted unique snapshot timestamps for a tier, read one partition at a time.
+
+    `gap_windows` needs nothing from a snapshot frame except this list -- a few
+    thousand strings for a month. Materialising the whole (ts, condition_id)
+    span to derive it is what made the report render's 31-day read ~600MB, and
+    holding that frame alongside the next large allocation put the render's
+    peak at 833MB on a 967MB host (measured per-phase 2026-07-28). Reading day
+    by day bounds it to one partition.
+    """
+    if not tier_markets:
+        return []
+    ids = set(tier_markets)
+    seen: set[str] = set()
+    for date in dates:
+        df = store.read_range([date], columns=["ts", "condition_id"])
+        if df.is_empty():
+            continue
+        seen.update(
+            df.filter(pl.col("condition_id").is_in(ids)).get_column("ts").unique().to_list()
+        )
+        del df
+    return sorted(seen)
 
 
 def snapshot_gaps(df: pl.DataFrame, tier_markets: list[str], cadence_minutes: int,
