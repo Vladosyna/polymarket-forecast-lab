@@ -165,11 +165,78 @@ def reject_match(data: dict[str, Any], condition_id: str, venue: str, external_i
     return True
 
 
+def backfill_kalshi_metadata(conn, ticker: str) -> bool:
+    """Fetch a confirmed Kalshi market's real question and resolution rules.
+
+    `db.link_event` deliberately upserts a bare placeholder row for a side its
+    venue's own collector hasn't synced, so the link always succeeds -- on the
+    assumption the collector fills it in later. For confirmed pairs it never
+    does: per-candidate legs and foreign elections sit outside the series the
+    Kalshi universe sync walks, so 24 of 26 confirmed counterparts still had
+    `question = NULL` three weeks on (2026-07-28).
+
+    That is not cosmetic. Auditing a pair means comparing resolution criteria,
+    and with the row empty there was nothing to compare against but the title
+    a third-party matcher supplied -- which is exactly the field that proved
+    misleading. Two genuinely wrong pairs (Steyer/Becerra, McConnell's
+    mismatched deadline) were invisible until this metadata was filled in, and
+    both were caught by Kalshi's own `rules_primary` text. Fetching it at
+    confirm time is what keeps a pair checkable.
+
+    Best-effort: returns False and leaves the placeholder alone on any failure
+    (guardrail 9 -- a confirmation must not fail because Kalshi is briefly
+    unreachable), and never overwrites a row the collector already populated.
+    """
+    import asyncio
+
+    from lab.api.http import TokenBucket
+    from lab.api.kalshi import KalshiClient
+    from lab.store import db as dbmod
+    from lab.util import now_utc_iso
+
+    cid = dbmod.venue_condition_id("kalshi", ticker)
+    row = conn.execute("SELECT question FROM markets WHERE condition_id = ?", (cid,)).fetchone()
+    if row is not None and row["question"]:
+        return False  # already synced by the collector -- leave it alone
+
+    async def _fetch():
+        client = KalshiClient(TokenBucket(rate=4, burst=8))
+        try:
+            return await client.market(ticker)
+        finally:
+            await client.aclose()
+
+    try:
+        market = asyncio.run(_fetch())
+    except Exception:
+        log.warning("m7: kalshi metadata backfill failed",
+                    extra={"ctx": {"ticker": ticker}})
+        return False
+    if market is None:
+        log.warning("m7: kalshi market not found for backfill",
+                    extra={"ctx": {"ticker": ticker}})
+        return False
+
+    conn.execute(
+        "UPDATE markets SET question = ?, description = ?, end_date_iso = ?, "
+        "last_synced_ts = ? WHERE condition_id = ?",
+        (market.title,
+         getattr(market, "rules_primary", None) or getattr(market, "subtitle", None),
+         getattr(market, "close_time", None), now_utc_iso(), cid),
+    )
+    conn.commit()
+    return True
+
+
 def link_confirmed_event(conn, condition_id: str, venue: str, external_id: str) -> str:
     """Mint (or reuse) the event_id linking a Polymarket market to a confirmed
     external venue-market (brief section 5/Phase 10: "a confirmed match
     creates an event linking >=2 venue-markets"). Best-effort title from the
-    Polymarket market's own question, if it's already synced."""
+    Polymarket market's own question, if it's already synced.
+
+    Also fills in the external side's own question/rules where the venue
+    collector won't -- see backfill_kalshi_metadata for why a placeholder left
+    empty makes the pair unauditable."""
     from lab.store import db as dbmod
 
     external_cid = dbmod.venue_condition_id(venue, external_id)
@@ -177,7 +244,10 @@ def link_confirmed_event(conn, condition_id: str, venue: str, external_id: str) 
         "SELECT question FROM markets WHERE condition_id = ?", (condition_id,)
     ).fetchone()
     title = row["question"] if row else None
-    return dbmod.link_event(conn, condition_id, external_cid, title=title)
+    event_id = dbmod.link_event(conn, condition_id, external_cid, title=title)
+    if venue == "kalshi":
+        backfill_kalshi_metadata(conn, external_id)
+    return event_id
 
 
 def _pair_horizon_bucket(end_date_iso: str | None, now: datetime) -> str | None:
