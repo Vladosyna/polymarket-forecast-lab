@@ -1,0 +1,22 @@
+{
+  "code_version": "249f29fcf72c",
+  "schema_version": "10",
+  "generated_at": "2026-07-28T05:38:22+00:00",
+  "row_count": 38882,
+  "fields": [
+    "condition_id",
+    "venue",
+    "category",
+    "tier",
+    "model_id",
+    "forecast_ts",
+    "p_yes",
+    "p_market_at_ts",
+    "spread_at_ts",
+    "resolved_ts",
+    "payout_yes",
+    "event_id",
+    "m3_randomized",
+    "m3_random_seed"
+  ]
+}
