@@ -961,6 +961,8 @@ def test_pmxt_prompt_carries_ticker_and_outcomes():
     # The disambiguating instruction must be present, or the title still
     # dominates the judgement.
     assert "ticker suffix" in prompt
+    # Mirror case: a negRisk Polymarket leg carries the whole set's criteria.
+    assert "negRisk" in prompt
 
 
 def test_pmxt_prompt_omits_absent_optional_fields():
