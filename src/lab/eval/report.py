@@ -445,6 +445,12 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
             "SELECT condition_id FROM markets WHERE tier = ?", (tier,))]
         clv_gap_windows.extend(compute_gap_windows(
             gap_df, tier_ids, cadence[tier], now - timedelta(days=clv_lookback_days), now))
+    # Dead weight from here on, and the CLV read below is the next large
+    # allocation -- holding both frames at once is what put the render's peak
+    # at 833MB on a 967MB host (measured per-phase 2026-07-28: gap_df_read
+    # 498MB, gap_windows 692MB, clv_snapshots_read 811MB). Nothing downstream
+    # reads gap_df; only the windows derived from it.
+    del gap_df
 
     _phase("gap_windows")
     clv_rows = []
