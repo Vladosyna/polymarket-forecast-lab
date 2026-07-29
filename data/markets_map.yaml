@@ -807,415 +807,241 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-07-28T14:05:17+00:00'
-proposed:
 - condition_id: '0x1c0408d969ca7245b8e8d671ba95e0e7062375ae185a124d1384fe5aa2608adb'
   question: Will Freddy Peralta win the 2026 NL Cy Young Award?
   venue: kalshi
   external_id: KXMLBNLCY-26-FPER
   external_question: Will Freddy Peralta win NL Cy Young?
-  rationale: 'Both markets ask whether Freddy Peralta will win the 2026 National League
-    Cy Young Award, and their resolution criteria are consistent: they both resolve
-    to ''Yes'' if Peralta wins the award, and ''No'' otherwise. The Polymarket resolution
-    includes tie-breaking and cancellation rules, but these do not conflict with the
-    Kalshi criteria. The high third-party confidence aligns with my independent assessment.'
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:01+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:18:32+00:00'
 - condition_id: '0x5244e82400ae4fb15981580bd5d6782f00ee0451c6d9b1dd04ac355f9ba76e53'
   question: Will Shohei Ohtani win the 2026 National League MVP Award?
   venue: kalshi
   external_id: KXMLBNLMVP-26-SOHT
   external_question: Will Shohei Ohtani win NL MVP?
-  rationale: 'Both markets clearly refer to the same specific event: Shohei Ohtani
-    winning the 2026 National League MVP Award. The Polymarket question and criteria
-    explicitly name this outcome, and the Kalshi market resolves to Yes if Ohtani
-    wins NL MVP in 2026. The resolution criteria are functionally identical, both
-    relying on official MLB determination. The third-party tool''s high confidence
-    aligns with this clear match.'
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:04+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:18:37+00:00'
 - condition_id: '0xefbdaf213a482fcf7d32f78a4a0965f8e41ab8bf2211a3d0a2d72ee33b894aaf'
   question: Will Jacob Misiorowski win the 2026 NL Cy Young Award?
   venue: kalshi
   external_id: KXMLBNLCY-26-JMIS
   external_question: Will Jacob Misiorowski win NL Cy Young?
-  rationale: Both markets resolve on whether Jacob Misiorowski will win the 2026 NL
-    Cy Young Award. Polymarket's resolution criteria match the official MLB winner,
-    with tiebreaker and cancellation rules. Kalshi's resolution criteria use the same
-    event and season. The third-party tool's high confidence aligns with the straightforward
-    identity. Minor differences in tiebreaker handling (alphabetical last name vs.
-    none stated) are negligible for a single player outcome; if multiple winners were
-    announced, both would logically resolve to the same winner under MLB rules.
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:06+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:18:42+00:00'
 - condition_id: '0x4cde2a38666140f5914b53c6699f82b0ab6b25c784969a025b9208f35dcd7a2d'
   question: Will Paul Skenes win the 2026 NL Cy Young Award?
   venue: kalshi
   external_id: KXMLBNLCY-26-PSKE
   external_question: Will Paul Skenes win NL Cy Young?
-  rationale: Both markets ask whether Paul Skenes will win the 2026 National League
-    Cy Young Award, with resolution criteria referencing the official MLB award winner.
-    The small difference in wording (Polymarket includes tie-breaking and cancellation
-    rules) is procedural and does not alter the core identity of the event. The third-party
-    tool's high confidence is justified.
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:09+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:18:50+00:00'
 - condition_id: '0x4b4e6b825a309efcd9b73984a991070e57b5c2874f0f49a6b2d0e5a25f7eacd3'
   question: Will Ben Rice win the 2026 American League MVP Award?
   venue: kalshi
   external_id: KXMLBALMVP-26-BRIC
   external_question: Will Ben Rice win AL MVP?
-  rationale: 'Both markets clearly ask whether Ben Rice will win the 2026 AL MVP.
-    The Polymarket question is direct and the Kalshi ticker explicitly targets the
-    same outcome (''BRIC'' = Ben Rice). Resolution criteria are consistent: Polymarket
-    uses ''Other'' for cancellation or no winner; Kalshi implicitly does the same
-    via its two-outcome structure (Yes/No). No substantive conflict exists. The third-party
-    tool''s high confidence (0.95) further supports alignment.'
-  confidence: 0.97
-  proposed_ts: '2026-07-28T21:00:11+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:18:55+00:00'
 - condition_id: '0x960f934d7f76dda986cbbb596190c67bbca2f2f20f181667b49dccdefcbf6e3a'
   question: Will JJ Wetherholt win the 2026 NL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBNLROTY-26-JWET
   external_question: Will JJ Wetherholt win NL ROTY?
-  rationale: Both markets specifically ask whether JJ Wetherholt will win the 2026
-    National League Rookie of the Year award, and their resolution criteria align
-    on the same event and timeframe. The slight wording differences are negligible,
-    and the third-party tool's high confidence is consistent with the clear identity
-    match.
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:13+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:00+00:00'
 - condition_id: '0xadcaa4e67d620dddaf25517d745e99ada18b3a907431985e6b1c788dda9415d1'
   question: Will Zack Wheeler win the 2026 NL Cy Young Award?
   venue: kalshi
   external_id: KXMLBNLCY-26-ZWHE
   external_question: Will Zack Wheeler win NL Cy Young?
-  rationale: 'Both markets ask the exact same yes/no question about whether Zack Wheeler
-    will win the 2026 National League Cy Young Award. The resolution criteria are
-    consistent: both rely on MLB''s official determination of the winner. The Kalshi
-    outcome ''Not Zack Wheeler'' is equivalent to Polymarket resolving to ''Other''
-    or not to Wheeler. No material differences exist in the event, season, or winning
-    condition.'
-  confidence: 1.0
-  proposed_ts: '2026-07-28T21:00:15+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+  confirmed_ts: '2026-07-29T10:19:04+00:00'
 - condition_id: '0x2d09f4a36f91aee3561c9af8fcbce20a70e413522fafb17f4da78292574ed381'
   question: Will Bryce Eldridge win the 2026 NL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBNLROTY-26-BELD
   external_question: Will Bryce Eldridge win NL ROTY?
-  rationale: Both markets explicitly resolve to 'Yes' if Bryce Eldridge wins the 2026
-    National League Rookie of the Year award, and to 'No' otherwise, using official
-    MLB results. The resolution text on Polymarket matches the Kalshi ticker and outcome
-    labels exactly, including tiebreaker and cancellation rules aligning with standard
-    ROTY resolution. The third-party identity classification at 0.95 confidence is
-    appropriate; no conflicting details found.
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:17+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:11+00:00'
 - condition_id: '0x50ec8a76ed2ef0513fd3b38d410e372900416ecc3ddcd8f450047f778a23ea94'
   question: Will Yoshinobu Yamamoto win the 2026 NL Cy Young Award?
   venue: kalshi
   external_id: KXMLBNLCY-26-YYAM
   external_question: Will Yoshinobu Yamamoto win NL Cy Young?
-  rationale: Both markets ask the same binary question about Yoshinobu Yamamoto winning
-    the 2026 National League Cy Young Award. The Polymarket resolution criteria specify
-    the NL Cy Young Award winner and handle ties and cancellations, while the Kalshi
-    criteria straightforwardly resolve to 'Yes' if he wins the NL Cy Young in 2026.
-    The slight differences in wording (e.g., 'Pro Baseball National League Cy Young'
-    vs. 'NL Cy Young Award') are standard variations for the same award. The third-party
-    tool's high confidence aligns with my assessment.
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:19+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:16+00:00'
 - condition_id: '0x6fe9f26e476b3db70ddda41e130dae8afe499cb78ef247daaf3336217366ebde'
   question: Don Cheadle as James Rhodes / War Machine?
   venue: kalshi
   external_id: KXROLEINPRODUCTIONDOOMSDAY-DON
   external_question: 'Will Don Cheadle perform as James Rhodes / War Machine in Avengers:
     Doomsday?'
-  rationale: 'Both markets resolve on whether Don Cheadle will portray James Rhodes
-    / War Machine in the film Avengers: Doomsday. The Polymarket explicitly asks that
-    question and its resolution criteria align with the same condition, while Kalshi''s
-    specific outcome (suffix and labels) is ''Don Cheadle as James Rhodes / War Machine?''
-    with nearly identical resolution text. The minor wording difference (''perform''
-    vs ''appear'') does not affect the substantive event or resolution. The third-party
-    tool''s high confidence matches my own independent judgment.'
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:22+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:23+00:00'
 - condition_id: '0xff1e63f197af4d9a2d6d30947ebd71c277a28fa9dfaa7dbbdcc0cf3d3b2f186a'
   question: Will Cam Schlittler win the 2026 AL Cy Young Award?
   venue: kalshi
   external_id: KXMLBALCY-26-CSCH
   external_question: Will Cam Schlittler win AL Cy Young?
-  rationale: Both markets clearly ask whether Cam Schlittler will win the 2026 AL
-    Cy Young Award. The Polymarket resolution criteria specify the AL Cy Young Award
-    winner, and the Kalshi resolution criteria explicitly states 'If Cam Schlittler
-    wins the Pro Baseball American League Cy Young in the 2026 season'. The outcomes
-    are binary and identical (yes/no or winner/other). The slight difference in phrasing
-    ('win the 2026 AL Cy Young Award' vs 'win AL Cy Young') is trivial and refers
-    to the same real-world event. The proposed match is highly reliable.
-  confidence: 0.98
-  proposed_ts: '2026-07-28T21:00:24+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:26+00:00'
 - condition_id: '0xa4e5f3afad90296ba5984e43078bea6da167545105eeb29797780b23f074df34'
   question: Will Cristopher Sanchez win the 2026 NL Cy Young Award?
   venue: kalshi
   external_id: KXMLBNLCY-26-CSAN
   external_question: Will Cristopher Sanchez win NL Cy Young?
-  rationale: 'Both markets ask whether Cristopher Sanchez will win the 2026 NL Cy
-    Young Award and resolve identically: the Kalshi market explicitly resolves to
-    Yes if Sanchez wins the 2026 NL Cy Young, and the Polymarket market resolves to
-    the player who wins that award, with Sanchez being the named subject. The resolution
-    criteria align on the same event and the same outcome (Sanchez winning), and the
-    small procedural differences regarding ties or cancellations do not affect the
-    core identity of the event.'
-  confidence: 1.0
-  proposed_ts: '2026-07-28T21:00:27+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+  confirmed_ts: '2026-07-29T10:19:28+00:00'
 - condition_id: '0x29663a900121eee8d9a969a3edb7f8649d5e58f16af2684f01dd877f5ab5fc2d'
   question: Will Kevin McGonigle win the 2026 AL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBALROTY-26-KMCG
   external_question: Will Kevin McGonigle win AL ROTY?
-  rationale: Both platforms ask whether Kevin McGonigle will win the 2026 American
-    League Rookie of the Year award. The Polymarket question explicitly names the
-    award and season, and its resolution criteria confirm it resolves to the AL ROY
-    winner, with tiebreaker falling to alphabetical order (which would still be McGonigle
-    if tied). The Kalshi market resolves to Yes if McGonigle wins the AL Rookie of
-    the Year in the 2026 season, exactly matching the condition. The player, award,
-    league, and season are identical. There is no ambiguity or discrepancy in outcome
-    definition.
-  confidence: 1.0
-  proposed_ts: '2026-07-28T21:00:30+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:30+00:00'
 - condition_id: '0x77f3245af5c8ce72dedf0575e096ab97c9cb5721e610dc3806b69b21bf1e3b6b'
   question: Will Tarik Skubal win the 2026 AL Cy Young Award?
   venue: kalshi
   external_id: KXMLBALCY-26-TSKU
   external_question: Will Tarik Skubal win AL Cy Young?
-  rationale: Both markets clearly and specifically ask whether Tarik Skubal will win
-    the 2026 American League Cy Young Award. The Polymarket resolution criteria confirm
-    the same award and season, with a tiebreaker alphabetically and a fallback for
-    canceled seasons. The Kalshi market resolves to 'Yes' if Skubal wins the same
-    award in the same season. The slight difference in fallback handling (e.g., alphabetical
-    tiebreaker vs. potential ambiguity) does not affect the core identity of the event.
-    The third-party tool's high confidence is well-founded.
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:32+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:31+00:00'
 - condition_id: '0x68c7e3aafd5f70550455e4025f14793ed2e3631686dfb6e1111f9400cc7e2a6f'
   question: Will Sal Stewart win the 2026 NL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBNLROTY-26-SSTE
   external_question: Will Sal Stewart win NL ROTY?
-  rationale: Both markets ask whether Sal Stewart will win the 2026 National League
-    Rookie of the Year award. The Polymarket question and resolution criteria match
-    the Kalshi ticker/outcome (KXMLBNLROTY-26-SSTE, 'Sal Stewart'). Resolution sources
-    and tiebreaker rules are consistent; the minor difference in tie-breaking (alphabetical
-    last name vs. not specified for Kalshi) is unlikely to affect a single-player
-    binary outcome. The third-party tool's confidence aligns with this assessment.
-  confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:35+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:33+00:00'
 - condition_id: '0x81f0581f13aa4e7b7d913df45f66752c92be4067a0a852c5f9dad60cc92d30a2'
   question: Will Yordan Alvarez win the 2026 American League MVP Award?
   venue: kalshi
   external_id: KXMLBALMVP-26-YALV
   external_question: "Will Yordan \xC1lvarez win AL MVP?"
-  rationale: "Both markets ask whether Yordan Alvarez will win the 2026 AL MVP award.\
-    \ The Polymarket question and criteria specifically refer to the 2026 American\
-    \ League Most Valuable Player Award, with a tiebreaker rule that does not conflict\
-    \ with the Kalshi 'Yes/No' outcome (both resolve to 'Yes' if Alvarez is the sole\
-    \ winner; the tiebreaker only affects rare ties). Resolution sources are compatible\
-    \ (MLB official info). The Kalshi title and ticker explicitly target Yordan \xC1\
-    lvarez winning AL MVP in 2026. The third-party tool's identity match with confidence\
-    \ 1.0 is correct."
-  confidence: 1.0
-  proposed_ts: '2026-07-28T21:00:38+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+  confirmed_ts: '2026-07-29T10:19:35+00:00'
 - condition_id: '0x43990f2943e63fff7fa48826d1abef25b69b9e5e2d6da59309c459c76ce22da9'
   question: Will Bobby Witt Jr. win the 2026 American League MVP Award?
   venue: kalshi
   external_id: KXMLBALMVP-26-RWIT
   external_question: Will Bobby Witt Jr. win AL MVP?
-  rationale: Both markets explicitly ask whether Bobby Witt Jr. will win the 2026
-    AL MVP award. Polymarket's resolution criteria refer to the official MLB winner
-    with a tiebreaker, and Kalshi's resolution states 'If Bobby Witt Jr. wins... the
-    market resolves to Yes.' The underlying event and outcome conditions are identical.
-    Slight difference in tiebreaker handling (Polymarket specifies alphabetical tiebreaker)
-    does not affect the core binary outcome. High confidence due to clear identity
-    in subject, player, season, award, and binary resolution.
-  confidence: 0.98
-  proposed_ts: '2026-07-28T21:00:40+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:36+00:00'
 - condition_id: '0xf76c4091366b114bb6969b98015e5ca8c3490e5b39e3a80539d2d478fab47933'
   question: Will Kazuma Okamoto win the 2026 AL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBALROTY-26-KOKA
   external_question: Will Kazuma Okamoto win AL ROTY?
-  rationale: 'Both Polymarket and Kalshi markets ask whether Kazuma Okamoto will win
-    the 2026 American League Rookie of the Year award, and the resolution criteria
-    align: they both reference the official MLB winner for the 2026 season. The small
-    textual differences (e.g., handling of ties in Polymarket criteria) do not create
-    a substantive conflict. The third-party tool''s high confidence (0.95) is consistent
-    with an identity match.'
-  confidence: 1.0
-  proposed_ts: '2026-07-28T21:00:43+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:38+00:00'
 - condition_id: '0x03a35ed9f0fbf82b2f9bf8d069366e0ad6e4942e7de6e22ca11e01384e37fbd5'
   question: Will Nolan McLean win the 2026 NL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBNLROTY-26-NMCL
   external_question: Will Nolan McLean win NL ROTY?
-  rationale: 'Both markets ask whether Nolan McLean will win the 2026 National League
-    Rookie of the Year award, and their resolution criteria align: both use the official
-    MLB winner for the 2026 season, with identical handling of ties and cancellation.
-    There are no material differences in the event or outcome being predicted.'
-  confidence: 1.0
-  proposed_ts: '2026-07-28T21:00:45+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:40+00:00'
 - condition_id: '0xc1c30becf85027a3fad693fe00aed610c574220f32fabef52c1ac53f76153622'
   question: Will Sarah Anthony win the 2026 Michigan Democratic Primary?
   venue: kalshi
   external_id: KXSENATEMID-26-SANT
   external_question: Will Sarah Anthony be the Democratic nominee for the Senate in
     Michigan?
-  rationale: 'Both markets resolve on whether Sarah Anthony wins the Democratic primary
-    for the 2026 Michigan Senate seat. The Polymarket question explicitly names the
-    primary, and the Kalshi criteria match that: ''wins the nomination for the Democratic
-    Party to contest the 2026 Class II Michigan Senate seat.'' The slight wording
-    difference (''primary winner'' vs. ''nominee'') is semantically identical. Resolution
-    sources are similar, and no contradictory conditions exist. Third-party confidence
-    is high, and independent review confirms no mismatch.'
-  confidence: 1.0
-  proposed_ts: '2026-07-28T21:00:47+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:42+00:00'
 - condition_id: '0x1586e33dc57b17433d080829870d73631a146b24d44d73817634c9f7171f84c3'
   question: Will Rashida Tlaib win the 2026 Michigan Democratic Primary?
   venue: kalshi
   external_id: KXSENATEMID-26-RTLA
   external_question: Will Rashida Tlaib be the Democratic nominee for the Senate in
     Michigan?
-  rationale: 'Both markets ask the same question: whether Rashida Tlaib will win the
-    2026 Michigan Democratic Senate primary. The Polymarket question explicitly targets
-    the Senate primary, and the Kalshi market resolves on her winning the Democratic
-    nomination for the Class II Michigan Senate seat. Resolution criteria align on
-    using official Democratic party results or credible news consensus. The high confidence
-    reflects the near-exact match in event, office, candidate, and election cycle,
-    with only minor wording differences.'
-  confidence: 0.98
-  proposed_ts: '2026-07-28T21:00:50+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:43+00:00'
 - condition_id: '0xa05f081e032395b4527d964fcefb032834c81bef0e85ac533c81f66139c35af4'
   question: Will Dana Nessel win the 2026 Michigan Democratic Primary?
   venue: kalshi
   external_id: KXSENATEMID-26-DNES
   external_question: Will Dana Nessel be the Democratic nominee for the Senate in
     Michigan?
-  rationale: 'Both questions ask whether Dana Nessel will be the Democratic nominee
-    for the 2026 U.S. Senate election in Michigan, and the resolution criteria directly
-    confirm that the winning event is identical: winning the Democratic primary to
-    become the nominee for that Senate seat. The Polymarket question uses ''win the
-    2026 Michigan Democratic Primary'' with resolution clarifying it''s for U.S. Senator,
-    and Kalshi explicitly resolves to Yes if she wins the Democratic nomination for
-    the Class II Michigan Senate seat. There is no ambiguity or difference in the
-    outcome being predicted.'
-  confidence: 1.0
-  proposed_ts: '2026-07-28T21:00:52+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:47+00:00'
 - condition_id: '0xc5452a97769a9aa7a264d11bf07c7da6ff6080061d426cd7ef92abb47f6d8160'
   question: Will Kristen McDonald Rivet win the 2026 Michigan Democratic Primary?
   venue: kalshi
   external_id: KXSENATEMID-26-KMCD
   external_question: Will Kristen McDonald Rivet be the Democratic nominee for the
     Senate in Michigan?
-  rationale: Both markets ask whether Kristen McDonald Rivet will be the Democratic
-    nominee for the 2026 Michigan U.S. Senate election. Polymarket specifies winning
-    the Democratic primary; Kalshi specifies being the Democratic nominee. These are
-    the same outcome, as winning the primary is the path to becoming the nominee.
-    Resolution criteria align with credible reporting. Slight reduction in confidence
-    due to minor wording differences and potential ambiguity if primary is canceled
-    (Polymarket resolves to Other, Kalshi likely resolves No), but both are standard
-    interpretations.
-  confidence: 0.9
-  proposed_ts: '2026-07-28T21:00:55+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:51+00:00'
 - condition_id: '0x0f1843cae1fa85c263c1f8118554fcff73f8af53d58d0f9fa5283490e69a7d94'
   question: Will Mandela Barnes win the 2026 Wisconsin Governor Democratic primary
     election?
@@ -1223,14 +1049,86 @@ proposed:
   external_id: KXGOVWINOMD-26-MBAR
   external_question: Will Mandela Barnes be the Democratic nominee for Governor in
     Wisconsin?
-  rationale: 'Both markets resolve on whether Mandela Barnes wins the Democratic primary/nomination
-    for the 2026 Wisconsin gubernatorial election. The Polymarket question directly
-    asks about winning the primary, while Kalshi''s specific outcome is about being
-    the Democratic nominee (which is equivalent to winning the primary). Resolution
-    criteria are consistent: both rely on official primary results, and the timing
-    (August 11, 2026) matches. The third-party tool''s high confidence is appropriate.'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-29T10:19:53+00:00'
+proposed:
+- condition_id: '0x8fc141205ebce5adf437bfdf4d0c5ff58ff24293b79c9431991346c208bb48ed'
+  question: Will Tulsi Gabbard win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-TGAB
+  external_question: Who will win the next presidential election?
+  rationale: Both markets unambiguously resolve to Yes if Tulsi Gabbard wins the 2028
+    U.S. presidential election (inaugurated as President in January 2029). The Polymarket
+    question explicitly asks whether Gabbard wins the 2028 election, and its resolution
+    criteria confirm the winner. The Kalshi market's outcome 'Tulsi Gabbard' and its
+    resolution criteria ('If Tulsi Gabbard is the next person inaugurated as President
+    for the term beginning in 2029') directly align. The Polymarket uses multiple
+    news sources, while Kalshi implicitly uses inauguration determination, but both
+    converge on the same factual event. The third-party tool's high confidence is
+    consistent with a clear identity match.
+  confidence: 0.98
+  proposed_ts: '2026-07-29T15:58:35+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xdda5fffe8bf55eb8409b9cf35a3a79b829cead72dd793f315012f2a8dcc94e7b'
+  question: Will Joel Brennan win the 2026 Wisconsin Governor Democratic primary election?
+  venue: kalshi
+  external_id: KXGOVWINOMD-26-JBRE
+  external_question: Will Joel Brennan be the Democratic nominee for Governor in Wisconsin?
+  rationale: Both markets resolve on whether Joel Brennan wins the 2026 Wisconsin
+    Democratic primary for governor, i.e., becomes the Democratic nominee. Polymarket's
+    question and criteria explicitly target winning the primary; Kalshi's outcome
+    'Joel Brennan' and criteria 'wins the nomination for the Democratic Party to contest
+    the 2026 Wisconsin Governorship' are equivalent. The third-party tool's high confidence
+    is well-founded.
   confidence: 0.95
-  proposed_ts: '2026-07-28T21:00:58+00:00'
+  proposed_ts: '2026-07-29T15:58:37+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xba8add06562a7bfd4fdd8f0a1882b5e2596540bd61c67a32359487694838f0a5'
+  question: Will Kendall Qualls win the 2026 Minnesota Governor Republican primary
+    election?
+  venue: kalshi
+  external_id: KXGOVMNNOMR-26-KQUA
+  external_question: Will Kendall Qualls be the Republican nominee for Governor in
+    Minnesota?
+  rationale: 'Both markets resolve on whether Kendall Qualls becomes the Republican
+    nominee for Governor of Minnesota in 2026, specifically via winning the primary.
+    The Polymarket question directly asks about winning the primary, and the Kalshi
+    outcome ''Kendall Qualls'' resolves to Yes if he wins the nomination through the
+    primary. The resolution criteria are aligned: Polymarket uses the primary winner,
+    and Kalshi uses winning the nomination. The slight phrasing difference (''win
+    the primary'' vs ''be the nominee'') is effectively the same event. The third-party
+    tool''s high confidence and identity relation are well-supported.'
+  confidence: 0.95
+  proposed_ts: '2026-07-29T15:58:39+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xafda84d1726c745016d74267018b34884919eb989a399a46bdd3a4968e4a6f4f'
+  question: Will Amy Klobuchar win the 2026 Minnesota Governor Democratic primary
+    election?
+  venue: kalshi
+  external_id: KXGOVMNNOMD-26-AKLO
+  external_question: Will Amy Klobuchar be the Democratic nominee for Governor in
+    Minnesota?
+  rationale: Both markets resolve on whether Amy Klobuchar wins the Democratic primary
+    for Minnesota Governor in 2026. The Polymarket question directly asks if she wins
+    the primary, and its resolution criteria confirm this. The Kalshi question asks
+    if she is the Democratic nominee, which is won by winning the primary, and its
+    outcome labels and criteria confirm the same specific outcome. There is no meaningful
+    difference in the events described; both are identity matches with high third-party
+    confidence and no contradictory elements.
+  confidence: 0.95
+  proposed_ts: '2026-07-29T15:58:42+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
