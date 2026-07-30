@@ -249,3 +249,129 @@ def test_tier_snapshot_timestamps_empty_tier_is_empty():
     from lab.collect.status import tier_snapshot_timestamps
 
     assert tier_snapshot_timestamps(None, ["2026-07-01"], []) == []
+
+
+# --- cgroup memory budget (2026-07-30 box wedge) --------------------------
+
+def _fake_systemd(monkeypatch, caps: dict, mem_total_kb: int = 967 * 1024):
+    """Stand in for systemctl + /proc/meminfo so the check is testable on any
+    host, including the Windows laptop where neither exists."""
+    import builtins
+    import subprocess as sp
+
+    from lab.collect import status as st
+
+    monkeypatch.setattr(st.shutil if hasattr(st, "shutil") else __import__("shutil"),
+                        "which", lambda _n: "/usr/bin/systemctl", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _n: "/usr/bin/systemctl")
+
+    real_open = builtins.open
+
+    def fake_open(path, *a, **k):
+        if str(path) == "/proc/meminfo":
+            import io
+            return io.StringIO(f"MemTotal:       {mem_total_kb} kB\n")
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+
+    class _Res:
+        def __init__(self, out):
+            self.stdout = out
+
+    def fake_run(cmd, **k):
+        unit = cmd[2]
+        return _Res(caps.get(unit, ""))
+
+    monkeypatch.setattr(sp, "run", fake_run)
+
+
+def test_memory_budget_flags_the_real_oversubscription(monkeypatch):
+    """THE regression case, with the exact numbers that wedged the box:
+    lab-run 900M + lab-dashboard 600M on a 967M host. Neither unit breaches
+    its own cap, so no kernel OOM ever fires -- the machine just thrashes."""
+    from lab.collect.status import memory_budget
+
+    _fake_systemd(monkeypatch, {
+        "lab-run.service": str(900 * 1024 * 1024),
+        "lab-dashboard.service": str(600 * 1024 * 1024),
+    })
+    b = memory_budget()
+    assert b is not None
+    assert b["oversubscribed"] is True
+    assert b["capped_total_bytes"] > b["physical_bytes"]
+
+
+def test_memory_budget_accepts_the_applied_fix(monkeypatch):
+    """The caps actually deployed after the incident: 700M + 200M = 900M,
+    under 967M."""
+    from lab.collect.status import memory_budget
+
+    _fake_systemd(monkeypatch, {
+        "lab-run.service": str(700 * 1024 * 1024),
+        "lab-dashboard.service": str(200 * 1024 * 1024),
+    })
+    assert memory_budget()["oversubscribed"] is False
+
+
+def test_memory_budget_treats_exact_equality_as_oversubscribed(monkeypatch):
+    """Caps summing to exactly RAM leave nothing for the kernel, sshd or
+    journald -- that is the wedge, not the safe boundary."""
+    from lab.collect.status import memory_budget
+
+    _fake_systemd(monkeypatch, {
+        "lab-run.service": str(967 * 1024 * 1024),
+        "lab-dashboard.service": "infinity",
+    })
+    assert memory_budget()["oversubscribed"] is True
+
+
+def test_memory_budget_records_uncapped_units_rather_than_counting_zero(monkeypatch):
+    """An uncapped unit contributes no bound to the sum, but pretending it
+    contributes nothing to the MACHINE would be the same blind spot again --
+    so it is named, not silently dropped."""
+    from lab.collect.status import memory_budget
+
+    _fake_systemd(monkeypatch, {
+        "lab-run.service": str(400 * 1024 * 1024),
+        "lab-dashboard.service": "infinity",
+    })
+    b = memory_budget()
+    assert b["uncapped_units"] == ["lab-dashboard.service"]
+    assert b["caps"]["lab-dashboard.service"] is None
+    assert b["capped_total_bytes"] == 400 * 1024 * 1024
+
+
+def test_memory_budget_returns_none_without_systemd(monkeypatch):
+    """The operator's laptop has no cgroups; the check must say 'not
+    applicable' rather than invent a verdict."""
+    import shutil
+
+    from lab.collect.status import memory_budget
+
+    monkeypatch.setattr(shutil, "which", lambda _n: None)
+    assert memory_budget() is None
+
+
+def test_format_status_warns_loudly_when_oversubscribed():
+    """The whole point is that it cannot be read as healthy."""
+    from lab.collect.status import format_status
+
+    gb = 1024 ** 3
+    out = format_status({
+        "ts": "2026-07-30T12:00:00+00:00",
+        "markets_by_tier": {}, "forecast_rows": 0, "resolutions": 0, "tiers": {},
+        "resolution_watcher": {"closed_unresolved": 0, "backlog": 0,
+                               "never_checked": 0, "oldest_check_age_h": None},
+        "venues": {}, "llm_spend_today_usd": 0.0, "llm_daily_cap_usd": 5.0,
+        "memory_budget": {
+            "physical_bytes": int(0.94 * gb),
+            "caps": {"lab-run.service": int(0.88 * gb),
+                     "lab-dashboard.service": int(0.59 * gb)},
+            "capped_total_bytes": int(1.47 * gb),
+            "uncapped_units": [],
+            "oversubscribed": True,
+        },
+    })
+    assert "OVERSUBSCRIBED" in out
+    assert "memory caps:" in out

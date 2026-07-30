@@ -110,6 +110,70 @@ def snapshot_gaps(df: pl.DataFrame, tier_markets: list[str], cadence_minutes: in
     return len(gap_windows(df, tier_markets, cadence_minutes, window_start, window_end))
 
 
+LAB_UNITS = ("lab-run.service", "lab-dashboard.service")
+
+
+def memory_budget(units: tuple[str, ...] = LAB_UNITS) -> dict[str, Any] | None:
+    """Per-unit cgroup memory caps against the machine's actual RAM.
+
+    Exists because of a real outage (2026-07-30): lab-run's cap was raised to
+    900M during earlier OOM work without noticing lab-dashboard already held
+    600M, on a 967M box. Neither unit ever breached its own cap, so the kernel
+    had no cgroup violation to act on and never chose an OOM victim -- it
+    simply thrashed until the host was unreachable for ~3 hours and needed a
+    manual power cycle. Snapshot history for that window is unrecoverable.
+
+    The invariant a limit cannot enforce alone: the SUM of the caps must stay
+    under physical RAM. A cap that is individually generous and collectively
+    impossible protects nothing -- it converts a recoverable per-service kill
+    (seconds, automatic) into an unrecoverable box wedge. That mistake took
+    ten days to surface; this check surfaces it on the next `lab status`.
+
+    Returns None where the question does not apply -- no systemd, no cgroup
+    accounting, or a non-Linux host (the operator's laptop) -- rather than
+    inventing a number.
+    """
+    import shutil
+    import subprocess
+
+    if not shutil.which("systemctl"):
+        return None
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            total_kb = next(
+                int(line.split()[1]) for line in f if line.startswith("MemTotal:")
+            )
+    except (OSError, StopIteration, ValueError, IndexError):
+        return None
+    total_bytes = total_kb * 1024
+
+    caps: dict[str, int | None] = {}
+    for unit in units:
+        try:
+            raw = subprocess.run(
+                ["systemctl", "show", unit, "-p", "MemoryMax", "--value"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        # "infinity" (no cap) and an empty value (unknown unit) are both
+        # "no bound to add" -- recorded as None so the caller can say which
+        # units are actually constrained rather than silently counting zero.
+        caps[unit] = int(raw) if raw.isdigit() else None
+
+    capped = {u: v for u, v in caps.items() if v is not None}
+    total_cap = sum(capped.values())
+    return {
+        "physical_bytes": total_bytes,
+        "caps": caps,
+        "capped_total_bytes": total_cap,
+        "uncapped_units": [u for u, v in caps.items() if v is None],
+        # Strictly greater: caps summing to exactly RAM already leaves nothing
+        # for the kernel, sshd or journald, so treat equality as oversubscribed.
+        "oversubscribed": total_cap >= total_bytes and bool(capped),
+    }
+
+
 def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     now = now_utc()
     conn = dbmod.connect(config["storage"]["db_path"])
@@ -180,6 +244,11 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
         """,
         (now.isoformat(timespec="seconds"),),
     ).fetchone()["n"]
+    # Infra invariant, not a data one -- but it belongs on the same screen,
+    # because the failure it catches presents as a data outage (see
+    # memory_budget's docstring).
+    out["memory_budget"] = memory_budget()
+
     out["resolution_watcher"] = {
         "closed_unresolved": conn.execute(
             """
@@ -278,5 +347,18 @@ def format_status(status: dict[str, Any]) -> str:
                 f"  [{venue}] markets={v['markets']} resolutions={v['resolutions']} "
                 f"closed_unresolved={v['closed_unresolved']} (no snapshot loop -- guardrail 16)"
             )
+    mb = status.get("memory_budget")
+    if mb:
+        gb = 1024 ** 3
+        caps = ", ".join(
+            f"{u.removesuffix('.service')}={v / gb:.2f}G" if v is not None
+            else f"{u.removesuffix('.service')}=uncapped"
+            for u, v in mb["caps"].items()
+        )
+        line = (f"  memory caps: {caps} | sum={mb['capped_total_bytes'] / gb:.2f}G "
+                f"of {mb['physical_bytes'] / gb:.2f}G RAM")
+        if mb["oversubscribed"]:
+            line += "  <-- OVERSUBSCRIBED: caps exceed RAM, a kernel OOM may never fire"
+        lines.append(line)
     lines.append(f"  LLM spend today: ${status['llm_spend_today_usd']} / cap ${status['llm_daily_cap_usd']}")
     return "\n".join(lines)
