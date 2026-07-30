@@ -1054,27 +1054,17 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-07-29T10:19:53+00:00'
-proposed:
 - condition_id: '0x8fc141205ebce5adf437bfdf4d0c5ff58ff24293b79c9431991346c208bb48ed'
   question: Will Tulsi Gabbard win the 2028 US Presidential Election?
   venue: kalshi
   external_id: KXPRESPERSON-28-TGAB
   external_question: Who will win the next presidential election?
-  rationale: Both markets unambiguously resolve to Yes if Tulsi Gabbard wins the 2028
-    U.S. presidential election (inaugurated as President in January 2029). The Polymarket
-    question explicitly asks whether Gabbard wins the 2028 election, and its resolution
-    criteria confirm the winner. The Kalshi market's outcome 'Tulsi Gabbard' and its
-    resolution criteria ('If Tulsi Gabbard is the next person inaugurated as President
-    for the term beginning in 2029') directly align. The Polymarket uses multiple
-    news sources, while Kalshi implicitly uses inauguration determination, but both
-    converge on the same factual event. The third-party tool's high confidence is
-    consistent with a clear identity match.
-  confidence: 0.98
-  proposed_ts: '2026-07-29T15:58:35+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-07-30T10:40:07+00:00'
+proposed:
 - condition_id: '0xdda5fffe8bf55eb8409b9cf35a3a79b829cead72dd793f315012f2a8dcc94e7b'
   question: Will Joel Brennan win the 2026 Wisconsin Governor Democratic primary election?
   venue: kalshi
@@ -1129,6 +1119,153 @@ proposed:
     confidence and no contradictory elements.
   confidence: 0.95
   proposed_ts: '2026-07-29T15:58:42+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x294cb485e8649a22ce12387104065729533d1b79db63b41f89ce5072429e08bf'
+  question: Will John Shulli be the Republican nominee for Senate in Delaware?
+  venue: kalshi
+  external_id: KXSENATEDER-26-JSHU
+  external_question: Will John Shulli be the Republican nominee for the Senate in
+    Delaware?
+  rationale: 'Both Polymarket and Kalshi markets ask whether John Shulli will be the
+    Republican nominee for the U.S. Senate in Delaware in 2026. The resolution criteria
+    identically define the event: winning the Republican primary nomination for the
+    2026 Delaware Senate seat. The minor phrasing differences (e.g., ''Republican
+    nominee for Senate in Delaware'' vs. ''Republican nominee for the Senate in Delaware'')
+    are semantically identical. The third-party tool''s high confidence aligns with
+    this assessment. No contradictory criteria or distinct resolution conditions are
+    present.'
+  confidence: 0.95
+  proposed_ts: '2026-07-30T15:28:21+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x7b43b562afcc2ee7e35bc22234f1ab8a35d84996a8ddcdd57a2f4842f5114e27'
+  question: Will Michael Katz be the Republican nominee for Senate in Delaware?
+  venue: kalshi
+  external_id: KXSENATEDER-26-MKAT
+  external_question: Will Michael Katz be the Republican nominee for the Senate in
+    Delaware?
+  rationale: 'Both markets specifically ask whether Michael Katz will be the Republican
+    Senate nominee for Delaware in 2026 and will resolve based on the Republican primary
+    outcome. The resolution criteria align: Polymarket uses the primary winner, Kalshi
+    uses nomination to contest the 2026 Class II seat. ''Other'' fallback on Polymarket
+    is a standard negative outcome, consistent with Kalshi''s ''Not Michael Katz''.
+    The third-party tool''s high confidence is consistent with the identical event
+    and outcome.'
+  confidence: 0.95
+  proposed_ts: '2026-07-30T15:28:23+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x1bbba3ff6e377538ecf3b96522bb80200e8e5c0b9222d3e004c59002ef362794'
+  question: Will Joey Atkins be the Democratic nominee for Senate in Florida?
+  venue: kalshi
+  external_id: KXSENATEFLD-26-JATK
+  external_question: Will Joey Atkins be the Democratic nominee for the Senate in
+    Florida?
+  rationale: "Both markets explicitly ask whether Joey Atkins will be the Democratic\
+    \ nominee for the U.S. Senate in Florida in 2026, and both resolution criteria\
+    \ define the same condition: winning the Democratic primary for that seat. The\
+    \ Polymarket criteria adds fallback for no primary (Other) which is consistent\
+    \ with a Yes/No binary in practice. The third-party tool's high confidence of\
+    \ 0.95 is plausible, and my independent review finds no discrepancy\u2014the ticker\
+    \ KXSENATEFLD-26-JATK confirms the specific nominee contest. Hence a perfect match."
+  confidence: 1.0
+  proposed_ts: '2026-07-30T15:28:25+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x2bb0a692b20324cc8c807bbc5534c448f0d6d8f7faf170960081c6884fb666fc'
+  question: Will Steve Simon be the Democratic nominee for Senate in Minnesota?
+  venue: kalshi
+  external_id: KXSENATEMND-26-SSIM
+  external_question: Will Steve Simon be the Democratic nominee for the Senate in
+    Minnesota?
+  rationale: 'Both markets explicitly ask whether Steve Simon will be the Democratic
+    Senate nominee in Minnesota for the 2026 election, and both resolution criteria
+    confirm they resolve on the winner of the Democratic primary. The criteria align:
+    Polymarket uses party announcement or credible reporting; Kalshi uses winning
+    the nomination. No material discrepancy exists. The third-party tool''s high confidence
+    is warranted.'
+  confidence: 0.95
+  proposed_ts: '2026-07-30T15:28:27+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xa875e0b4802818c2ed51fa4a44eeb303d2a11b1df946de66c0444d80468e78b6'
+  question: Will Megan Degenfelder win the 2026 Wyoming Governor Republican primary
+    election?
+  venue: kalshi
+  external_id: KXGOVWYNOMR-26-MDEG
+  external_question: Will Megan Degenfelder be the Republican nominee for Governor
+    in Wyoming?
+  rationale: Both markets unambiguously ask whether Megan Degenfelder will win the
+    2026 Wyoming Republican gubernatorial primary/nomination. The Polymarket question
+    names the primary election and the Kalshi outcome label 'Megan Degenfelder' combined
+    with its ticker suffix '-MDEG' and the resolution criteria (winning the nomination)
+    directly align. Resolution timelines (August 18, 2026 primary) and fallback conditions
+    are consistent. The third-party tool's high confidence matches my independent
+    assessment.
+  confidence: 0.95
+  proposed_ts: '2026-07-30T15:28:32+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xfb481845055afdf15febad269fcb534be4c5e79d5789b72659a036660b46e11b'
+  question: Will Eric Barlow win the 2026 Wyoming Governor Republican primary election?
+  venue: kalshi
+  external_id: KXGOVWYNOMR-26-EBAR
+  external_question: Will Eric Barlow be the Republican nominee for Governor in Wyoming?
+  rationale: Both markets resolve on whether Eric Barlow wins the 2026 Wyoming Republican
+    gubernatorial primary/nomination. Polymarket explicitly specifies the primary
+    winner (including run-offs) and Kalshi specifies the Republican nominee for Governor;
+    in Wyoming, the primary winner is the de facto nominee. The resolution criteria
+    align on the same event and outcome, with only minor wording differences.
+  confidence: 0.95
+  proposed_ts: '2026-07-30T15:28:34+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.9
+- condition_id: '0x8bb083247bc0525ae99c364b72394f3cd8e8d15bd4ed7ce08bd71079bba2bda6'
+  question: Will Cindy Holscher win the 2026 Kansas Governor Democratic primary election?
+  venue: kalshi
+  external_id: KXGOVKSNOMD-26-CH
+  external_question: Will Cindy Holscher be the Democratic nominee for Governor in
+    Kansas?
+  rationale: 'Both markets ask whether Cindy Holscher will be the Democratic nominee
+    for Governor of Kansas in the 2026 election, and the resolution criteria align:
+    Polymarket resolves to the winner of the Democratic primary (or run-off), which
+    is equivalent to being the Democratic nominee; Kalshi explicitly resolves to ''Yes''
+    if she wins the nomination. The third-party tool''s identity assessment is fully
+    supported, and any difference in phrasing (primary winner vs. nominee) describes
+    the same factual outcome.'
+  confidence: 1.0
+  proposed_ts: '2026-07-30T15:28:38+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xefe6300fd8a053cca53df8f1bd536c5f571a136392c0516e7b16e39f1addecb0'
+  question: Will JB Pritzker win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-JPRI
+  external_question: Who will win the next presidential election?
+  rationale: Both markets specifically ask whether J.B. Pritzker will win the 2028
+    U.S. presidential election. Polymarket resolves to Pritzker if he wins, Kalshi's
+    outcome 'J.B. Pritzker' resolves identically. The Kalshi ticker and outcome label
+    confirm the match despite the broad title. Resolution criteria are consistent
+    (inauguration-based with fallback). The tool's high confidence is well-founded.
+  confidence: 0.95
+  proposed_ts: '2026-07-30T15:28:40+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
