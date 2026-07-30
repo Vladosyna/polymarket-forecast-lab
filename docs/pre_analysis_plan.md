@@ -157,3 +157,24 @@ yield-bearing collateral flattens its term structure). This stratification is ex
 to the frozen primary hypotheses but is committed now, before any confirmatory data exists,
 specifically to prevent this becoming a post hoc excuse in either direction if H1 resolves cleanly
 or resolves to null.
+
+**Addendum 9.4 (2026-07-30).** H3's pre-registered external pool (§2) names Kalshi *and*
+Metaculus. Metaculus access will not be obtained: on 2026-07-29 Metaculus declined this project's
+researcher data request for recent data, offering access only to a 2023-and-earlier archive. That
+archive cannot serve a design that scores *live* community predictions against contemporaneous
+market prices as questions resolve, so the offer was not a partial fit but a non-fit. H3's realized
+external pool is therefore **Kalshi-only for the entire confirmatory window**, and the paper will
+report it as such rather than describing a two-venue pool it never had.
+
+Nothing else changes: not the claim statistic, not the honesty tiers, not the exclusion rules, not
+any hypothesis in §2. This addendum records an external constraint on realized data scope — a fact
+about what could be collected — and is deliberately *not* a revision of the analysis plan. It is
+filed under the same discipline as 9.1: a dated fact, not a specification changed after seeing how
+the data behaved.
+
+Two consequences worth stating now rather than at write-up. First, `m1_hier@metaculus` (the bare
+recalibration call that would have fed a Metaculus quote into M7) will never be exercised on live
+data; the M1.x family's realized scope is Polymarket and Kalshi. Second, M1.x's documented
+limitation — that it trains on a Polymarket-only historical bootstrap and that between-venue
+variance components are weakly identified with so few groups — stops being a caveat about a future
+state and becomes a permanent property of this study, to be stated in those terms.
