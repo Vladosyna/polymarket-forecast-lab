@@ -384,6 +384,59 @@ independently attributable and verifiable, not just push-authorized.
 | `metaculus last_snapshot_age=never` | Expected and benign by design, until at least one Metaculus pair exists in `data\markets_map.yaml`'s confirmed list | No action — there is no broad Metaculus universe sync, only confirmed-pair snapshots. |
 | "LLM spend today: $X / cap $Y" near the cap | By design (guardrail 10): M3 and the weekly M7 propose job will start skipping remaining markets for the rest of the UTC day once the cap is hit | Not an error — just fewer forecasts/proposals until the cap resets at UTC midnight. No action needed. |
 
+### Incident: cgroup limits oversubscribed, box wedged (2026-07-30)
+
+The VPS became unreachable for ~3 hours and needed a manual power cycle from
+the DigitalOcean console. Snapshot history for that window is gone.
+
+**The symptom worth recognising again:** ICMP answered normally (175 ms, 0%
+loss) while *no userspace service could be served* — HTTPS timed out, and SSH
+could not complete a TCP handshake even at a 4-minute timeout. Kernel alive,
+userspace starved. If ping works and nothing else does, do not keep retrying
+SSH; power-cycle.
+
+**No OOM kill, no restart.** The orchestrator ran continuously throughout.
+The only trace in its own log is a growing lag between the systemd timestamp
+and the application's own: 21 seconds at 07:14, **29 minutes** by 07:45. The
+system journal shows `systemd-journald` and `systemd-resolved` repeatedly
+"Under memory pressure, flushing caches" from 08:42 until the reboot.
+
+**Cause: the per-service memory caps summed to more than the machine had.**
+
+| service | MemoryMax |
+|---|---|
+| lab-run | 900 M |
+| lab-dashboard | 600 M |
+| **sum** | **1500 M** |
+| physical RAM | **967 M** |
+
+Each service could grow to its own cap without ever breaching it, while
+together they exhausted the box. With no cgroup violation to act on, the
+kernel never selected an OOM victim — it simply thrashed. The 900 M figure
+was set during the 2026-07-20 OOM work without accounting for the dashboard's
+pre-existing 600 M.
+
+The dashboard was not involved: it logged nothing during the window and holds
+~25 M; the 223 nginx hits were mostly 404 scanners.
+
+**Fix (drop-ins under `/etc/systemd/system/<unit>.service.d/memory.conf`):**
+lab-run 600 M/700 M, lab-dashboard 150 M/200 M — the caps now sum to 900 M,
+below physical RAM.
+
+**The rule this encodes:** the sum of `MemoryMax` across services must stay
+below physical RAM. A cap that is individually generous and collectively
+impossible protects nothing — it converts a recoverable per-service kill
+(seconds, automatic) into an unrecoverable box wedge (manual power cycle,
+hours of lost collection).
+
+**Consequence to watch:** lab-run's measured working set is 440–570 M, with
+excursions near 790 M during a tail sweep. At `MemoryMax=700 M` such an
+excursion will now be killed and restarted. That is the intended trade, but
+if restarts become frequent it is the signal that this box is undersized
+rather than that the cap is wrong.
+
+---
+
 ### Incident: the resolution watcher stall (2026-07-02 → 2026-07-25)
 
 Worth recording because the failure was silent, lasted three weeks, and the
