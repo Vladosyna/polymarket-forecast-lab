@@ -1270,6 +1270,175 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xcb5be7398b6e371840d461a4b8900d5640f390599af6b45b1b24d011195fd6aa'
+  question: Will Corbin Carroll win the 2026 National League MVP Award?
+  venue: kalshi
+  external_id: KXMLBNLMVP-26-CCAR
+  external_question: Will Corbin Carroll win NL MVP?
+  rationale: Both markets specifically ask whether Corbin Carroll will win the 2026
+    NL MVP. Polymarket's resolution criteria confirm it resolves to the actual winner
+    of that award, with 'Other' only for cancellation/no winner, which is consistent
+    with a binary Yes/No outcome on Carroll specifically. Kalshi's ticker and outcome
+    labels (Corbin Carroll vs. Not Corbin Carroll) directly match this proposition.
+    The minor wording differences and tie-handling rules do not affect the core outcome
+    being predicted.
+  confidence: 0.96
+  proposed_ts: '2026-07-31T15:28:29+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x1daed5e41e81f6247ca2b6ac2c284572c91886103ede7738e588553c1c90a46c'
+  question: Will Carson Benge win the 2026 NL Rookie of the Year award?
+  venue: kalshi
+  external_id: KXMLBNLROTY-26-CBEN
+  external_question: Will Carson Benge win NL ROTY?
+  rationale: 'Both markets resolve to exactly the same outcome: whether Carson Benge
+    wins the 2026 National League Rookie of the Year award. The Polymarket resolution
+    criteria confirm the market resolves to the player who wins that award, and the
+    specific question names Carson Benge. The Kalshi outcome labels (''Carson Benge''
+    vs ''Not Carson Benge'') and resolution criteria directly match. Tie handling
+    and cancellation clauses do not create a distinction for the named player. The
+    identity is exact.'
+  confidence: 1.0
+  proposed_ts: '2026-07-31T15:28:31+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0x02ef91cb7f3a78f5cc1d7e6ac619aff0ab82b88ef13f7e26ff1e80abde66f29f'
+  question: Will Elly De La Cruz win the 2026 National League MVP Award?
+  venue: kalshi
+  external_id: KXMLBNLMVP-26-ECRU
+  external_question: Will Elly De La Cruz win NL MVP?
+  rationale: Both markets ask whether Elly De La Cruz wins the 2026 National League
+    MVP Award. The Polymarket resolution criteria confirm the exact award and season,
+    and the Kalshi outcome labels (Elly De La Cruz / Not Elly De La Cruz) match this
+    binary. The Kalshi title slightly generalizes ('Will Elly De La Cruz win NL MVP?')
+    but the ticker includes '2026' and the resolution criteria specify the 2026 season.
+    There is no substantive divergence in the event, resolution source, or timing.
+    The third-party confidence is reasonable and aligns with the independent assessment.
+  confidence: 0.97
+  proposed_ts: '2026-07-31T15:28:35+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x538a9d1f42ae767592e7bb2f1d5384ea40dc6cbc0c54e4db85c78a60cbbb46bc'
+  question: Will Nick Kurtz win the 2026 American League MVP Award?
+  venue: kalshi
+  external_id: KXMLBALMVP-26-NKUR
+  external_question: Will Nick Kurtz win AL MVP?
+  rationale: Both markets explicitly resolve on whether Nick Kurtz wins the 2026 American
+    League MVP award. The Polymarket question directly asks this, and its resolution
+    criteria confirm the same event. The Kalshi market's specific outcome (as indicated
+    by the ticker and outcome labels) is 'Nick Kurtz wins AL MVP in 2026'. There is
+    no divergence in the subject, timeframe, or award. Minor differences in tie-handling
+    and cancellation rules are procedural and do not affect the identity of the event.
+    The high confidence is slightly tempered by the minor wording differences, but
+    the core outcome is identical.
+  confidence: 0.93
+  proposed_ts: '2026-07-31T15:28:44+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x720cf4c6448d32730d7e80c39231ab1da2eed6aeb723f2f0991c96e1c4fa8ef9'
+  question: Will Parker Messick win the 2026 AL Cy Young Award?
+  venue: kalshi
+  external_id: KXMLBALCY-26-PMES
+  external_question: Will Parker Messick win AL Cy Young
+  rationale: Both markets resolve to whether Parker Messick wins the 2026 American
+    League Cy Young Award. The Polymarket question explicitly asks this and resolves
+    per MLB official winner. The Kalshi market (ticker KXMLBALCY-26-PMES) has outcomes
+    'Not Parker Messick' and 'Parker Messick' with resolution criteria stating it
+    resolves to Yes if Parker Messick wins the 2026 AL Cy Young. The event, season,
+    award, and specific player all align. Minor discrepancies (e.g., tie handling
+    in Polymarket vs. no tie specification in Kalshi) are unlikely to affect the outcome
+    for a single award winner, as ties are rare; the core identity is clear.
+  confidence: 0.92
+  proposed_ts: '2026-07-31T15:28:47+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xa203cc908da0d417590e01f89fb651a335650d6b797da76ac28726d5f8c7610b'
+  question: "Will Fran\xE7ois Hollande win the 2027 French presidential election?"
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-FHOL
+  external_question: "Will Fran\xE7ois Hollande win the 2027 French presidential election?"
+  rationale: "Both markets ask the same specific question: whether Fran\xE7ois Hollande\
+    \ will win the 2027 French presidential election. The Polymarket resolution criteria\
+    \ describe the election outcome in general, and the question specifically names\
+    \ Hollande as the candidate; the Kalshi market's ticker and outcomes explicitly\
+    \ resolve to Yes if Hollande wins. No material difference in resolution conditions\
+    \ exists\u2014both rely on the official election result. The third-party tool's\
+    \ high confidence aligns with this independent verification."
+  confidence: 1.0
+  proposed_ts: '2026-07-31T15:28:49+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0xc4435df23facee8c4cd86090310c7835c2a0425646b2588b0a02e67fa42f444e'
+  question: Will Glenn Youngkin win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-GYOU
+  external_question: Who will win the next presidential election?
+  rationale: 'Both markets resolve on whether Glenn Youngkin wins the 2028 U.S. presidential
+    election and is inaugurated for the term beginning in 2029. Polymarket''s question
+    explicitly asks ''Will Glenn Youngkin win...'' and resolves to the person who
+    wins (i.e., is inaugurated if not called earlier). Kalshi''s specific outcome
+    (identified by ticker KXPRESPERSON-28-GYOU and outcome labels) is ''Glenn Youngkin''
+    as the next person inaugurated as President for the term beginning in 2029. The
+    resolution criteria align: if Youngkin wins the election and is inaugurated, both
+    resolve Yes; otherwise No. The slight difference in timing (calls by three sources
+    vs. inauguration) does not create a meaningful divergence because Polymarket also
+    defaults to inauguration if sources haven''t called by January 20, 2029, which
+    matches Kalshi''s inauguration-based resolution. The suggested match is appropriate.'
+  confidence: 0.97
+  proposed_ts: '2026-07-31T15:28:52+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x4567b275e6b667a6217f5cb4f06a797d3a1eaf1d0281fb5bc8c75e2046ae7e57'
+  question: Will Gavin Newsom win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-GNEWS
+  external_question: Who will win the next presidential election?
+  rationale: Both markets resolve on whether Gavin Newsom wins the 2028 US presidential
+    election. Polymarket's specific question asks if Newsom wins, and Kalshi's ticker
+    KXPRESPERSON-28-GNEWS with outcomes 'Not Gavin Newsom | Gavin Newsom' resolves
+    Yes if he is inaugurated for the term beginning in 2029, which matches the Polymarket
+    criteria of winning the election and being inaugurated. The timing and event are
+    identical.
+  confidence: 0.97
+  proposed_ts: '2026-07-31T15:28:54+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xd25c820d3aee1c735c0fa62c36f4905632ab8c6988653b5b4134593b3209eb7f'
+  question: Will Lisa Demuth win the 2026 Minnesota Governor Republican primary election?
+  venue: kalshi
+  external_id: KXGOVMNNOMR-26-LDEM
+  external_question: Will Lisa Demuth be the Republican nominee for Governor in Minnesota?
+  rationale: Both Polymarket and Kalshi resolve on whether Lisa Demuth wins the 2026
+    Minnesota Republican gubernatorial primary/nomination. The Polymarket explicitly
+    names the Republican primary for Governor of Minnesota and resolves to 'Yes' if
+    Demuth is the overall winner. The Kalshi market's ticker (KXGOVMNNOMR-26-LDEM)
+    and outcome labels confirm it resolves to 'Yes' if Demuth wins the Republican
+    nomination for Minnesota Governor. The titles differ slightly (primary winner
+    vs. nominee), but in the context of Minnesota's primary system, the primary winner
+    is the nominee, so the resolution criteria are functionally identical. The third-party
+    tool's high confidence is consistent with this assessment.
+  confidence: 0.97
+  proposed_ts: '2026-07-31T15:28:57+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
