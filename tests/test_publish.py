@@ -311,3 +311,41 @@ def test_publish_prunes_only_after_a_successful_db_push(config, monkeypatch):
         assert calls == [], "pruned without a successful push"
     finally:
         conn.close()
+
+
+def test_publish_does_not_prune_when_the_push_fails(config, monkeypatch):
+    """The dangerous case: a db push that ERRORS must not be followed by a
+    prune. Prune only deletes local copies it can confirm on the remote, but
+    a failed push means the newest object may not be there at all -- retiring
+    anything against that state is exactly the wrong moment."""
+    from pathlib import Path
+
+    from lab import publish as pub
+
+    calls = []
+    monkeypatch.setattr(pub, "prune_lfs", lambda d: calls.append(d) or {"ok": True})
+
+    class _Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "fatal: unable to access remote"
+
+    real_run_git = pub._run_git
+
+    def fake_run_git(args, cwd):
+        if args and args[0] == "push":
+            return _Failed()
+        return real_run_git(args, cwd)
+
+    monkeypatch.setattr(pub, "_run_git", fake_run_git)
+
+    results_dir = Path(config["publish"]["results_dir"])
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        result = pub.publish_results(config, conn, results_dir=results_dir,
+                                     push=True, include_db=True)
+    finally:
+        conn.close()
+
+    assert result.get("pushed") is False
+    assert calls == [], "pruned after a failed push -- the local copy may be all there is"
