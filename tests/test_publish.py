@@ -242,3 +242,72 @@ def test_run_publish_job_calls_sync_env_only_when_env_enabled(config, monkeypatc
     result = run_publish_job(config)
     assert result.get("env_included") is True
     assert len(calls) == 1
+
+
+# --- LFS prune after a db push (2026-07-31 disk growth) -------------------
+
+def test_prune_lfs_verifies_the_remote_before_deleting(monkeypatch, tmp_path):
+    """Not optional for this repo. Prune removes LOCAL copies and by default
+    trusts its own bookkeeping about what the remote holds; this is the backup
+    of data that cannot be re-collected (brief section 11), so every object is
+    confirmed present on GitHub first."""
+    import subprocess as sp
+
+    from lab.publish import prune_lfs
+
+    seen = {}
+
+    class _Res:
+        returncode = 0
+        stdout = ""
+        stderr = "prune: 92 local objects, 32 retained, done.\nprune: 60 files pruned, done.\n"
+
+    def fake_run(cmd, **k):
+        seen["cmd"] = cmd
+        return _Res()
+
+    monkeypatch.setattr(sp, "run", fake_run)
+    out = prune_lfs(tmp_path)
+
+    assert seen["cmd"] == ["git", "lfs", "prune", "--verify-remote"]
+    assert out["ok"] is True
+    assert any("pruned" in line for line in out["summary"])
+
+
+def test_prune_lfs_failure_never_raises(monkeypatch, tmp_path):
+    """A failed prune costs disk; a raise here would cost the backup
+    (guardrail 9)."""
+    import subprocess as sp
+
+    from lab.publish import prune_lfs
+
+    class _Res:
+        returncode = 1
+        stdout = ""
+        stderr = "fatal: could not reach remote\n"
+
+    monkeypatch.setattr(sp, "run", lambda cmd, **k: _Res())
+    out = prune_lfs(tmp_path)
+    assert out["ok"] is False
+
+
+def test_publish_prunes_only_after_a_successful_db_push(config, monkeypatch):
+    """Only a db push leaves a new multi-hundred-MB object behind, and only a
+    successful push means the remote actually has it. A snapshots-only or
+    failed push must not trigger a prune."""
+    from lab import publish as pub
+
+    calls = []
+    monkeypatch.setattr(pub, "prune_lfs", lambda d: calls.append(d) or {"ok": True})
+
+    results_dir = Path(config["publish"]["results_dir"])
+
+    conn = db.connect(config["storage"]["db_path"])
+    try:
+        # Curated-only, and push=False: nothing large added and nothing sent,
+        # so there is nothing on the remote to safely retire against.
+        pub.publish_results(config, conn, results_dir=results_dir, push=False,
+                            include_db=True)
+        assert calls == [], "pruned without a successful push"
+    finally:
+        conn.close()

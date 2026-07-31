@@ -182,4 +182,41 @@ def publish_results(
         result["pushed"] = pushed.returncode == 0
         if not result["pushed"]:
             result["push_stderr"] = pushed.stderr
+        elif include_db:
+            result["lfs_prune"] = prune_lfs(results_dir)
     return result
+
+
+def prune_lfs(results_dir: Path) -> dict[str, Any]:
+    """Drop local LFS objects that are already safely on the remote.
+
+    lab.db is pushed whole every `db_interval_days` and LFS has no delta
+    compression for it, so each push writes a NEW object the size of the
+    entire database and every previous one stays on disk forever. By
+    2026-07-31 that was 8 objects totalling 7.5GB -- including a 2.5GB and a
+    1.8GB copy of the pre-dedup database whose bloat had already been fixed
+    weeks earlier. At ~230MB/day the VPS would have run out of disk around
+    mid-September, well before the analysis freeze.
+
+    Pruning here rather than on a timer because this is the function that
+    creates those objects: whatever retires them belongs next to whatever
+    makes them, and only a successful db push can leave a new one behind.
+
+    `--verify-remote` is not optional for this repo. Prune deletes local
+    copies, and the default trusts its own bookkeeping about what the remote
+    holds; for the backup of data that cannot be re-collected (brief §11),
+    every object is confirmed present on GitHub before its local copy goes.
+    Never raises: a failed prune costs disk, while a failed publish would
+    cost a backup (guardrail 9).
+    """
+    proc = subprocess.run(
+        ["git", "lfs", "prune", "--verify-remote"],
+        cwd=results_dir, capture_output=True, text=True,
+    )
+    ok = proc.returncode == 0
+    if not ok:
+        log.warning("lfs prune failed -- disk not reclaimed, backup unaffected",
+                    extra={"ctx": {"stderr": (proc.stderr or "")[:300]}})
+    # git-lfs writes its progress/summary to stderr, not stdout.
+    summary = [ln for ln in (proc.stderr or "").splitlines() if "prune" in ln.lower()]
+    return {"ok": ok, "summary": summary[-2:]}
