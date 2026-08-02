@@ -1275,83 +1275,77 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-07-31T20:09:37+00:00'
-proposed:
-- condition_id: '0x24616ce096cda6fc1b3e72beb79cef139360606ca3aac79b62d874c34a9d749b'
-  question: Will Julio Rodriguez win the 2026 American League MVP Award?
-  venue: kalshi
-  external_id: KXMLBALMVP-26-JROD
-  external_question: "Will Julio Rodr\xEDguez win AL MVP?"
-  rationale: "Both markets ask specifically whether Julio Rodr\xEDguez will win the\
-    \ 2026 American League MVP. The Kalshi ticker KXMLBALMVP-26-JROD and outcome labels\
-    \ confirm the outcome is Julio Rodr\xEDguez winning AL MVP, matching the Polymarket\
-    \ question. Resolution criteria are substantively identical: both rely on official\
-    \ MLB announcement of the AL MVP winner for the 2026 season. Minor differences\
-    \ (Polymarket includes tie/cancellation rules, while Kalshi's brief criteria omit\
-    \ them) are standard boilerplate and do not change the underlying event. Thus\
-    \ a match is highly likely."
-  confidence: 0.97
-  proposed_ts: '2026-07-31T21:00:02+00:00'
-  source: pmxt
-  source_meta:
-    relation_type: identity
-    pmxt_confidence: 0.95
-- condition_id: '0xf36a179eb7954a4ad3b6250c29dc274868aab44ddcbaa1e37b9bc3bcc9b69db9'
-  question: Will Shohei Ohtani win the 2026 NL Cy Young Award?
-  venue: kalshi
-  external_id: KXMLBNLCY-26-SOHT
-  external_question: Will Shohei Ohtani win NL Cy Young?
-  rationale: 'Both markets resolve to the same binary outcome: whether Shohei Ohtani
-    wins the 2026 National League Cy Young Award. The Polymarket question explicitly
-    names the award and season, and its resolution criteria define the winner according
-    to MLB official rules, with sensible fallbacks for cancellation or ties. The Kalshi
-    market''s ticker (KXMLBNLCY-26-SOHT) and outcome labels unambiguously correspond
-    to the same event, and its resolution criteria confirm the same condition. The
-    small difference in wording (Polymarket mentions tie-breaking and cancellation,
-    Kalshi does not) does not create a substantive mismatch for the typical no-tie,
-    on-time outcome. The third-party tool''s high confidence is consistent with a
-    clear identity match.'
-  confidence: 0.98
-  proposed_ts: '2026-07-31T21:00:05+00:00'
-  source: pmxt
-  source_meta:
-    relation_type: identity
-    pmxt_confidence: 0.95
 - condition_id: '0xe29b33ef5bf351c8a22bfd79f8b58e62649d54ceee6f9735387cef79f52fecae'
   question: Will Wes Moore win the 2028 US Presidential Election?
   venue: kalshi
   external_id: KXPRESPERSON-28-WMOO
   external_question: Who will win the next presidential election?
-  rationale: 'Both markets resolve on the same real-world event: whether Wes Moore
-    will win the 2028 U.S. Presidential Election and be inaugurated as President for
-    the term beginning in 2029. Polymarket asks directly if Wes Moore will win the
-    2028 election, with resolution based on the candidate who wins the election (or
-    is inaugurated). Kalshi''s specific outcome is ''Wes Moore'' (ticker KXPRESPERSON-28-WMOO),
-    resolving to Yes if Wes Moore is the next person inaugurated as President for
-    the term beginning in 2029. Both criteria are aligned on the same candidate and
-    the same election/inauguration event. The minor difference in phrasing (winning
-    the election vs. being inaugurated) is immaterial for practical purposes, as the
-    winner will be inaugurated unless extraordinary circumstances occur. The third-party
-    tool''s confidence of 0.95 is consistent with this assessment.'
-  confidence: 0.95
-  proposed_ts: '2026-07-31T21:00:08+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-02T10:59:07+00:00'
 - condition_id: '0xa26ab383a1f115fa8d2b0fcbac29bcd6a9843ec8c1d160b0a122917230c3c96a'
   question: Will Ann Diener win the Alaska Senate race in 2026?
   venue: kalshi
   external_id: KXAKSENATE-26NOV03-ADIE
   external_question: Will Ann Diener win the 2026 Alaska Senate race?
-  rationale: Both markets unambiguously resolve to YES if Ann Diener wins the 2026
-    Alaska U.S. Senate election, and NO otherwise. The Polymarket question names the
-    same specific candidate and race, and its resolution criteria confirm the exact
-    same event. The Kalshi title and ticker suffix also align on the same candidate
-    and race. Discrepancies in election date (Polymarket says Nov 3, Kalshi ticker
-    says Nov 26-03) are minor terminological/formatting inconsistencies and do not
-    change the event or resolution outcome.
-  confidence: 0.98
-  proposed_ts: '2026-07-31T21:00:11+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-02T10:59:15+00:00'
+- condition_id: '0x24616ce096cda6fc1b3e72beb79cef139360606ca3aac79b62d874c34a9d749b'
+  question: Will Julio Rodriguez win the 2026 American League MVP Award?
+  venue: kalshi
+  external_id: KXMLBALMVP-26-JROD
+  external_question: "Will Julio Rodr\xEDguez win AL MVP?"
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-02T10:59:17+00:00'
+- condition_id: '0xf36a179eb7954a4ad3b6250c29dc274868aab44ddcbaa1e37b9bc3bcc9b69db9'
+  question: Will Shohei Ohtani win the 2026 NL Cy Young Award?
+  venue: kalshi
+  external_id: KXMLBNLCY-26-SOHT
+  external_question: Will Shohei Ohtani win NL Cy Young?
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-02T10:59:31+00:00'
+proposed:
+- condition_id: '0x61600d487069f99e775307a0655c1a79f26e4fc6d8d1ba66790c64d78d0beba2'
+  question: Will Jon Ossoff win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-JOSS
+  external_question: Who will win the next presidential election?
+  rationale: Both markets resolve on Jon Ossoff winning the 2028 U.S. Presidential
+    Election. Polymarket's question directly asks if Ossoff will win the 2028 election,
+    and its resolution criteria specify the winner of that election. Kalshi's specific
+    outcome is titled 'Jon Ossoff' and resolves to Yes if Ossoff is the next person
+    inaugurated as President for the term beginning in 2029, which corresponds to
+    the 2028 election winner. The timing and event are identical.
+  confidence: 0.95
+  proposed_ts: '2026-08-02T17:00:01+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xb83df8ea773e1f6693320c4ee94f28ab3fbe10d270d695b6e0f76d03cabeed4d'
+  question: Will Ethan Corson win the 2026 Kansas Governor Democratic primary election?
+  venue: kalshi
+  external_id: KXGOVKSNOMD-26-EC
+  external_question: Will Ethan Corson be the Democratic nominee for Governor in Kansas?
+  rationale: 'Both the Polymarket question and the Kalshi ticker/outcome refer to
+    the same specific event: whether Ethan Corson wins the Kansas Democratic gubernatorial
+    primary/nomination in 2026. Polymarket''s resolution criteria explicitly state
+    it resolves to the winner of the Democratic primary; Kalshi resolves to Yes if
+    Corson wins the nomination. The semantic overlap is direct and unambiguous, with
+    no material difference in resolution criteria beyond identical outcome.'
+  confidence: 0.97
+  proposed_ts: '2026-08-02T17:00:04+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
