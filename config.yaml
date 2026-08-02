@@ -280,20 +280,12 @@ schedule:
   control:
     forecast_max_age_hours: 24     # nightly bundle should run at least daily
     shadow_max_age_hours: 168      # weekly -> 7 days
-    # TEMPORARY HOLD, 2026-08-02. Raised from 720 (30d) to stop the hourly
-    # catch-up re-running `lab learn` while it is still unsafe on this host.
-    # It ran twice today (Aug 1 14:00 and Aug 2 11:59), never completed, never
-    # stamped a success -- so it stayed permanently overdue and would be
-    # retried every hour, each attempt driving the orchestrator to ~1.1GB,
-    # throttling it into missed jobs and a dead heartbeat. The out-of-process
-    # change (8efdf0f) is deployed but did not prevent it, and why is not yet
-    # established; until it is, the retry is the immediate harm.
-    # Cost of the hold is low: scheduled learn runs are dry-run (apply=False),
-    # producing a reviewable diff and writing nothing -- so what is skipped is
-    # an operator artifact, not model state. The monthly cron (1st, 12:00 UTC)
-    # still fires on its own schedule; only the hourly retry is suppressed.
-    # Restore to 720 once the memory behaviour is understood.
-    learn_max_age_hours: 2000       # monthly -> 30 days
+    # Held at 2000 for a few hours on 2026-08-02 while `lab learn` was
+    # repeatedly wedging the host; restored once the cause turned out to be
+    # RAM (967M -> 1.9G) rather than the job, and a manual run completed in
+    # 101s. Left here as the note that this knob suppresses only the hourly
+    # catch-up retry -- the monthly cron fires regardless.
+    learn_max_age_hours: 720       # monthly -> 30 days
     pmxt_verify_max_age_hours: 18  # twice-daily -> catch-up if a ~12h cycle is missed
     paper_export_max_age_hours: 192  # weekly -> 8 days (small buffer over the 7-day cadence)
   # Hourly health/liveness check: re-runs overdue analytics services and forces

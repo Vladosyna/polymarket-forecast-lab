@@ -384,6 +384,35 @@ independently attributable and verifiable, not just push-authorized.
 | `metaculus last_snapshot_age=never` | Expected and benign by design, until at least one Metaculus pair exists in `data\markets_map.yaml`'s confirmed list | No action — there is no broad Metaculus universe sync, only confirmed-pair snapshots. |
 | "LLM spend today: $X / cap $Y" near the cap | By design (guardrail 10): M3 and the weekly M7 propose job will start skipping remaining markets for the rest of the UTC day once the cap is hit | Not an error — just fewer forecasts/proposals until the cap resets at UTC midnight. No action needed. |
 
+### The M1 training set is a host dependency, not a repo artifact
+
+`data/bootstrap/observations.parquet` (51 MB, 1,967,376 rows) is the ONLY
+input the M1 / M1.x recalibration refit trains on. Everything the lab collects
+itself goes to the walk-forward holdout instead, so without this file the
+refit reports `skipped: insufficient_data` with `n_train=0` and the curves
+simply stop being updated.
+
+That is exactly what happened between the 2026-07-10 laptop-to-VPS cutover and
+2026-08-02: the directory existed but was empty on the VPS, so M1's curves sat
+frozen at their 2026-07-03 values for a month. Nothing was broken and nothing
+lied -- `lab learn` reported the skip every run -- but the dry-run output was
+not being read, which is the failure mode a dry-run has when nobody reviews it.
+
+Practical notes:
+
+- The file is **static**. It is derived from a historical archive that ends in
+  2025 and carries no date column; 2026-onward data never enters it. Copy once
+  per host, never regenerate.
+- It is NOT the 27 GB `quant.parquet`. That one is only the raw source used to
+  build this file (`lab bootstrap`), and is not needed at refit time.
+- It is gitignored and not covered by the results-mirror backup, so it lives
+  only on hosts you put it on. Losing it is recoverable (rebuild from the
+  archive) but slow; copying the 51 MB from another host is faster.
+- A host without it still runs everything else correctly. The symptom is
+  narrow: M1/M1.x silently stop refitting.
+
+---
+
 ### Incident: cgroup limits oversubscribed, box wedged (2026-07-30)
 
 The VPS became unreachable for ~3 hours and needed a manual power cycle from
