@@ -197,16 +197,25 @@ def test_report_control_age_is_not_hourly():
     assert _control_max_ages({})["report"] >= 168
 
 
-def test_report_renders_out_of_process():
-    """The render's peak must belong to a process that exits -- in-process it
-    became the collector's own RSS, and an OOM kill took collection with it."""
+def test_heavy_batch_jobs_run_out_of_process():
+    """Their peaks must belong to a process that exits. In-process the peak
+    became the collector's own RSS, and both of these took the host down that
+    way: report on 2026-07-28, learn on 2026-08-02."""
     import inspect
 
     from lab.collect import runner
 
-    src = inspect.getsource(runner._render_report_out_of_process)
+    src = inspect.getsource(runner._run_lab_command_out_of_process)
     assert "create_subprocess_exec" in src
-    assert '"-m", "lab", "report"' in src
-    # A non-zero exit must propagate, or _run would record a success for a
-    # render that never produced a page.
+    assert '"-m", "lab", *args' in src
+    # A non-zero exit must propagate, or _run would record a success for work
+    # that never happened.
     assert "raise RuntimeError" in src
+
+    services = inspect.getsource(runner._build_analytics_services)
+    for job in ("report", "learn"):
+        assert f'_run_lab_command_out_of_process("{job}")' in services, (
+            f"{job} is back in the orchestrator process"
+        )
+    # learn especially: it must not be an in-process thread call again.
+    assert "analytics.run_learn_job" not in services

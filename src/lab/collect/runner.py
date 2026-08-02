@@ -362,23 +362,31 @@ def _control_max_ages(config: dict[str, Any]) -> dict[str, float]:
     }
 
 
-async def _render_report_out_of_process(config: dict[str, Any]) -> None:
-    """Render the report in a child process.
+async def _run_lab_command_out_of_process(*args: str) -> None:
+    """Run `lab <args>` in a child process and raise if it fails.
 
-    Measured on the production host (2026-07-28): a render peaks at ~834MB and
-    runs ~178s, while the collector alone holds ~565MB -- about 1.4GB against
-    967MB of RAM. In-process that peak became the orchestrator's own RSS, and
-    when the kernel picked a victim it took collection down with it.
+    For the batch jobs whose peak memory does not fit alongside the collector
+    on this host. Two things change in a child: the peak belongs to a process
+    that exits, so memory returns to the OS instead of staying resident in the
+    collector for the rest of the day, and an OOM kill lands on the child while
+    collection keeps running.
 
-    In a child, two things change. The peak belongs to a process that exits,
-    so the memory returns to the OS instead of staying resident in the
-    collector for the rest of the day; and an OOM kill lands on the child,
-    leaving the collector running. Raising on a non-zero exit is deliberate:
-    `_run` then declines to record a success, so the render is retried on its
-    own (weekly) control age rather than pretending it produced a page.
+    Both current callers earned their place by taking the box down.
+    `report` (2026-07-28): peaks ~834MB over ~178s against a collector already
+    holding ~565MB, on 967MB of RAM. `learn` (2026-08-02): the monthly loop
+    ran for the first time since 2026-07-02, against a database that had grown
+    four-fold in the meantime, and pushed 1.8GB into swap -- staying under its
+    700MB RSS cap the whole time, since MemoryMax does not bound swap -- which
+    thrashed the host for 21 hours with collection dead before a global OOM
+    ended it.
+
+    Raising on a non-zero exit is deliberate: `_run` then declines to record a
+    success, so the job retries on its own control age rather than pretending
+    it did something. A negative code is a signal, and -9 is the case worth
+    recognising on sight.
     """
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "lab", "report",
+        sys.executable, "-m", "lab", *args,
         cwd=str(PROJECT_ROOT),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
@@ -387,10 +395,11 @@ async def _render_report_out_of_process(config: dict[str, Any]) -> None:
     tail = (out or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
     if proc.returncode != 0:
         raise RuntimeError(
-            f"report render exited {proc.returncode} (a negative code is a signal, "
-            f"e.g. -9 = OOM-killed): {' | '.join(tail)}"
+            f"lab {' '.join(args)} exited {proc.returncode} (a negative code is a "
+            f"signal, e.g. -9 = OOM-killed): {' | '.join(tail)}"
         )
-    log.info("report rendered out-of-process", extra={"ctx": {"tail": tail}})
+    log.info("lab command completed out-of-process",
+             extra={"ctx": {"args": list(args), "tail": tail}})
 
 
 def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], Awaitable[None]]]:
@@ -489,13 +498,15 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
         await _run("forecast", body, tail=tail)
 
     async def run_report_service() -> None:
-        await _run("report", lambda: _render_report_out_of_process(config))
+        await _run("report", lambda: _run_lab_command_out_of_process("report"))
 
     async def run_shadow_service() -> None:
         await _run("shadow", lambda: asyncio.to_thread(analytics.run_shadow_job, config))
 
     async def run_learn_service() -> None:
-        await _run("learn", lambda: asyncio.to_thread(analytics.run_learn_job, config))
+        # Out-of-process for the same reason as report: this is the heaviest
+        # batch job in the system and it wedged the host on 2026-08-02.
+        await _run("learn", lambda: _run_lab_command_out_of_process("learn"))
 
     async def run_map_propose_service() -> None:
         await _run("map_propose", lambda: asyncio.to_thread(analytics.run_map_propose_job, config))
@@ -562,7 +573,7 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
     scheduler.add_job(services["forecast"], CronTrigger.from_crontab(forecast_cron, timezone="UTC"),
                       id="nightly", max_instances=1, coalesce=True)
     # Weekly, not nightly, and out-of-process (see
-    # _render_report_out_of_process): the HTML report renders data the
+    # _run_lab_command_out_of_process): the HTML report renders data the
     # nightly bundle already committed, so its cadence is an operator
     # convenience, not a research requirement -- while each render costs a
     # ~834MB, ~3-minute child on a 967MB host. `lab report` stays available
