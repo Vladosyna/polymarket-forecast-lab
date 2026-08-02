@@ -67,6 +67,19 @@ def _instrument(monkeypatch, config, durations):
     ]:
         monkeypatch.setattr(analytics, attr, _make(name))
 
+    # report and learn no longer call a jobs.* function at all -- they spawn
+    # `lab <cmd>` in a child process (runner._run_lab_command_out_of_process,
+    # after each took the host down: report 2026-07-28, learn 2026-08-02).
+    # Patch that path too, or they run real subprocesses here and, worse, drop
+    # out of the serialization check entirely -- which is exactly how report
+    # silently stopped being covered by this test on 2026-07-28.
+    from lab.collect import runner as runner_mod
+
+    async def _fake_out_of_process(*args):
+        _make(args[0])(config)
+
+    monkeypatch.setattr(runner_mod, "_run_lab_command_out_of_process", _fake_out_of_process)
+
     monkeypatch.setattr("lab.schedule_state.record_job_run", lambda *a, **k: None)
     return state
 
