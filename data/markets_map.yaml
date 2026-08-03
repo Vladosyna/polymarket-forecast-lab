@@ -1315,41 +1315,84 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-02T10:59:31+00:00'
-proposed:
 - condition_id: '0x61600d487069f99e775307a0655c1a79f26e4fc6d8d1ba66790c64d78d0beba2'
   question: Will Jon Ossoff win the 2028 US Presidential Election?
   venue: kalshi
   external_id: KXPRESPERSON-28-JOSS
   external_question: Who will win the next presidential election?
-  rationale: Both markets resolve on Jon Ossoff winning the 2028 U.S. Presidential
-    Election. Polymarket's question directly asks if Ossoff will win the 2028 election,
-    and its resolution criteria specify the winner of that election. Kalshi's specific
-    outcome is titled 'Jon Ossoff' and resolves to Yes if Ossoff is the next person
-    inaugurated as President for the term beginning in 2029, which corresponds to
-    the 2028 election winner. The timing and event are identical.
-  confidence: 0.95
-  proposed_ts: '2026-08-02T17:00:01+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-03T11:18:36+00:00'
 - condition_id: '0xb83df8ea773e1f6693320c4ee94f28ab3fbe10d270d695b6e0f76d03cabeed4d'
   question: Will Ethan Corson win the 2026 Kansas Governor Democratic primary election?
   venue: kalshi
   external_id: KXGOVKSNOMD-26-EC
   external_question: Will Ethan Corson be the Democratic nominee for Governor in Kansas?
-  rationale: 'Both the Polymarket question and the Kalshi ticker/outcome refer to
-    the same specific event: whether Ethan Corson wins the Kansas Democratic gubernatorial
-    primary/nomination in 2026. Polymarket''s resolution criteria explicitly state
-    it resolves to the winner of the Democratic primary; Kalshi resolves to Yes if
-    Corson wins the nomination. The semantic overlap is direct and unambiguous, with
-    no material difference in resolution criteria beyond identical outcome.'
-  confidence: 0.97
-  proposed_ts: '2026-08-02T17:00:04+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-03T11:18:40+00:00'
+proposed:
+- condition_id: '0x12f92dbd7c10d696c91644acd6ff49647ec99c8bc57023557bf0ab1bab8b3956'
+  question: Will Gavin Williams win the 2026 AL Cy Young Award?
+  venue: kalshi
+  external_id: KXMLBALCY-26-GWIL
+  external_question: Will Gavin Williams win AL Cy Young?
+  rationale: Both markets ask whether Gavin Williams will win the 2026 AL Cy Young
+    Award, and both resolve based on the official winner of that award in the 2026
+    season. The Kalshi market's title is the broader event, but the ticker and outcome
+    labels clearly specify the identical outcome. The Polymarket resolution details
+    about ties or cancellations do not conflict with the Kalshi criteria; they are
+    standard clarifications. Thus, the two markets are a true match.
+  confidence: 1.0
+  proposed_ts: '2026-08-03T21:00:01+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0x1b427a1cc93c7d7be6814173de740735e0d1c321a8bdfc9242bde26c19779bad'
+  question: Will Cinde Warmington win the 2026 New Hampshire Governor Democratic primary
+    election?
+  venue: kalshi
+  external_id: KXGOVNHNOMD-26-CWAR
+  external_question: Will Cinde Warmington be the Democratic nominee for Governor
+    in New Hampshire?
+  rationale: Both markets resolve on whether Cinde Warmington is the Democratic nominee
+    for Governor of New Hampshire in 2026, specifically by winning the Democratic
+    primary. The Polymarket question directly asks if she will win the primary, and
+    its resolution criteria confirm it resolves based on the primary winner. The Kalshi
+    market resolves to Yes if she wins the party nomination for the 2026 governorship.
+    Although the Kalshi title says 'nominee' rather than 'primary winner,' the underlying
+    resolution criteria (winning the nomination) and the primary-election context
+    align with the Polymarket market's criteria. The timing, state, office, and candidate
+    all match, and there is no indication of a different event. The only minor differences
+    are wording, but the specific outcome is identical.
+  confidence: 0.95
+  proposed_ts: '2026-08-03T21:00:04+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x5f1e5bf9375dc70015137bf01d6185ace4813c3fc811b3edeb14c4578173bb26'
+  question: Will Mason Miller win the 2026 NL Cy Young Award?
+  venue: kalshi
+  external_id: KXMLBNLCY-26-MMIL
+  external_question: Will Mason Miller win NL Cy Young?
+  rationale: Both markets ask whether Mason Miller will win the 2026 National League
+    Cy Young Award. The Polymarket question names Mason Miller explicitly and its
+    resolution criteria define the winner as the official NL Cy Young winner for 2026.
+    The Kalshi ticker and outcome labels confirm the Yes outcome is 'Mason Miller'
+    winning the NL Cy Young in 2026. Both resolve based on the MLB official winner
+    of the 2026 NL Cy Young. No discrepancies in the specific outcome or season.
+  confidence: 1.0
+  proposed_ts: '2026-08-03T21:00:07+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
