@@ -491,19 +491,22 @@ def _authorizer(action: int, arg1: str | None, arg2, db_name, trigger) -> int:
     return sqlite3.SQLITE_OK
 
 
-def connect(db_path: str | Path) -> sqlite3.Connection:
-    """Open (creating if needed) the lab database with schema and guards applied."""
-    path = Path(db_path)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    # Let the collector and orchestrator analytics connections wait on each
-    # other instead of failing with "database is locked" under WAL.
-    conn.execute("PRAGMA busy_timeout=10000")
+def _schema_is_current(conn: sqlite3.Connection) -> bool:
+    """True when this database is already at SCHEMA_VERSION.
+
+    A pure read, deliberately: it decides whether connect() may skip the
+    schema+migration block entirely. See connect() for why that matters.
+    """
+    try:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+    except sqlite3.Error:
+        return False  # no meta table -> brand-new database, needs the full path
+    return row is not None and row[0] == SCHEMA_VERSION
+
+
+def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     migrate_multi_venue(conn)
     migrate_eval_measurement_upgrade(conn)
@@ -527,6 +530,39 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (SCHEMA_VERSION,)
         )
     conn.commit()
+
+
+def connect(db_path: str | Path) -> sqlite3.Connection:
+    """Open (creating if needed) the lab database with schema and guards applied.
+
+    The schema+migration block runs only when the database is not already at
+    SCHEMA_VERSION. It used to run on EVERY connection, and that was the cause
+    of this project's recurring "database is locked" failures (2026-08-01
+    through 08-05, most visibly as an hourly crash loop): `executescript`, the
+    seven migrations and two INSERT OR IGNOREs all take the write lock, so
+    merely opening a connection to READ one value -- which
+    `schedule_state.last_run_age_seconds` does on every catch-up tick --
+    contended with whatever was writing at the time. Under light load it was
+    invisible; under a long-running job it made every concurrent open fail.
+
+    Skipping it is safe precisely because the migrations are already
+    idempotent and version-gated: the version check reads what they would
+    otherwise re-assert. A new or out-of-date database still takes the full
+    path.
+    """
+    path = Path(db_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    # Let the collector and orchestrator analytics connections wait on each
+    # other instead of failing with "database is locked" under WAL.
+    conn.execute("PRAGMA busy_timeout=10000")
+    if not _schema_is_current(conn):
+        _apply_schema_and_migrations(conn)
     conn.set_authorizer(_authorizer)
     return conn
 

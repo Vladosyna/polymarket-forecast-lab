@@ -290,3 +290,72 @@ def test_link_event_upserts_placeholder_for_unsynced_venue_market(conn):
     event_id = db.link_event(conn, MARKET["condition_id"], kalshi_cid)
     linked = conn.execute("SELECT condition_id FROM markets WHERE event_id = ?", (event_id,)).fetchall()
     assert {r["condition_id"] for r in linked} == {MARKET["condition_id"], kalshi_cid}
+
+
+# --- connect() must not need the write lock (2026-08-01..05 lock storm) ----
+
+def test_connect_succeeds_while_another_connection_holds_the_write_lock(tmp_path):
+    """THE regression test, reproducing the exact production failure.
+
+    connect() used to run executescript(SCHEMA), seven migrations and two
+    INSERT OR IGNOREs on EVERY call, so merely opening a connection to READ
+    one value took the write lock. schedule_state.last_run_age_seconds does
+    exactly that on every catch-up tick, so while a long job was writing, the
+    open failed with "database is locked" -- which is how an hourly learn run
+    turned into 84 unit restarts over three days.
+    """
+    import sqlite3
+
+    path = tmp_path / "lab.db"
+    db.connect(path).close()  # first open creates and migrates
+
+    writer = sqlite3.connect(path)
+    writer.execute("PRAGMA busy_timeout=0")
+    writer.execute("BEGIN IMMEDIATE")  # hold the write lock
+    writer.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('probe','1')")
+    try:
+        reader = db.connect(path)  # must not need the write lock
+        try:
+            assert reader.execute("SELECT COUNT(*) FROM markets").fetchone()[0] == 0
+        finally:
+            reader.close()
+    finally:
+        writer.rollback()
+        writer.close()
+
+
+def test_connect_still_migrates_a_new_database(tmp_path):
+    conn = db.connect(tmp_path / "fresh.db")
+    try:
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"markets", "forecasts", "model_versions", "wealth_ledger"} <= tables
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == db.SCHEMA_VERSION
+    finally:
+        conn.close()
+
+
+def test_connect_reruns_migrations_when_the_version_is_stale(tmp_path):
+    """The skip is version-gated, not unconditional: an out-of-date database
+    must still take the full path."""
+    path = tmp_path / "lab.db"
+    db.connect(path).close()
+
+    import sqlite3
+
+    raw = sqlite3.connect(path)
+    raw.execute("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
+    raw.execute("DROP TABLE wealth_ledger")
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(path)
+    try:
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "wealth_ledger" in tables, "stale schema was not re-migrated"
+        assert conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == db.SCHEMA_VERSION
+    finally:
+        conn.close()
