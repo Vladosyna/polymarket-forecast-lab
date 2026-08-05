@@ -1373,7 +1373,64 @@ confirmed:
   external_id: FEDHIKE-26DEC31
   external_question: Will the Federal Reserve hike rates by December 31, 2026?
   confirmed_ts: '2026-08-05T17:10:54+00:00'
-proposed: []
+proposed:
+- condition_id: '0x3f59d171eae6e7504a9f8716b0753c41a4c8f12fb8d2eaa927b013810da71c4e'
+  question: Will Max Clark win the 2026 AL Rookie of the Year award?
+  venue: kalshi
+  external_id: KXMLBALROTY-26-MCLA
+  external_question: Will Max Clark win AL ROTY?
+  rationale: Both the Polymarket question and the Kalshi market specifically ask whether
+    Max Clark will win the 2026 American League Rookie of the Year award. The resolution
+    criteria in both cases hinge on the official winner of the 2026 AL Rookie of the
+    Year. The minor nuances (Polymarket's handling of ties, cancellation, etc.) are
+    procedural and do not change the fundamental outcome being predicted. The identity
+    match is clear.
+  confidence: 0.95
+  proposed_ts: '2026-08-05T21:00:02+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x8b8b164d719db79db0311ffdf1e7044b46968c6115b10cda9e4536b4156f9f76'
+  question: Will Pete Crow-Armstrong win the 2026 National League Hank Aaron Award?
+  venue: kalshi
+  external_id: KXMLBNLHAARON-26-PCRO
+  external_question: Will Pete Crow-Armstrong win NL Hank Aaron Award?
+  rationale: 'Both markets ask whether Pete Crow-Armstrong will win the 2026 National
+    League Hank Aaron Award. The Kalshi ticker and outcome label confirm it is the
+    specific player-market for the NL Hank Aaron Award, matching the Polymarket question''s
+    specified league and award. Resolution criteria align: the Kalshi market resolves
+    Yes if he wins that award in 2026, while Polymarket resolves to him if he is the
+    official winner. Minor edge-case differences (e.g., tie-break, season cancellation)
+    do not affect the core identity for the Yes/No outcome on this specific player.
+    The tool''s high confidence is consistent with the clear match.'
+  confidence: 0.99
+  proposed_ts: '2026-08-05T21:00:04+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0xd94b47bdeba16ae948bfb147bda059f3543d6fca73291644dfff5268bba7a797'
+  question: Will Tucker Carlson win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-TCAR
+  external_question: Who will win the next presidential election?
+  rationale: 'Both markets resolve on whether Tucker Carlson wins the 2028 U.S. Presidential
+    Election, specifically whether he is inaugurated as President for the term beginning
+    in 2029. The Polymarket question explicitly asks if Carlson will win, with resolution
+    based on the winner of the 2028 election (via AP, Fox, NBC calling the same candidate
+    or inauguration). The Kalshi market''s specific outcome (Tucker Carlson) resolves
+    to Yes if Carlson is inaugurated as President for the 2029 term. These criteria
+    are aligned in substance: Carlson must win the election to be inaugurated, and
+    the election winner determines the next president. Minor differences in resolution
+    sources (AP/Fox/NBC vs. inauguration) do not create a meaningful discrepancy for
+    the ''Yes'' outcome. The match is valid.'
+  confidence: 0.98
+  proposed_ts: '2026-08-05T21:00:08+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
