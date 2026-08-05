@@ -250,3 +250,57 @@ def test_fit_m7_extremization_registers_first_fit_as_challenger(config):
     active = registry.active_version(conn, "m7_extremization")
     assert active is not None
     conn.close()
+
+
+def test_estimate_rho_bar_m7_projects_columns_instead_of_reading_order_books(config, tmp_path):
+    """This is 90 days x every venue's snapshots. Unprojected it also drags in
+    the bids_json/asks_json blobs -- >1.3GB on the live host, OOM-killed
+    (2026-08-05). The projection is the whole difference, so it is asserted,
+    not assumed.
+    """
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    conn = db.connect(config["storage"]["db_path"])
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map(
+        {"confirmed": [{"condition_id": "0x1", "venue": "kalshi", "external_id": "T1"}],
+         "proposed": []},
+        map_path,
+    )
+
+    now = now_utc()
+    for day_offset in range(12):
+        ts = now - timedelta(days=day_offset)
+        for cid in ("0x1", "kalshi:T1"):
+            store.append([{
+                "ts": floor_ts_bucket(ts, 5), "condition_id": cid, "token_id_yes": f"tok-{cid}",
+                "best_bid": 0.49, "best_ask": 0.51, "mid": 0.5, "spread": 0.02,
+                "bid_depth_usd": 100.0, "ask_depth_usd": 100.0, "last_trade_price": None,
+                "venue": "kalshi" if cid.startswith("kalshi") else "polymarket",
+            }])
+
+    seen: list = []
+    real_read_range = store.read_range
+
+    def spy(dates, columns=None):
+        seen.append(columns)
+        return real_read_range(dates, columns=columns)
+
+    store.read_range = spy
+    estimate_rho_bar_m7(conn, store, config, markets_map_path=map_path, min_days=5)
+    conn.close()
+
+    assert seen, "estimate_rho_bar_m7 never read snapshots -- fixture is wrong"
+    for columns in seen:
+        assert columns is not None, "unprojected read: the order-book blobs come with it"
+        assert "bids_json" not in columns and "asks_json" not in columns
+
+
+def test_price_moves_24h_projects_columns_too():
+    """Same defect class, and this one runs nightly inside the collector's own
+    cgroup."""
+    import inspect
+
+    from lab import forecast as fc
+
+    src = inspect.getsource(fc.price_moves_24h)
+    assert "read_range(dates, columns=" in src, "unprojected snapshot read is back"

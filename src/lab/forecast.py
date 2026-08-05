@@ -197,7 +197,10 @@ def price_moves_24h(store: SnapshotStore, config: dict[str, Any]) -> dict[str, f
     """|mid now - mid ~24h ago| per market, from snapshot history."""
     now = now_utc()
     dates = [utc_date_str(now - timedelta(days=d)) for d in range(3)]
-    df = store.read_range(dates)
+    # Same projection point as estimate_rho_bar_m7: only these three columns are
+    # read below, and an unprojected read drags the order-book JSON blobs in
+    # with them -- here inside the collector's own cgroup, every night.
+    df = store.read_range(dates, columns=["ts", "condition_id", "mid"])
     if df.is_empty():
         return {}
     moves: dict[str, float] = {}

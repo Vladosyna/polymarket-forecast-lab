@@ -308,7 +308,13 @@ def estimate_rho_bar_m7(conn, store, config: dict[str, Any],
 
     now = now_utc()
     dates = [utc_date_str(now - timedelta(days=d)) for d in range(lookback_days)]
-    df = store.read_range(dates)
+    # Projection matters here more than anywhere else in the codebase: this is
+    # 90 days of every venue's snapshots, and an unprojected read pulls the
+    # bids_json/asks_json order-book blobs -- "the bulk of a row's bytes", per
+    # read_range's own docstring -- for all of it. Unprojected it cost >1.3GB
+    # and was OOM-killed on the production host (2026-08-05); this function
+    # only ever reads these three columns.
+    df = store.read_range(dates, columns=["ts", "condition_id", "mid"])
     if df.is_empty():
         return None
 
