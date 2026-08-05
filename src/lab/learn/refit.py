@@ -35,6 +35,22 @@ def _obs_len(observations: Any) -> int:
     return len(observations)
 
 
+def _is_empty(rows: Any) -> bool:
+    """Emptiness test that a polars DataFrame survives.
+
+    `not df` raises TypeError ("the truth value of a DataFrame is ambiguous"),
+    which is how the walk-forward guard failed the first time the bootstrap set
+    was handed through as a frame. Anything without a length keeps the old
+    truthiness semantics, so a generator caller is unaffected.
+    """
+    if rows is None:
+        return True
+    try:
+        return len(rows) == 0
+    except TypeError:
+        return not rows
+
+
 def _obs_columns(observations: Any, names: tuple[str, ...],
                  defaults: dict[str, Any] | None = None) -> dict[str, np.ndarray]:
     """Column arrays from either a list of mappings or a polars DataFrame.
@@ -72,6 +88,8 @@ def _obs_columns(observations: Any, names: tuple[str, ...],
         else:
             out[name] = np.array([o[name] for o in observations])
     return out
+
+
 EPS = 1e-6
 
 
@@ -102,9 +120,9 @@ def assert_walk_forward(train: Any, validation: Any) -> None:
     is a bug. A refit call missing either window raises rather than silently
     fitting on full history.
     """
-    if not train:
+    if _is_empty(train):
         raise WalkForwardError("refit requires a non-empty training window")
-    if not validation:
+    if _is_empty(validation):
         raise WalkForwardError("refit requires a non-empty validation window")
 
 

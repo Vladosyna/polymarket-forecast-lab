@@ -182,3 +182,78 @@ def test_the_learn_loop_never_materialises_the_bootstrap_set_as_dicts():
     # Comments explain the ban and would otherwise match it.
     code = "\n".join(line.split("#", 1)[0] for line in src.splitlines())
     assert ".to_dicts()" not in code, "the bootstrap training set is being expanded into dicts again"
+
+
+def test_walk_forward_guard_accepts_a_dataframe_training_window():
+    """`not df` raises TypeError, so the guard silently became a crash the
+    first time the bootstrap set reached it as a frame (caught on the VPS,
+    2026-08-05, after the dict expansion was removed)."""
+    import polars as pl
+    import pytest
+
+    from lab.learn.refit import WalkForwardError, assert_walk_forward
+
+    rows = _synthetic_obs(120)
+    frame = pl.DataFrame(rows)
+
+    assert_walk_forward(frame, rows)          # must not raise
+    with pytest.raises(WalkForwardError):
+        assert_walk_forward(frame.head(0), rows)
+    with pytest.raises(WalkForwardError):
+        assert_walk_forward(frame, [])
+
+
+def test_refit_statistical_models_runs_end_to_end_with_a_dataframe_training_set(
+        tmp_path, monkeypatch):
+    """The whole point of the DataFrame path, exercised the way production runs
+    it. The unit tests above all called the fitters directly, which is why the
+    `not df` crash in the walk-forward guard was found on the VPS instead of
+    here -- nothing covered `refit_statistical_models` with a frame.
+    """
+    import polars as pl
+
+    from lab.learn.loop import refit_statistical_models
+    from lab.store import db
+    from lab.util import load_config
+
+    cfg = load_config()
+    cfg["storage"] = {
+        "db_path": str(tmp_path / "lab.db"),
+        "snapshots_dir": str(tmp_path / "snapshots"),
+        "models_dir": str(tmp_path / "models"),
+        "logs_dir": str(tmp_path / "logs"),
+        "reports_dir": str(tmp_path / "reports"),
+    }
+    rows = _synthetic_obs(1200)
+    # The bootstrap file has no venue column -- reproduce that exactly.
+    frame = pl.DataFrame([{k: v for k, v in r.items() if k != "venue"} for r in rows])
+    monkeypatch.setattr("lab.learn.bootstrap.load_observations", lambda config: frame)
+
+    conn = db.connect(cfg["storage"]["db_path"])
+    try:
+        # Live holdout: m0_market forecasts on resolved markets.
+        for i, r in enumerate(rows[:300]):
+            cid = f"0xlive{i:04d}"
+            conn.execute(
+                "INSERT INTO markets (condition_id, question, category, venue, tier, active, closed)"
+                " VALUES (?,?,?,'polymarket','liquid',0,1)", (cid, "q", r["category"]))
+            conn.execute(
+                "INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
+                " VALUES ('2026-01-01T00:00:00+00:00',?, 'm0_market', ?, ?)",
+                (cid, r["p_market"], r["p_market"]))
+            conn.execute(
+                "INSERT INTO resolutions (condition_id, resolved_ts, payout_yes, disputed)"
+                " VALUES (?, '2026-02-01T00:00:00+00:00', ?, 0)", (cid, r["outcome"]))
+        conn.commit()
+
+        results = refit_statistical_models(conn, cfg, apply=False)
+    finally:
+        conn.close()
+
+    # It must actually have fitted, not silently taken the insufficient-data branch.
+    assert "skipped" not in results["m1_curves"], results["m1_curves"]
+    assert "skipped" not in results["m1_hier_curves"], results["m1_hier_curves"]
+    assert results["m1_curves"]["n_train"] == len(rows)
+    assert results["m1_hier_curves"]["n_train"] == len(rows)
+    # per_market came from the frame, not from a row loop over dicts
+    assert results["m2_baserates"]
