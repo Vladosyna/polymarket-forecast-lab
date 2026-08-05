@@ -61,7 +61,7 @@ def _instrument(monkeypatch, config, durations):
         ("run_forecast_job", "forecast"), ("run_eval_job", "forecast"),
         ("run_report_job", "forecast"), ("run_publish_job", "publish"),
         ("run_ledger_commitment_job", "ledger"), ("run_shadow_job", "shadow"),
-        ("run_learn_job", "learn"), ("run_map_propose_job", "map_propose"),
+        ("run_map_propose_job", "map_propose"),
         ("run_pmxt_verify_job", "pmxt_verify"),
         ("run_paper_export_job", "paper_export"),
     ]:
@@ -102,7 +102,7 @@ def test_two_different_services_never_overlap(config, monkeypatch):
     )
 
 
-def test_all_six_services_fired_at_once_still_serialize(config, monkeypatch):
+def test_all_services_fired_at_once_still_serialize(config, monkeypatch):
     """The worst realistic case: a 1st-of-month that is also a Sunday, with
     every cron landing together. All must still run, one at a time."""
     state = _instrument(monkeypatch, config, {})
@@ -116,7 +116,7 @@ def test_all_six_services_fired_at_once_still_serialize(config, monkeypatch):
     assert state["peak"] == 1, f"peak concurrency {state['peak']}, expected 1"
     # Every service still got its turn -- serializing must not drop work.
     assert set(state["order"]) >= {
-        "forecast", "shadow", "learn", "map_propose", "pmxt_verify", "paper_export"}
+        "forecast", "shadow", "map_propose", "pmxt_verify", "paper_export"}
 
 
 def test_serialization_does_not_deadlock_on_repeat_calls(config, monkeypatch):

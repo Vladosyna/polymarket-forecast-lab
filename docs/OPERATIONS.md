@@ -435,6 +435,53 @@ closed it.
 
 ---
 
+### Second act: with the lock gone, learn was OOM-killed — a child does not leave its parent's cgroup (2026-08-05)
+
+The lock fix above was necessary and worked (zero `database is locked` errors
+after it landed), but it was not the whole story. Re-running learn through the
+orchestrator under observation — the thing that had never been done — it died
+again at 84 s:
+
+```
+lab learn exited -9 (a negative code is a signal, e.g. -9 = OOM-killed)
+```
+
+The same job standalone from the CLI finishes in about 101 s. That gap is the
+entire finding, and it is not about learn:
+
+**Running a batch job out-of-process does not give it its own memory budget.**
+`_run_lab_command_out_of_process` spawns `python -m lab learn` as a child, and a
+child inherits its parent's cgroup. So learn's ~830 MB peak landed *inside*
+`lab-run.service`'s 1400 MB cap, on top of the collector's own ~570 MB. The
+cgroup was over its limit and the kernel killed the newest, largest member.
+Out-of-process bought process isolation (a crash cannot corrupt the
+orchestrator's heap) — it never bought memory isolation, and the earlier
+report-render fix was read as if it had.
+
+**Fix: `lab learn` left the orchestrator entirely for its own systemd unit and
+timer** (`lab-learn.service` / `lab-learn.timer`, documented in
+`docs/VPS_OPERATIONS.md`). This is not a new pattern in this project — the pmxt
+scan has run exactly this way since the cutover. A separate unit means a
+separate cgroup, so learn's peak is charged to learn; if it ever exceeds its
+own cap, systemd kills learn and nothing else, and the collector does not
+notice. `tests/test_schedule.py::test_learn_is_not_scheduled_by_the_orchestrator_at_all`
+holds the removal in place.
+
+Two follow-ons landed with it. The weekly report moved 06:00 → 14:00 UTC: it
+had been sitting 4 h behind the nightly bundle, inside the ≥ 5 h margin the
+spacing test requires of the heaviest job — the test had simply never included
+`report_cron` in its job list, and reviewing the list for learn's removal is
+what surfaced it. And `report` itself remains an in-cgroup child of `lab-run`
+by deliberate choice: its ~834 MB peak is what the 1400 MB cap was sized for,
+and it is not worth a unit of its own while that holds.
+
+**The operator lesson.** "It runs out-of-process" and "it has its own resource
+budget" are different claims, and this system had been treating the first as
+evidence for the second since 2026-07-28. Only a process tree that systemd
+starts itself gets its own cgroup accounting.
+
+---
+
 ### The M1 training set is a host dependency, not a repo artifact
 
 `data/bootstrap/observations.parquet` (51 MB, 1,967,376 rows) is the ONLY

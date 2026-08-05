@@ -31,21 +31,26 @@ follows the same precedent for consistency. Revisit if this host ever runs
 anything beyond this lab.
 
 **Scope.** This host runs the **full pipeline** via `lab-run.service` (`uv run
-lab run` — collector + scheduled forecast/eval/report/shadow/learn, exactly like
+lab run` — collector + scheduled forecast/eval, report, and shadow, much like
 `docs/OPERATIONS.md`'s laptop setup) plus the **Streamlit dashboard**
 (`lab-dashboard.service`, read/write UI over the same data). The original
 `lab-collect.service` (collector-only) is disabled, not deleted — `lab-run.service`
 subsumes everything it did.
 
-**Two long-running systemd services, plus two systemd timers, run on this host:**
+The one job that is **not** in `lab-run.service` is the monthly `lab learn`
+loop: it has its own unit and timer, for cgroup-budget reasons spelled out in
+"Why `lab learn` has its own unit" below.
+
+**Two long-running systemd services, plus several systemd timers, run on this host:**
 
 | Unit | Purpose | Command |
 |---|---|---|
-| `lab-run.service` | **Primary orchestrator** (collector + forecast/eval/report/shadow/learn) | `uv run lab run` |
+| `lab-run.service` | **Primary orchestrator** (collector + forecast/eval, report, shadow, map_propose, pmxt_verify, paper_export) | `uv run lab run` |
 | `lab-collect.service` | Collector-only — **disabled since 2026-07-10**, kept for rollback | `uv run lab collect` |
 | `lab-dashboard.service` | Streamlit dashboard, loopback-only | `/root/.local/bin/uv run streamlit run src/lab/dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.headless true` |
 | `pmxt-scan.timer` → `pmxt-scan.service` | pmxt Router scan, twice daily 05:00/17:00 UTC | `uv run --with pmxt python scripts/pmxt_router_scan.py` |
-| `pmxt-verify.timer` → `pmxt-verify.service` | LLM-verify pmxt candidates into `markets_map.yaml`, twice daily 06:00/18:00 UTC | `uv run lab map pmxt-verify` |
+| `lab-learn.timer` → `lab-learn.service` | **Monthly learning loop** (dry-run), 1st of the month 04:00 UTC | `uv run lab learn` |
+| `pmxt-verify.timer` → `pmxt-verify.service` | **Disabled** — `lab-run.service` schedules the verify pass itself (17:00/21:00 UTC). Kept for a host that runs the pmxt cycle without the orchestrator | `uv run lab map pmxt-verify` |
 | `results-pull.timer` → `results-pull.service` | **Disabled since 2026-07-10** — role reversed, see "Cutover" below | `git pull --ff-only origin main` |
 
 Standard commands apply to the long-running services:
@@ -62,11 +67,11 @@ journalctl -u lab-dashboard.service -f
 For the timers (oneshot services, triggered on schedule — nothing to "keep running"):
 
 ```bash
-systemctl list-timers pmxt-scan.timer pmxt-verify.timer --no-pager   # next/last fire time
-systemctl start pmxt-scan.service      # trigger a scan right now, out of schedule
-systemctl start pmxt-verify.service    # trigger a verify pass right now
+systemctl list-timers lab-learn.timer pmxt-scan.timer --no-pager   # next/last fire time
+systemctl start lab-learn.service       # run the monthly learn diff right now
+systemctl start pmxt-scan.service       # trigger a scan right now, out of schedule
+journalctl -u lab-learn.service -n 60 --no-pager
 journalctl -u pmxt-scan.service -n 40 --no-pager
-journalctl -u pmxt-verify.service -n 40 --no-pager
 ```
 
 ---
@@ -185,6 +190,61 @@ returned cleanly (0 clusters matched for any of them at the time, which is a leg
 "nothing found yet" result, not an error). If a genuine schema problem appears instead,
 the script prints a line starting `pmxt schema mismatch` with the raw object dump needed
 to diagnose it.
+
+## Why `lab learn` has its own unit
+
+`lab learn` is the heaviest batch job in the system (~830 MB peak, ~100 s) and
+it runs once a month. Until 2026-08-05 the orchestrator scheduled it like any
+other analytics job, spawning it as a child process — which looked like enough
+isolation and was not:
+
+**A child process does not leave its parent's cgroup.** `python -m lab learn`
+launched from `lab-run.service` is accounted against *that unit's* memory
+budget. So learn's peak stacked on top of the collector's steady ~570 MB inside
+a 1400 MB cap, and the kernel killed learn at 84 s. The same job, started from
+the shell, finishes in about 101 s. Out-of-process gave crash isolation; only a
+separate unit gives memory isolation.
+
+`/etc/systemd/system/lab-learn.service` is a `Type=oneshot` unit with its own
+`MemoryMax`, triggered by `lab-learn.timer` (`OnCalendar=*-*-01 04:00:00 UTC`,
+`Persistent=true` so a reboot over the 1st still runs it). Exactly the pattern
+`pmxt-scan.timer` has used since the cutover.
+
+**It runs dry-run.** `uv run lab learn` with no `--apply` writes nothing — it
+produces the reviewable diff the brief requires (§6, "dry-run by default").
+Applying is a deliberate operator act:
+
+```bash
+journalctl -u lab-learn.service -n 200 --no-pager    # read the monthly diff
+cd /root/polymarket-forecast-lab && /root/.local/bin/uv run lab learn --apply
+```
+
+Note that M1/M1.x refits need `data/bootstrap/observations.parquet` present on
+this host or they report `skipped: insufficient_data` — see `docs/OPERATIONS.md`,
+"The M1 training set is a host dependency".
+
+**Memory budget, stated honestly.** The three units' caps (1400 + 500 + 900 MB)
+deliberately do **not** sum below the box's 1973 MB, which the 2026-07-30 wedge
+otherwise established as the rule. The rule targets units that run continuously
+and can all sit at their ceiling at once; `lab-learn` runs for ~2 minutes a
+month, in a 04:00 slot no other scheduled job occupies, against real concurrent
+usage of ~570 MB (orchestrator) + ~70 MB (dashboard). What its own cap buys is
+the invariant that matters here: if learn ever balloons, systemd kills **learn**
+and the collector never notices. Check the assumption still holds after any
+change to the other two caps:
+
+```bash
+systemctl show lab-run lab-dashboard lab-learn -p MemoryMax -p MemoryCurrent
+free -m
+```
+
+`lab status` prints the same comparison (its memory-budget block) and flags
+oversubscription automatically.
+
+**Why `report` did not also get a unit.** It has the same child-in-the-cgroup
+property, but its ~834 MB peak is precisely what `lab-run`'s 1400 MB cap was
+sized for, and it has been surviving there since 2026-07-28. Revisit if the
+collector's steady-state RSS grows.
 
 ## The dashboard: nginx + Let's Encrypt + HTTP Basic Auth
 
@@ -383,3 +443,4 @@ covers what is specific to this VPS host.
 | 2026-07-10 | **Public-repo push access fixed**: found this host had no way to push to the public `polymarket-forecast-lab` repo at all (plain HTTPS origin, no credential helper) — a gap that would have silently stranded every `pmxt_verify`/`ledger_commitment`/`paper_export` commit made here. Fixed with a new `id_ed25519_public_repo` deploy key (write access) plus a `github.com-public` SSH config alias, confirmed with a real push. |
 | 2026-07-10 | **Personal git identity added**: new personal-account SSH key (`id_ed25519_personal_github`) and GPG signing key generated on this host (and, independently, on the laptop); `commit.gpgsign`/`tag.gpgsign` enabled globally. Confirmed real commits to both the public and private results repos show `"verified": true` via the GitHub API. |
 | 2026-07-13 | **Laptop retired; the three-day-over parallel window's cost paid off in full.** Both hosts' `lab.db` had quietly diverged since the 07-10 cutover (each independently forecasting/resolving), which surfaced as two concrete problems on `git pull` here: (a) `docs/ledger_commitments.jsonl` had two non-reconciled entries for the same calendar date on three separate days (07-10/11/12) — resolved by keeping every entry from both sides (append-only discipline forbids picking a "winner" or silently rewriting either), so the file now honestly shows both hosts' independent commitments during the overlap; (b) the laptop's own local, never-commit `publish.enabled: false` override had leaked into a real commit (`26ccd36`, made from the laptop) — caught while merging this host's own pending commits back in, fixed in `6fbbab4` before this host pulled either. Also live-verified for the first time: this host's `lab-run.service` config also picked up `26ccd36`'s `m3_boundary_randomization_enabled: true` and the `eval/run.py`/`fee_schedule.yaml` changes cleanly through this same merge, then a `systemctl restart lab-run.service` (confirmed healthy: normal snapshot activity within seconds, `git rev-list` 0/0 against origin). Final `lab status` comparison ahead of retirement: this host 0 gaps in 24h on both tiers vs. the laptop's 145 (liquid) / 7 (tail) — the always-on host had already become the more reliable one, independent of the divergence bugs above. The laptop's final divergent state (a few hundred extra forecast rows unique to it) was backed up to the private results repo's own `laptop-final-snapshot-2026-07-13` branch, not merged into `main` — see `docs/OPERATIONS.md`'s retirement entry for why. One step remains outside any automated session's reach: the laptop's `PolymarketForecastLabWatchdog(Hourly)` scheduled tasks need `Unregister-ScheduledTask` from an **elevated** PowerShell to actually stop existing; until an operator runs that by hand, `data\PAUSE` on the laptop is the only thing stopping the hourly watchdog from resurrecting a now-pointless orchestrator there. |
+| 2026-08-05 | **`lab learn` moved out of the orchestrator into its own `lab-learn.service` + `lab-learn.timer`** (monthly, 1st 04:00 UTC, dry-run, own `MemoryMax`). Cause: after the `database is locked` storm was fixed, learn still died through the orchestrator — this time genuinely OOM-killed at 84 s, because a child process does not leave its parent's cgroup, so its ~830 MB peak was charged to `lab-run.service`'s 1400 MB budget on top of the collector's ~570 MB. Running it out-of-process was never memory isolation, only crash isolation. Same pattern `pmxt-scan.timer` has always used. Also in this change: the weekly report moved 06:00 → 14:00 UTC (it had been sitting inside the ≥ 5 h margin behind the nightly bundle that the spacing test requires, which had simply never checked `report_cron`); `pmxt-verify.timer` documented as disabled (the orchestrator schedules that pass itself at 17:00/21:00). Full writeup in `docs/OPERATIONS.md`. |

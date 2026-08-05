@@ -43,7 +43,10 @@ def _scheduled_jobs() -> dict[str, str]:
     return {
         "forecast": cfg["schedule"]["forecast_cron"],
         "shadow": cfg["schedule"]["shadow_cron"],
-        "learn": cfg["schedule"]["learn_cron"],
+        "report": cfg["schedule"]["report_cron"],
+        # No "learn": it left this process on 2026-08-05 for its own systemd
+        # timer, so its schedule is not this file's to space (and not this
+        # process's memory budget to share).
         "map_propose": cfg["cross_venue"]["propose_cron"],
         "pmxt_verify": cfg["cross_venue"]["pmxt_verify_cron"],
         "paper_export": cfg["paper_export"]["cron"],

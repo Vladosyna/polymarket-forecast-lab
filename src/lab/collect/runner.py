@@ -4,8 +4,16 @@ Every job checks the PAUSE kill file first, so polling halts within one cycle
 of the file appearing (guardrail 8).
 
 `run_collect` runs collection only. `run_orchestrator` (the one-button entry
-point) additionally schedules the analytics jobs -- forecast/eval/report,
-shadow, and learn -- on the same event loop.
+point) additionally schedules the analytics jobs -- forecast/eval, report,
+shadow -- on the same event loop.
+
+`lab learn` deliberately is NOT among them: it owns a separate systemd unit
+and timer (see docs/VPS_OPERATIONS.md). A child process does not leave its
+parent's cgroup, so running the monthly loop from here made it share the
+collector's memory budget -- on 2026-08-05 it was OOM-killed at 84s doing
+exactly that, while a standalone run of the same job finished in 101s. Batch
+work with its own footprint gets its own budget, the way the pmxt scan
+already does.
 """
 
 from __future__ import annotations
@@ -333,7 +341,7 @@ async def run_collect(config: dict[str, Any]) -> None:
         log.info("collector stopped")
 
 
-SERVICE_NAMES = ("forecast", "report", "shadow", "learn", "map_propose", "pmxt_verify",
+SERVICE_NAMES = ("forecast", "report", "shadow", "map_propose", "pmxt_verify",
                  "paper_export")
 
 
@@ -355,7 +363,6 @@ def _control_max_ages(config: dict[str, Any]) -> dict[str, float]:
         # 834MB child every hour for nothing.
         "report": control.get("report_max_age_hours", 192),
         "shadow": control.get("shadow_max_age_hours", 168),
-        "learn": control.get("learn_max_age_hours", 720),
         "map_propose": control.get("map_propose_max_age_hours", 168),
         "pmxt_verify": control.get("pmxt_verify_max_age_hours", 18),
         "paper_export": control.get("paper_export_max_age_hours", 192),
@@ -503,11 +510,6 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
     async def run_shadow_service() -> None:
         await _run("shadow", lambda: asyncio.to_thread(analytics.run_shadow_job, config))
 
-    async def run_learn_service() -> None:
-        # Out-of-process for the same reason as report: this is the heaviest
-        # batch job in the system and it wedged the host on 2026-08-02.
-        await _run("learn", lambda: _run_lab_command_out_of_process("learn"))
-
     async def run_map_propose_service() -> None:
         await _run("map_propose", lambda: asyncio.to_thread(analytics.run_map_propose_job, config))
 
@@ -521,7 +523,6 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
         "forecast": run_forecast_service,
         "report": run_report_service,
         "shadow": run_shadow_service,
-        "learn": run_learn_service,
         "map_propose": run_map_propose_service,
         "pmxt_verify": run_pmxt_verify_service,
         "paper_export": run_paper_export_service,
@@ -555,12 +556,15 @@ async def _run_overdue_services(
 
 
 def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -> AnalyticsContext:
-    """Schedule forecast/eval/report, shadow, and learn on cron triggers (UTC)."""
+    """Schedule forecast/eval, report and shadow on cron triggers (UTC).
+
+    `learn` is absent by design -- it runs from its own systemd timer so its
+    memory footprint does not share the collector's cgroup budget (see the
+    module docstring)."""
     sched = config.get("schedule", {})
     forecast_cron = sched.get("forecast_cron", "0 2 * * *")   # nightly 02:00
-    report_cron = sched.get("report_cron", "0 6 * * 0")       # weekly Sun 06:00
+    report_cron = sched.get("report_cron", "0 14 * * 0")      # weekly Sun 14:00
     shadow_cron = sched.get("shadow_cron", "0 3 * * 0")       # weekly Sun 03:00
-    learn_cron = sched.get("learn_cron", "0 4 1 * *")         # monthly 1st 04:00
     map_propose_cron = config.get("cross_venue", {}).get(
         "propose_cron", "0 5 * * 1")                          # weekly Mon 05:00
     pmxt_verify_cron = config.get("cross_venue", {}).get(
@@ -582,8 +586,9 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
                       id="report_weekly", max_instances=1, coalesce=True)
     scheduler.add_job(services["shadow"], CronTrigger.from_crontab(shadow_cron, timezone="UTC"),
                       id="weekly", max_instances=1, coalesce=True)
-    scheduler.add_job(services["learn"], CronTrigger.from_crontab(learn_cron, timezone="UTC"),
-                      id="monthly", max_instances=1, coalesce=True)
+    # No learn job here: it runs from its own systemd timer (lab-learn.timer),
+    # so its memory footprint gets its own cgroup budget instead of competing
+    # with the collector's. See the module docstring.
     # M7: proposes candidate matches only -- never auto-confirms. A human still
     # has to run `lab map confirm` before a pair goes live (brief section 6/9).
     scheduler.add_job(services["map_propose"], CronTrigger.from_crontab(map_propose_cron, timezone="UTC"),
@@ -598,7 +603,7 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
                       id="paper_export_weekly", max_instances=1, coalesce=True)
     log.info("analytics scheduled",
              extra={"ctx": {"nightly": forecast_cron, "report": report_cron, "weekly": shadow_cron,
-                            "monthly": learn_cron, "map_propose": map_propose_cron,
+                            "map_propose": map_propose_cron,
                             "pmxt_verify": pmxt_verify_cron, "paper_export": paper_export_cron,
                             "control": actx.max_age_hours}})
     return actx

@@ -259,9 +259,17 @@ schedule:
   # a ~834MB, ~3-minute child process on a 967MB host, and in-process it was
   # taking the collector down with it. `lab report` stays available on demand
   # whenever a fresher page is wanted.
-  report_cron: "0 6 * * 0"      # weekly Sunday 06:00 UTC -> render the report
+  # Moved 06:00 -> 12:00 on 2026-08-05: at 06:00 it sat only 4h after the
+  # nightly bundle, inside the >=5h margin the spacing test requires of the
+  # heaviest job. It had never been checked against that rule -- report was
+  # missing from the test's job list until learn's removal prompted a review.
+  report_cron: "0 14 * * 0"     # weekly Sunday 14:00 UTC -> render the report
   shadow_cron: "0 7 * * 0"      # weekly Sunday 07:00 UTC -> shadow portfolio (was 03:00)
-  learn_cron: "0 14 1 * *"      # monthly, 1st at 14:00 UTC -> learning loop (was 04:00)
+  # learn_cron REMOVED 2026-08-05: `lab learn` no longer runs from this
+  # process. It has its own systemd unit and timer (docs/VPS_OPERATIONS.md),
+  # because a child process does not leave its parent's cgroup -- running the
+  # monthly loop here made it share the collector's memory budget and it was
+  # OOM-killed at 84s doing so, while the same job standalone finishes in 101s.
   # Disabled 2026-07-20 -- was the retry engine in a self-sustaining OOM crash
   # loop on the VPS: report_job routinely fails to complete under memory
   # pressure (src/lab/eval/report.py's redundant, unprojected full-history
@@ -280,22 +288,11 @@ schedule:
   control:
     forecast_max_age_hours: 24     # nightly bundle should run at least daily
     shadow_max_age_hours: 168      # weekly -> 7 days
-    # HOLD, reinstated 2026-08-05 after removing it was shown to be wrong.
-    # It was lifted on 2026-08-02 to "test the orchestrator path" once a manual
-    # run completed in 101s. The test failed and kept failing unattended for
-    # three days: catch-up ran learn hourly, learn held the sqlite write lock
-    # so every other job died on "database is locked", the unit restarted 84
-    # times, and each partial run registered a fresh model_versions row -- 50
-    # junk m4_weights versions in an append-only audit trail.
-    #
-    # Two lessons, both mine: a safety measure removed to run an experiment
-    # must be watched to its conclusion, and `lab learn` completing from the
-    # CLI does not establish that it completes under the orchestrator.
-    #
-    # This suppresses ONLY the hourly catch-up retry; the monthly cron still
-    # fires. Restore to 720 only once learn is shown to finish under the
-    # orchestrator without holding the DB lock for the whole run.
-    learn_max_age_hours: 2000       # monthly -> 30 days
+    # learn_max_age_hours REMOVED 2026-08-05 along with the hourly catch-up
+    # that used it. The hold it briefly held (2000h) was only ever suppressing
+    # a retry loop whose real cause was db.connect() taking the write lock on
+    # every open; that is fixed, and learn now runs from its own timer, so
+    # there is no orchestrator-side overdue check for it to gate.       # monthly -> 30 days
     pmxt_verify_max_age_hours: 18  # twice-daily -> catch-up if a ~12h cycle is missed
     paper_export_max_age_hours: 192  # weekly -> 8 days (small buffer over the 7-day cadence)
   # Hourly health/liveness check: re-runs overdue analytics services and forces

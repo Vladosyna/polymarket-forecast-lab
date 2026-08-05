@@ -102,9 +102,9 @@ def test_orchestrator_job_registration(tmp_path):
         _register_health_check(scheduler, config, ctx, actx)
 
         job_ids = {job.id for job in scheduler.get_jobs()}
-        assert job_ids >= {"nightly", "weekly", "monthly", "health_check", "heartbeat_ping",
+        assert job_ids >= {"nightly", "weekly", "health_check", "heartbeat_ping",
                            "map_propose_weekly", "pmxt_verify_twice_daily"}
-        assert len(job_ids) >= 10  # 4 collector + heartbeat_ping + 4 analytics + health_check
+        assert len(job_ids) >= 9  # 4 collector + heartbeat_ping + 3 analytics + health_check
 
         health = scheduler.get_job("health_check")
         assert health is not None
@@ -213,9 +213,22 @@ def test_heavy_batch_jobs_run_out_of_process():
     assert "raise RuntimeError" in src
 
     services = inspect.getsource(runner._build_analytics_services)
-    for job in ("report", "learn"):
-        assert f'_run_lab_command_out_of_process("{job}")' in services, (
-            f"{job} is back in the orchestrator process"
-        )
-    # learn especially: it must not be an in-process thread call again.
-    assert "analytics.run_learn_job" not in services
+    assert '_run_lab_command_out_of_process("report")' in services, (
+        "report is back in the orchestrator process"
+    )
+
+
+def test_learn_is_not_scheduled_by_the_orchestrator_at_all():
+    """A child process does not leave its parent's cgroup, so running the
+    monthly loop from here made it share the collector's memory budget -- it
+    was OOM-killed at 84s on 2026-08-05 doing exactly that, while the same job
+    standalone finishes in 101s. It owns a systemd timer now."""
+    import inspect
+
+    from lab.collect import runner
+    from lab.collect.runner import _control_max_ages
+
+    assert "learn" not in runner.SERVICE_NAMES
+    assert "learn" not in _control_max_ages({})
+    src = inspect.getsource(runner._register_analytics_jobs)
+    assert 'services["learn"]' not in src
