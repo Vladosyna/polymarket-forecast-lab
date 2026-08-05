@@ -384,6 +384,57 @@ independently attributable and verifiable, not just push-authorized.
 | `metaculus last_snapshot_age=never` | Expected and benign by design, until at least one Metaculus pair exists in `data\markets_map.yaml`'s confirmed list | No action — there is no broad Metaculus universe sync, only confirmed-pair snapshots. |
 | "LLM spend today: $X / cap $Y" near the cap | By design (guardrail 10): M3 and the weekly M7 propose job will start skipping remaining markets for the rest of the UTC day once the cap is hit | Not an error — just fewer forecasts/proposals until the cap resets at UTC midnight. No action needed. |
 
+### Incident: every connection took the write lock (2026-08-01 → 08-05)
+
+Presented as an hourly 100%-CPU spike, an hourly restart, and heartbeat
+alerts. Cost: 84 unit restarts over three days, and 50 junk `model_versions`
+rows written into an append-only audit trail.
+
+**Root cause, and it was not the job that looked guilty.** `db.connect()` ran
+`executescript(SCHEMA)`, all seven migrations and two `INSERT OR IGNORE`s on
+**every call**. All of that takes the SQLite write lock. So opening a
+connection merely to *read* — which `schedule_state.last_run_age_seconds`
+does on every hourly catch-up tick — contended with whatever was writing.
+Under light load this was invisible for months. With one long-running job
+holding the writer, every concurrent open failed outright. The production
+traceback ends at `migrate_multi_venue`'s `INSERT OR IGNORE INTO venues`,
+reached from `last_run_age_seconds`.
+
+`lab learn` was blamed for three days and was innocent. It was simply the
+first job long enough to keep a writer busy while the catch-up kept opening
+read connections. Every hour: catch-up saw learn overdue (it never stamped a
+success, because it kept dying) → ran it → learn wrote → every other job died
+on "database is locked" → the unit restarted → repeat. Each partial run got
+far enough to register a `model_versions` row before dying, which is where the
+50 junk rows came from.
+
+**Fix:** the schema/migration block now runs only when the database is not
+already at `SCHEMA_VERSION`, so an ordinary open is a single read. Safe
+precisely because the migrations were already idempotent and version-gated —
+the version check reads what they would otherwise re-assert. A new or stale
+database still takes the full path. Regression test holds the write lock on
+one connection and requires another to open successfully; it fails without the
+fix, at the same line as the production traceback.
+
+**The 50 junk rows are left in place.** `model_versions` is append-only for
+the same reason `docs/ledger_commitments.jsonl` is: deleting rows to tidy an
+audit trail is the act the trail exists to make detectable. They are inert —
+all 50 have `is_active = 0` and none was ever promoted (registered
+2026-08-03T02:13 .. 2026-08-05T17:03; the 7 active versions all predate the
+window or come from the deliberate 2026-08-02 apply). Anyone counting
+`m4_weights` versions should know they include hourly artifacts of a crash
+loop, not 178 considered model revisions.
+
+**Two operator lessons, both earned the hard way here.** A safety measure
+removed to run an experiment has to be watched to its conclusion — the hold on
+learn's catch-up was lifted on 2026-08-02 to test something and left lifted
+for three unattended days. And a job completing from the CLI does not
+establish that it completes under the orchestrator; that was the exact gap the
+test was meant to close, and a single manual success was treated as if it had
+closed it.
+
+---
+
 ### The M1 training set is a host dependency, not a repo artifact
 
 `data/bootstrap/observations.parquet` (51 MB, 1,967,376 rows) is the ONLY
