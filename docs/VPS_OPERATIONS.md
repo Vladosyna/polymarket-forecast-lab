@@ -193,17 +193,26 @@ to diagnose it.
 
 ## Why `lab learn` has its own unit
 
-`lab learn` is the heaviest batch job in the system (~830 MB peak, ~100 s) and
+`lab learn` is the heaviest batch job in the system (~900 MB peak, ~105 s) and
 it runs once a month. Until 2026-08-05 the orchestrator scheduled it like any
 other analytics job, spawning it as a child process — which looked like enough
 isolation and was not:
 
 **A child process does not leave its parent's cgroup.** `python -m lab learn`
 launched from `lab-run.service` is accounted against *that unit's* memory
-budget. So learn's peak stacked on top of the collector's steady ~570 MB inside
-a 1400 MB cap, and the kernel killed learn at 84 s. The same job, started from
-the shell, finishes in about 101 s. Out-of-process gave crash isolation; only a
-separate unit gives memory isolation.
+budget. So learn's peak stacked on top of the collector's steady ~500 MB inside
+a 1400 MB cap, and the kernel killed it at 84 s. Out-of-process gave crash
+isolation; only a separate unit gives memory isolation.
+
+Giving it a unit is what made the footprint *measurable*, and measuring it
+found two real defects rather than a number to configure around. Before those
+were fixed the job needed **1747 MB of RAM plus 1666 MB of swap and still died**
+on a 1973 MB box: it expanded the 1,967,376-row bootstrap training set into
+Python dicts (~1.8 GB), and `estimate_rho_bar_m7` read 90 days of every venue's
+snapshots without a column projection, dragging the order-book JSON blobs along
+(>1.3 GB). Both are fixed in code; the job now peaks at 900 MB with no swap.
+The lesson worth keeping: a cap is a diagnostic, not a fix — the first two
+attempts here raised it, and both times raising it was wrong.
 
 `/etc/systemd/system/lab-learn.service` is a `Type=oneshot` unit with its own
 `MemoryMax`, triggered by `lab-learn.timer` (`OnCalendar=*-*-01 04:00:00 UTC`,
@@ -226,12 +235,18 @@ this host or they report `skipped: insufficient_data` — see `docs/OPERATIONS.m
 **Memory budget, stated honestly.** The three units' caps (1400 + 500 + 900 MB)
 deliberately do **not** sum below the box's 1973 MB, which the 2026-07-30 wedge
 otherwise established as the rule. The rule targets units that run continuously
-and can all sit at their ceiling at once; `lab-learn` runs for ~2 minutes a
-month, in a 04:00 slot no other scheduled job occupies, against real concurrent
-usage of ~570 MB (orchestrator) + ~70 MB (dashboard). What its own cap buys is
-the invariant that matters here: if learn ever balloons, systemd kills **learn**
-and the collector never notices. Check the assumption still holds after any
-change to the other two caps:
+and can all sit at their ceiling at once; `lab-learn` runs for under two minutes
+a month, in a 04:00 slot no other scheduled job occupies, against real
+concurrent usage of ~500 MB (orchestrator) + ~70 MB (dashboard). What its own
+cap buys is the invariant that matters here: if learn ever balloons, systemd
+kills **learn** and the collector never notices — which is exactly what happened
+on 2026-08-05, repeatedly, while the collector logged 0 restarts throughout.
+
+900 MB is the measured no-swap point, not a guess: the same run completes at
+700 MB (154 MB swapped) and at 600 MB (242 MB swapped), and touches no swap at
+900 MB. Prefer keeping it there — swapping a job that holds the whole training
+set is how a 105-second job becomes a nine-minute one. Check the assumption
+still holds after any change to the other two caps:
 
 ```bash
 systemctl show lab-run lab-dashboard lab-learn -p MemoryMax -p MemoryCurrent
@@ -443,4 +458,4 @@ covers what is specific to this VPS host.
 | 2026-07-10 | **Public-repo push access fixed**: found this host had no way to push to the public `polymarket-forecast-lab` repo at all (plain HTTPS origin, no credential helper) — a gap that would have silently stranded every `pmxt_verify`/`ledger_commitment`/`paper_export` commit made here. Fixed with a new `id_ed25519_public_repo` deploy key (write access) plus a `github.com-public` SSH config alias, confirmed with a real push. |
 | 2026-07-10 | **Personal git identity added**: new personal-account SSH key (`id_ed25519_personal_github`) and GPG signing key generated on this host (and, independently, on the laptop); `commit.gpgsign`/`tag.gpgsign` enabled globally. Confirmed real commits to both the public and private results repos show `"verified": true` via the GitHub API. |
 | 2026-07-13 | **Laptop retired; the three-day-over parallel window's cost paid off in full.** Both hosts' `lab.db` had quietly diverged since the 07-10 cutover (each independently forecasting/resolving), which surfaced as two concrete problems on `git pull` here: (a) `docs/ledger_commitments.jsonl` had two non-reconciled entries for the same calendar date on three separate days (07-10/11/12) — resolved by keeping every entry from both sides (append-only discipline forbids picking a "winner" or silently rewriting either), so the file now honestly shows both hosts' independent commitments during the overlap; (b) the laptop's own local, never-commit `publish.enabled: false` override had leaked into a real commit (`26ccd36`, made from the laptop) — caught while merging this host's own pending commits back in, fixed in `6fbbab4` before this host pulled either. Also live-verified for the first time: this host's `lab-run.service` config also picked up `26ccd36`'s `m3_boundary_randomization_enabled: true` and the `eval/run.py`/`fee_schedule.yaml` changes cleanly through this same merge, then a `systemctl restart lab-run.service` (confirmed healthy: normal snapshot activity within seconds, `git rev-list` 0/0 against origin). Final `lab status` comparison ahead of retirement: this host 0 gaps in 24h on both tiers vs. the laptop's 145 (liquid) / 7 (tail) — the always-on host had already become the more reliable one, independent of the divergence bugs above. The laptop's final divergent state (a few hundred extra forecast rows unique to it) was backed up to the private results repo's own `laptop-final-snapshot-2026-07-13` branch, not merged into `main` — see `docs/OPERATIONS.md`'s retirement entry for why. One step remains outside any automated session's reach: the laptop's `PolymarketForecastLabWatchdog(Hourly)` scheduled tasks need `Unregister-ScheduledTask` from an **elevated** PowerShell to actually stop existing; until an operator runs that by hand, `data\PAUSE` on the laptop is the only thing stopping the hourly watchdog from resurrecting a now-pointless orchestrator there. |
-| 2026-08-05 | **`lab learn` moved out of the orchestrator into its own `lab-learn.service` + `lab-learn.timer`** (monthly, 1st 04:00 UTC, dry-run, own `MemoryMax`). Cause: after the `database is locked` storm was fixed, learn still died through the orchestrator — this time genuinely OOM-killed at 84 s, because a child process does not leave its parent's cgroup, so its ~830 MB peak was charged to `lab-run.service`'s 1400 MB budget on top of the collector's ~570 MB. Running it out-of-process was never memory isolation, only crash isolation. Same pattern `pmxt-scan.timer` has always used. Also in this change: the weekly report moved 06:00 → 14:00 UTC (it had been sitting inside the ≥ 5 h margin behind the nightly bundle that the spacing test requires, which had simply never checked `report_cron`); `pmxt-verify.timer` documented as disabled (the orchestrator schedules that pass itself at 17:00/21:00). Full writeup in `docs/OPERATIONS.md`. |
+| 2026-08-05 | **`lab learn` moved out of the orchestrator into its own `lab-learn.service` + `lab-learn.timer`** (monthly, 1st 04:00 UTC, dry-run, `MemoryMax=900M`). Cause: after the `database is locked` storm was fixed, learn still died through the orchestrator — this time genuinely OOM-killed, because a child process does not leave its parent's cgroup, so its peak was charged to `lab-run.service`'s budget on top of the collector's. Running it out-of-process was never memory isolation, only crash isolation. Same pattern `pmxt-scan.timer` has always used. Measuring it in its own cgroup then exposed two real defects, both fixed in code rather than configured around: the bootstrap training set was expanded into 1,967,376 Python dicts (~1.8 GB), and `estimate_rho_bar_m7` read 90 days of snapshots unprojected, order-book blobs included (>1.3 GB). Peak went 1747 MB (+1666 MB swap, still dying) → 900 MB, no swap, 105 s. Also in this change: the weekly report moved 06:00 → 14:00 UTC (it had been sitting inside the ≥ 5 h margin behind the nightly bundle that the spacing test requires, which had simply never checked `report_cron`); `pmxt-verify.timer` documented as disabled (the orchestrator schedules that pass itself at 17:00/21:00). Full writeup in `docs/OPERATIONS.md`. |

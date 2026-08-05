@@ -467,6 +467,43 @@ own cap, systemd kills learn and nothing else, and the collector does not
 notice. `tests/test_schedule.py::test_learn_is_not_scheduled_by_the_orchestrator_at_all`
 holds the removal in place.
 
+**Third act: with its own cgroup, the footprint became measurable — and the
+number was absurd.** In an *uncapped* accounting cgroup the job peaked at
+**1747 MB of RAM plus 1666 MB of swap and was still killed**, on a 1973 MB box.
+No cap can accommodate that, so the next three attempts (900 MB, 700 MB,
+1200 MB) were all wrong by construction. Step-by-step RSS probing through
+`run_learn`'s stages found two independent defects, both fixed in code:
+
+1. **The bootstrap training set was expanded into Python dicts.**
+   `loop.py`'s `load_observations(config).to_dicts()` turned
+   `observations.parquet` — 1,967,376 rows × 5 columns, ~80 MB as Arrow — into
+   ~1.8 GB of dict shells and boxed floats. Both M1 fitters only ever read
+   fixed columns as numpy arrays, so they now take either shape and the loop
+   hands them the frame. Verified byte-identical against the previous
+   implementation on all four horizon buckets before deploying.
+2. **`estimate_rho_bar_m7` read 90 days of snapshots unprojected.** Its input
+   is 268 resolved rows, but it pulled every venue's snapshot history for the
+   whole window *including* the `bids_json`/`asks_json` order-book blobs —
+   >1.3 GB. `read_range` has had a `columns=` projection since the report
+   readers needed one; this call site simply never used it. `price_moves_24h`
+   had the same defect on a 3-day window and, worse, runs nightly inside the
+   collector's own cgroup, so it was fixed too.
+
+After both: **900 MB peak, no swap, 105 s**, completing cleanly under its own
+cap. The same run also succeeds at 700 MB and 600 MB by swapping, so 900 MB is
+chosen as the measured no-swap point rather than the minimum that survives.
+
+Note what the fixes did *not* change: `m1_curves` and `m1_hier_curves` came
+back **not promoted**, their confidence sequences spanning zero (`cs_lo`
+≈ −0.018) on n_train = 1,967,376 and n_holdout = 14,468. The CI gate worked
+exactly as specified throughout; it was never what was broken.
+
+**The operator lesson, second half.** Three times in this incident the
+reflex was to adjust the memory cap, and three times the cap was not the
+problem — a cap is a diagnostic that tells you what a job demands, and a job
+demanding 3.4 GB to fit four logistic curves is telling you about the job. The
+useful move was to instrument the stages and read the numbers.
+
 Two follow-ons landed with it. The weekly report moved 06:00 → 14:00 UTC: it
 had been sitting 4 h behind the nightly bundle, inside the ≥ 5 h margin the
 spacing test requires of the heaviest job — the test had simply never included
