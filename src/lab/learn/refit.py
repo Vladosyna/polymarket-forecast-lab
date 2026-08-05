@@ -28,6 +28,50 @@ HORIZON_BUCKETS = {
     "30to90d": (30, 90),
     "gt90d": (90, 10_000),
 }
+
+
+def _obs_len(observations: Any) -> int:
+    """Row count for either input shape (a DataFrame is not truthy-testable)."""
+    return len(observations)
+
+
+def _obs_columns(observations: Any, names: tuple[str, ...],
+                 defaults: dict[str, Any] | None = None) -> dict[str, np.ndarray]:
+    """Column arrays from either a list of mappings or a polars DataFrame.
+
+    Both M1 fitters read a fixed handful of columns and immediately turn them
+    into numpy arrays, so the row-of-dicts shape is pure overhead for a large
+    training set. The bootstrap set is 1,967,376 rows: as Python dicts it cost
+    ~1.8GB RSS -- more than the production host physically has, which is how it
+    was found (2026-08-05, `lab learn` OOM-killed even with swap). Handed the
+    DataFrame directly, the same fit reads five contiguous arrays.
+
+    The list-of-mappings path is unchanged and stays the one every other
+    caller (the live holdout, every test fixture) uses. `defaults` supplies a
+    constant column for a name the input does not carry -- the bootstrap file
+    has no `venue` column, and both shapes must agree that those rows are
+    'polymarket' (M1.x's own convention).
+    """
+    defaults = defaults or {}
+    n = _obs_len(observations)
+    if hasattr(observations, "get_column"):          # polars DataFrame
+        present = set(observations.columns)
+        out: dict[str, np.ndarray] = {}
+        for name in names:
+            if name in present:
+                out[name] = observations.get_column(name).to_numpy()
+            elif name in defaults:
+                out[name] = np.full(n, defaults[name])
+            else:
+                raise KeyError(f"observations are missing required column {name!r}")
+        return out
+    out = {}
+    for name in names:
+        if name in defaults:
+            out[name] = np.array([o.get(name, defaults[name]) for o in observations])
+        else:
+            out[name] = np.array([o[name] for o in observations])
+    return out
 EPS = 1e-6
 
 
@@ -153,25 +197,28 @@ def isotonic_fit(p_market: np.ndarray, y: np.ndarray, n_bins: int = 20) -> list[
 def fit_m1_curves(observations: list[dict]) -> dict[str, Any]:
     """Fit per-horizon-bucket recalibration curves.
 
-    observations: [{p_market, outcome, days_to_resolution}, ...]
+    observations: [{p_market, outcome, days_to_resolution}, ...], or a polars
+    DataFrame carrying the same columns (see `_obs_columns`).
     """
     artifact: dict[str, Any] = {"kind": "m1_curves", "fitted_at": now_utc_iso(), "buckets": {}}
-    if not observations:
+    if _obs_len(observations) == 0:
         log.warning("m1 fit: no observations")
         return artifact
-    obs = np.array(
-        [(o["p_market"], o["outcome"], o["days_to_resolution"]) for o in observations], dtype=float
-    )
+    cols = _obs_columns(observations, ("p_market", "outcome", "days_to_resolution"))
+    p_all = cols["p_market"].astype(float)
+    y_all = cols["outcome"].astype(float)
+    d_all = cols["days_to_resolution"].astype(float)
     for name in HORIZON_BUCKETS:
         lo, hi = HORIZON_BUCKETS[name]
-        mask = (obs[:, 2] >= lo) & (obs[:, 2] < hi)
-        subset = obs[mask]
-        if len(subset) < 100:
+        mask = (d_all >= lo) & (d_all < hi)
+        n_bucket = int(np.count_nonzero(mask))
+        if n_bucket < 100:
             log.warning("m1 fit: bucket has too few observations, skipping",
-                        extra={"ctx": {"bucket": name, "n": int(len(subset))}})
+                        extra={"ctx": {"bucket": name, "n": n_bucket}})
             continue
-        fit = fit_logistic_recalibration(subset[:, 0], subset[:, 1])
-        iso = isotonic_fit(subset[:, 0], subset[:, 1])
+        p_b, y_b = p_all[mask], y_all[mask]
+        fit = fit_logistic_recalibration(p_b, y_b)
+        iso = isotonic_fit(p_b, y_b)
         iso_dev = max(
             (abs(float(sigmoid(fit["alpha"] + fit["beta"] * logit(b["p_center"]))) - b["isotonic"])
              for b in iso),
@@ -200,30 +247,41 @@ def fit_m1_hier_curves(
     the same outcome as an infinitely-shrunk offset, without wasting a
     parameter on noise).
 
-    observations: [{p_market, outcome, days_to_resolution, venue}, ...].
+    observations: [{p_market, outcome, days_to_resolution, venue}, ...], or a
+    polars DataFrame carrying the same columns (see `_obs_columns`); a missing
+    `venue` column means 'polymarket', as the bootstrap training set has none.
     Guardrail 16: fits only on polymarket/kalshi/metaculus rows -- any other
     venue tag is dropped before fitting, a second explicit backstop beyond
     whatever filtering the caller already did.
     """
     artifact: dict[str, Any] = {"kind": "m1_hier_curves", "fitted_at": now_utc_iso(), "buckets": {}}
-    obs = [o for o in observations if o.get("venue", "polymarket") in HIER_ALLOWED_VENUES]
-    if not obs:
+    if _obs_len(observations) == 0:
         log.warning("m1_hier fit: no observations")
         return artifact
+    cols = _obs_columns(observations, ("p_market", "outcome", "days_to_resolution", "venue"),
+                        defaults={"venue": "polymarket"})
+    allowed = np.isin(cols["venue"], HIER_ALLOWED_VENUES)
+    if not allowed.any():
+        log.warning("m1_hier fit: no observations")
+        return artifact
+    p_all = cols["p_market"].astype(float)[allowed]
+    y_all = cols["outcome"].astype(float)[allowed]
+    d_all = cols["days_to_resolution"].astype(float)[allowed]
+    v_all = cols["venue"][allowed]
 
     for name in HORIZON_BUCKETS:
         lo, hi = HORIZON_BUCKETS[name]
-        subset = [o for o in obs if lo <= o["days_to_resolution"] < hi]
-        if len(subset) < min_bucket_n:
+        in_bucket = (d_all >= lo) & (d_all < hi)
+        bucket_n = int(np.count_nonzero(in_bucket))
+        if bucket_n < min_bucket_n:
             log.warning("m1_hier fit: bucket has too few observations, skipping",
-                        extra={"ctx": {"bucket": name, "n": len(subset)}})
+                        extra={"ctx": {"bucket": name, "n": bucket_n}})
             continue
 
-        p = np.array([o["p_market"] for o in subset], dtype=float)
-        y = np.array([o["outcome"] for o in subset], dtype=float)
-        venues = np.array([o.get("venue", "polymarket") for o in subset])
+        p = p_all[in_bucket]
+        y = y_all[in_bucket]
+        venues = v_all[in_bucket]
         x = logit(p)
-        bucket_n = len(subset)
 
         venue_counts = {v: int(np.sum(venues == v)) for v in sorted(set(venues.tolist()))}
         fit_venues = [v for v in venue_counts if venue_counts[v] >= min_venue_n]

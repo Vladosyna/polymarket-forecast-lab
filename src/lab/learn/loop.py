@@ -494,21 +494,25 @@ def refit_statistical_models(conn, config: dict[str, Any], *, apply: bool) -> di
     results: dict[str, Any] = {}
     pct = _max_step_pct(config)
 
+    # Kept as a DataFrame, deliberately: `.to_dicts()` on this file (1,967,376
+    # rows) cost ~1.8GB RSS and was OOM-killed on the production host, while
+    # both fitters only ever read fixed columns as arrays (see refit._obs_columns).
     try:
-        obs = load_observations(config).to_dicts()
+        obs = load_observations(config)
     except FileNotFoundError:
         obs = []
     live = m1_resolved_rows(conn)  # walk-forward holdout: the lab's own forward record
+    n_obs = len(obs)
 
-    if obs and live:
+    if n_obs and live:
         m1 = fit_m1_walk_forward(train=obs, validation=live)
         m1 = _bound_m1_curves(load_active_artifact(config, "m1_curves"), m1, pct)
         results["m1_curves"] = _process_challenger(
             conn, config, "m1_curves", m1, live, _m1_predict, apply=apply)
-        results["m1_curves"].update(n_train=len(obs), n_holdout=len(live))
+        results["m1_curves"].update(n_train=n_obs, n_holdout=len(live))
     else:
         results["m1_curves"] = {"skipped": "insufficient_data",
-                                "n_train": len(obs), "n_holdout": len(live)}
+                                "n_train": n_obs, "n_holdout": len(live)}
 
     # M1.x hierarchical recalibration (Phase 12): same train/validation split as
     # m1_curves above -- the bootstrap `obs` carries no venue tag and defaults to
@@ -517,21 +521,27 @@ def refit_statistical_models(conn, config: dict[str, Any], *, apply: bool) -> di
     # Registers under its OWN artifact key ('m1_hier_curves'), so the very first
     # fit auto-promotes (no incumbent to touch) and every later refit is CI-gated
     # against its own prior version -- m1_curves' active pointer is never touched.
-    if obs and live:
+    if n_obs and live:
         m1h = fit_m1_hier_walk_forward(train=obs, validation=live)
         m1h = _bound_m1_hier_curves(load_active_artifact(config, "m1_hier_curves"), m1h, pct)
         results["m1_hier_curves"] = _process_challenger(
             conn, config, "m1_hier_curves", m1h, live, _m1_hier_predict, apply=apply)
-        results["m1_hier_curves"].update(n_train=len(obs), n_holdout=len(live))
+        results["m1_hier_curves"].update(n_train=n_obs, n_holdout=len(live))
     else:
         results["m1_hier_curves"] = {"skipped": "insufficient_data",
-                                     "n_train": len(obs), "n_holdout": len(live)}
+                                     "n_train": n_obs, "n_holdout": len(live)}
 
+    # First occurrence per condition_id wins, same as the row loop this replaces
+    # -- done in polars so the 2M-row training set never becomes Python objects.
     per_market: dict[str, dict] = {}
-    for o in obs:
-        cid = o.get("condition_id")
-        if cid and cid not in per_market:
-            per_market[cid] = {"category": o.get("category", "unknown"), "outcome": o["outcome"]}
+    if n_obs:
+        first = obs.unique(subset=["condition_id"], keep="first", maintain_order=True)
+        for cid, cat, outcome in zip(first.get_column("condition_id"),
+                                     first.get_column("category"),
+                                     first.get_column("outcome")):
+            if cid:
+                per_market[cid] = {"category": cat if cat is not None else "unknown",
+                                   "outcome": outcome}
     for r in conn.execute(
         """SELECT m.condition_id, m.category, r.payout_yes AS outcome
            FROM resolutions r JOIN markets m ON m.condition_id = r.condition_id
