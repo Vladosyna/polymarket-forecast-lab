@@ -512,6 +512,72 @@ what surfaced it. And `report` itself remains an in-cgroup child of `lab-run`
 by deliberate choice: its ~834 MB peak is what the 1400 MB cap was sized for,
 and it is not worth a unit of its own while that holds.
 
+---
+
+### The hourly crash loop: the nightly bundle read the whole snapshot archive (2026-08-02 .. 08-06)
+
+**Symptom the operator saw:** ~100% CPU every hour. **What it actually was:**
+`lab-run.service` OOM-killed on a 62-minute cycle, 19 restarts, each one taking
+the collector down with it — roughly 24 collector kills a day for four days,
+against unrecoverable snapshot history.
+
+**The loop.** `last_run_forecast` was stuck at 2026-08-02T16:18. Every hourly
+health check saw the nightly bundle 90+ hours overdue, ran it, the bundle
+crossed the unit's 1400 MB cap, the cgroup killed the whole unit, systemd
+restarted it, and the stamp stayed stale. 21 minutes of CPU per cycle on a
+1-vCPU box is what surfaced it.
+
+**Three separate reads, all the same defect, found one at a time.** Each fix was
+real and none of them was sufficient, which is the part worth remembering:
+
+1. `eligible_market_states` → `latest_per_market`: two days of every venue's
+   snapshots at the full schema, **+578 MB** per call, and it is called 11 times
+   across forecast/universe/M3/M6/M7/shadow — several inside one bundle. Fixed
+   by defaulting the method to every column except the order-book blobs (nothing
+   in `src/lab` reads them back) and reducing one day at a time.
+2. `clv_validity_check` → `read_range`: **every partition in the archive** —
+   measured live, 30 partitions, 14,900,405 rows, 675 MB even projected to three
+   columns — to score a handful of sports markets. Projection could not fix it;
+   the waste was rows. `read_range` gained a `condition_ids` filter, applied at
+   all four call sites of that shape rather than only the one that crashed.
+3. `build_mid_index`: the index built over that read was a dict of Python lists
+   of ISO strings and floats, ~100 bytes a row. It took the report render from
+   444 MB to **1227 MB**. Now int64 epochs and float64 mids, 16 bytes a row.
+
+**What made the loop self-sustaining, and why it hid from the first two fixes.**
+The fatal read was in `update_clv_trust_flag`, which runs *after* `run_eval`
+returns. So the bundle logged `eval complete`, then died — before
+`record_job_run`. Finished work that never counted as done, re-run hourly. The
+diagnostic tell was one missing log line: `lab.eval.run: eval complete` appeared
+every cycle, `lab.jobs: eval job complete` never did.
+
+**Verified fixed, 2026-08-06:** bundle ran end to end (forecast 16:03, eval job
+complete 16:15), stamp written, 0 restarts, unit peak 833 MB against the
+1400 MB cap. The bundle's own concurrency guard also proved out: the health
+check fired a second forecast catch-up at 16:12 while the first was still
+running, and the per-service lock skipped it — no double run, no double LLM
+spend.
+
+**The report was next in line and would have died tomorrow.** `last_run_report`
+was 7 days old against a 192-hour control, so the catch-up would have fired it
+on 08-07. Measured before the index fix: collector 288 MB anon + render
+1227 MB = 1515 MB against a 1400 MB cap. After: 288 + 684 = 972 MB. Caught by
+measuring instead of waiting.
+
+**Two operator notes on metrics used here.** A cgroup's `MemoryPeak` counts
+reclaimable page cache, so a read-heavy job reports a peak equal to whatever cap
+it was given — it reads "at the limit" whether or not it is near trouble. Use
+the process's anonymous RSS (`memory.stat`'s `anon`, or the report's own
+per-phase probes) to size anything. And `MemoryCurrent` right after a big job
+overstates the steady state for the same reason: it read 708 MB where the
+collector's actual anon was 288 MB.
+
+**The lesson.** Two days, three fixes, one defect class: a large read that is
+narrowed by neither columns nor rows. After the first fix the class was not
+swept — only the site that had crashed was. Whenever one of these turns up,
+enumerate every caller of the same reader and classify each, rather than fixing
+the one in the traceback.
+
 **The operator lesson.** "It runs out-of-process" and "it has its own resource
 budget" are different claims, and this system had been treating the first as
 evidence for the second since 2026-07-28. Only a process tree that systemd
