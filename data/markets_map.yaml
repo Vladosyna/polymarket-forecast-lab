@@ -1403,7 +1403,62 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-06T15:47:06+00:00'
-proposed: []
+proposed:
+- condition_id: '0x29271437572fd58353539701b2f2d7717cb27098be8f2d61ac68097ee1a904e2'
+  question: Will Josh Elliott win the 2026 Connecticut Governor Democratic primary
+    election?
+  venue: kalshi
+  external_id: KXGOVCTNOMD-26-JELL
+  external_question: Will Josh Elliott be the Democratic nominee for Governor in Connecticut?
+  rationale: Both markets resolve on whether Josh Elliott wins the 2026 Connecticut
+    Democratic gubernatorial primary/nomination. The Polymarket question explicitly
+    asks if Elliott wins the primary; the Kalshi market resolves Yes if Elliott wins
+    the Democratic nomination. The nomination is determined by winning the primary
+    (no separate convention or alternative process is indicated in either resolution
+    criteria). The minor difference in wording ('primary winner' vs 'nominee') does
+    not create a distinct event under standard primary rules. The Kalshi ticker and
+    outcome labels confirm the specific outcome matches the Polymarket leg.
+  confidence: 0.95
+  proposed_ts: '2026-08-06T21:00:02+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x8377be7973fda37582973f6533625ff035bd7ece986a9762d12b1cfb81baf057'
+  question: Will David Bronson win the 2026 Alaska governor election?
+  venue: kalshi
+  external_id: KXGOVAK-26-DBRO
+  external_question: Who will win the governorship in Alaska?
+  rationale: Both markets resolve on the specific outcome of whether Dave Bronson
+    wins the 2026 Alaska governorship. Polymarket asks if Bronson will win the election,
+    while Kalshi's specific outcome is 'Dave Bronson' (Yes if he is sworn in as governor),
+    which implies winning the election. The resolution criteria align on the same
+    electoral event and candidate, with minor differences in confirmation source timing
+    but no substantive divergence in the underlying event.
+  confidence: 0.95
+  proposed_ts: '2026-08-06T21:00:04+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x7591555301baf2f0cbfbddce041adcc911e1316dec33f9383a75c977d5191dc2'
+  question: Will Brett Hulsey win the 2026 Wisconsin Governor Democratic primary election?
+  venue: kalshi
+  external_id: KXGOVWINOMD-26-BHUL
+  external_question: Will Brett Hulsey be the Democratic nominee for Governor in Wisconsin?
+  rationale: Both markets resolve based on Brett Hulsey winning the 2026 Wisconsin
+    Democratic gubernatorial primary/nomination. The Polymarket question asks whether
+    Hulsey wins the primary, and its resolution criteria confirm that the primary
+    winner is the determinant. The Kalshi market resolves to Yes if Hulsey is the
+    Democratic nominee, which is outcome of the same primary. No material difference
+    in the resolution event exists. The slight disagreement in phrasing ('win primary'
+    vs 'be nominee') is tautological for a single-candidate primary in this context.
+  confidence: 0.98
+  proposed_ts: '2026-08-06T21:00:07+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
