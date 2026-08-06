@@ -185,3 +185,65 @@ def test_old_partitions_without_depth_still_merge(tmp_path):
     assert len(df) == 2
     assert df["bids_json"][0] is None      # legacy row -> null depth
     assert df["mid"][0] == 0.5             # legacy data intact
+
+
+# --- latest_per_market: projected + day-at-a-time (2026-08-06 OOM) ----------
+
+def _multi_day_store(tmp_path) -> SnapshotStore:
+    """Three days, several markets, written out of chronological order so a
+    naive 'last row appended' would give a different answer than 'latest ts'."""
+    store = SnapshotStore(str(tmp_path / "snapshots"))
+    plan = [
+        ("2026-03-01T00:00:00+00:00", "0xA", 0.10),
+        ("2026-03-03T05:00:00+00:00", "0xA", 0.30),   # newest for A, written first
+        ("2026-03-02T12:00:00+00:00", "0xA", 0.20),
+        ("2026-03-01T09:00:00+00:00", "0xB", 0.60),
+        ("2026-03-02T23:55:00+00:00", "0xB", 0.65),   # newest for B, mid-day boundary
+        ("2026-03-03T00:05:00+00:00", "0xC", 0.90),   # C exists on one day only
+    ]
+    for ts, cid, mid in plan:
+        row = _row(ts, cid, mid)
+        row["bids_json"] = '[[0.49, 100]]'
+        row["asks_json"] = '[[0.51, 100]]'
+        row["venue"] = "polymarket"
+        store.append([row])
+    return store
+
+
+def test_latest_per_market_matches_the_whole_window_reduction(tmp_path):
+    """Reducing day-by-day must give the same rows as reducing one concatenated
+    frame -- that equivalence is the whole licence for bounding the peak."""
+    store = _multi_day_store(tmp_path)
+    dates = ["2026-03-03", "2026-03-02", "2026-03-01"]
+
+    got = store.latest_per_market(dates).sort("condition_id")
+    from lab.store.snapshots import LATEST_PER_MARKET_COLUMNS
+    whole = (store.read_range(dates, columns=LATEST_PER_MARKET_COLUMNS)
+             .sort("ts").group_by("condition_id").last().sort("condition_id"))
+
+    assert got.to_dicts() == whole.to_dicts()
+    assert dict(zip(got["condition_id"], got["mid"])) == {"0xA": 0.30, "0xB": 0.65, "0xC": 0.90}
+
+
+def test_latest_per_market_leaves_the_order_book_blobs_on_disk(tmp_path):
+    """They are the bulk of a row's bytes and nothing in src/lab reads them
+    back. Unprojected this call cost ~578MB and OOM-killed the orchestrator
+    hourly (2026-08-06); projected, the same window costs ~24MB."""
+    store = _multi_day_store(tmp_path)
+    df = store.latest_per_market(["2026-03-03", "2026-03-02", "2026-03-01"])
+
+    assert "bids_json" not in df.columns
+    assert "asks_json" not in df.columns
+    assert {"ts", "condition_id", "mid", "spread",
+            "bid_depth_usd", "ask_depth_usd", "venue"} <= set(df.columns)
+    # ...and a caller that explicitly wants them still can.
+    with_books = store.latest_per_market(["2026-03-03"], columns=list(SNAPSHOT_SCHEMA))
+    assert with_books["bids_json"][0] == '[[0.49, 100]]'
+
+
+def test_latest_per_market_returns_a_typed_empty_frame_for_missing_dates(tmp_path):
+    store = _multi_day_store(tmp_path)
+    empty = store.latest_per_market(["2020-01-01", "2020-01-02"])
+    assert empty.is_empty()
+    assert "bids_json" not in empty.columns
+    assert "condition_id" in empty.columns   # typed, so callers can still select

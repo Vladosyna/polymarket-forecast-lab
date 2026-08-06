@@ -40,6 +40,15 @@ SNAPSHOT_SCHEMA = {
     "venue": pl.String,
 }
 
+# What `latest_per_market` reads: everything except the order-book JSON blobs.
+# Nothing in src/lab reads those back today -- they are collected for later
+# depth analysis -- and they are the bulk of a row's bytes. Reading them was
+# costing ~578MB per call against ~24MB for the same window projected, and
+# `latest_per_market` is called 11 times across the forecast/universe/M3/M6/M7/
+# shadow paths, several of them inside a single forecast bundle. A caller that
+# genuinely needs a book blob can pass `columns` explicitly.
+LATEST_PER_MARKET_COLUMNS = [c for c in SNAPSHOT_SCHEMA if c not in ("bids_json", "asks_json")]
+
 
 def floor_ts_bucket(ts: datetime, bucket_minutes: int) -> str:
     """Floor a UTC datetime to the cadence bucket, ISO-8601."""
@@ -139,11 +148,28 @@ class SnapshotStore:
             return pl.DataFrame(schema=schema)
         return pl.concat(frames, how="diagonal")
 
-    def latest_per_market(self, dates: list[str]) -> pl.DataFrame:
-        df = self.read_range(dates)
-        if df.is_empty():
-            return df
-        return df.sort("ts").group_by("condition_id").last()
+    def latest_per_market(self, dates: list[str],
+                          columns: list[str] | None = None) -> pl.DataFrame:
+        """Most recent snapshot row per condition_id across `dates`.
+
+        Reduced one day at a time rather than over a single concatenated frame:
+        the result is the same row either way (`ts` is ISO-8601, so lexical and
+        chronological order agree, and the last-of-the-per-day-lasts is the
+        overall last), but the peak is one day's partition instead of the whole
+        window. Defaults to `LATEST_PER_MARKET_COLUMNS` -- see there for why the
+        order-book blobs are excluded.
+        """
+        cols = columns if columns is not None else LATEST_PER_MARKET_COLUMNS
+        reduced = []
+        for date in dates:
+            day = self.read_range([date], columns=cols)
+            if not day.is_empty():
+                reduced.append(day.sort("ts").group_by("condition_id").last())
+        if not reduced:
+            return self.read_range([], columns=cols)   # correctly-typed empty frame
+        if len(reduced) == 1:
+            return reduced[0]
+        return pl.concat(reduced, how="diagonal").sort("ts").group_by("condition_id").last()
 
 
 def utc_date_str(ts: datetime) -> str:
