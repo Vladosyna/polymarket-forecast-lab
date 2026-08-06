@@ -342,12 +342,18 @@ def fit_m1_hier_curves(
     return artifact
 
 
-def fit_m2_baserates(rows: list[dict], min_n: int = 50) -> dict[str, Any]:
-    """Category base rates from resolved markets: [{category, outcome}, ...]."""
+def fit_m2_baserates(rows: Any, min_n: int = 50) -> dict[str, Any]:
+    """Category base rates from resolved markets: [{category, outcome}, ...],
+    or a polars DataFrame with those columns (see `_obs_columns`) -- the
+    bootstrap archive has 221,991 markets, and expanding them into dicts just
+    to read two fields is the same waste `fit_m1_curves` stopped doing."""
     artifact: dict[str, Any] = {"kind": "m2_baserates", "fitted_at": now_utc_iso(), "categories": {}}
     by_cat: dict[str, list[float]] = {}
-    for r in rows:
-        by_cat.setdefault(r["category"], []).append(float(r["outcome"]))
+    if _is_empty(rows):
+        return artifact
+    cols = _obs_columns(rows, ("category", "outcome"))
+    for cat, outcome in zip(cols["category"].tolist(), cols["outcome"].tolist()):
+        by_cat.setdefault(cat, []).append(float(outcome))
     for cat, outcomes in sorted(by_cat.items()):
         if len(outcomes) < min_n:
             continue

@@ -317,13 +317,16 @@ def bootstrap(
     obs = bs.load_observations(config)
     typer.echo(f"observations: {len(obs)} rows / {obs['condition_id'].n_unique()} markets")
 
-    m1 = fit_m1_curves(obs.to_dicts())
+    # The frame, not dicts: this file is 1,967,376 rows and expanding it cost
+    # ~1.8GB, which is more than the production host has. `lab learn` stopped
+    # doing this on 2026-08-05; this path was missed then.
+    m1 = fit_m1_curves(obs)
     save_artifact(config, "m1_curves", m1)
     for name, fit in m1["buckets"].items():
         typer.echo(f"  m1 {name}: alpha={fit['alpha']:.3f} beta={fit['beta']:.3f} n={fit['n']}")
 
     per_market = obs.group_by("condition_id").first().select("category", "outcome")
-    m2 = fit_m2_baserates(per_market.to_dicts())
+    m2 = fit_m2_baserates(per_market)
     save_artifact(config, "m2_baserates", m2)
     typer.echo(f"  m2 base rates: {len(m2['categories'])} categories")
 
