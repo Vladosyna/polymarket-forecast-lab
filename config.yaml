@@ -97,6 +97,12 @@ forecast:
   cadence_hours: 24
   # ...plus an extra forecast when |24h price move| exceeds this.
   price_move_trigger: 0.10
+  # Minimum hours since the last forecast before the price-move trigger may
+  # fire again. Inert under the normal once-a-day bundle (age is ~24h by then);
+  # it exists so a catch-up storm cannot re-fire the same 24h move hourly, as
+  # happened 2026-08-02..06 (up to 25 forecasts per market-day). Added
+  # 2026-08-06; see docs/pre_analysis_plan.md addendum 9.5.
+  price_move_min_hours: 6
   # Probabilities clamped to this range before writing to the ledger.
   p_clamp: [0.01, 0.99]
   # Price freshness guard (brief guardrail 13): skip forecast if the latest

@@ -157,3 +157,81 @@ def test_scoring_membership_includes_m6_negrisk_sweep(conn):
     conn.commit()
 
     assert null_control_ids_by_venue(conn, config)["polymarket"] == {"m6_only"}
+
+
+# --- the price-move trigger needs its own spacing (2026-08-02..06) ----------
+
+def test_price_move_trigger_cannot_refire_within_its_minimum_spacing():
+    """It reads a 24-HOUR move, so without spacing an hourly re-run writes the
+    same event over and over. During the crash loop that produced up to 25
+    forecasts for one market-day and 54,634 excess rows in five days -- 10% of
+    the whole ledger, concentrated on the volatile markets the trigger selects.
+    """
+    from datetime import timedelta
+
+    from lab.forecast import _due
+    from lab.store import db
+    from lab.util import now_utc
+
+    import tempfile
+    from pathlib import Path
+
+    tmp = Path(tempfile.mkdtemp())
+    conn = db.connect(tmp / "lab.db")
+    try:
+        config = {"forecast": {"cadence_hours": 24, "price_move_trigger": 0.10,
+                               "price_move_min_hours": 6}}
+        big_move = 0.5   # far over the trigger
+
+        # No prior forecast -> always due.
+        assert _due(conn, "0x1", "m0_market", config, big_move) is True
+
+        conn.execute(
+            "INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
+            " VALUES (?, '0x1', 'm0_market', 0.5, 0.5)",
+            ((now_utc() - timedelta(hours=1)).isoformat(timespec="seconds"),))
+        conn.commit()
+        # One hour later, same 24h move: NOT due. This is the whole fix.
+        assert _due(conn, "0x1", "m0_market", config, big_move) is False
+
+        # A second market, last forecast past the spacing. (Not a DELETE on the
+        # first: the ledger's authorizer forbids it, which is the point of it.)
+        conn.execute(
+            "INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
+            " VALUES (?, '0x2', 'm0_market', 0.5, 0.5)",
+            ((now_utc() - timedelta(hours=7)).isoformat(timespec="seconds"),))
+        conn.commit()
+        # Past the spacing, a genuine move still earns its extra forecast.
+        assert _due(conn, "0x2", "m0_market", config, big_move) is True
+        # ...and a small move still does not.
+        assert _due(conn, "0x2", "m0_market", config, 0.01) is False
+    finally:
+        conn.close()
+
+
+def test_daily_cadence_is_unaffected_by_the_spacing_guard():
+    """The guard must be inert in normal operation: a market with no price move
+    still gets its once-a-day forecast."""
+    from datetime import timedelta
+
+    from lab.forecast import _due
+    from lab.store import db
+    from lab.util import now_utc
+
+    import tempfile
+    from pathlib import Path
+
+    tmp = Path(tempfile.mkdtemp())
+    conn = db.connect(tmp / "lab.db")
+    try:
+        config = {"forecast": {"cadence_hours": 24, "price_move_trigger": 0.10,
+                               "price_move_min_hours": 6}}
+        conn.execute(
+            "INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
+            " VALUES (?, '0x1', 'm0_market', 0.5, 0.5)",
+            ((now_utc() - timedelta(hours=25)).isoformat(timespec="seconds"),))
+        conn.commit()
+        assert _due(conn, "0x1", "m0_market", config, None) is True
+        assert _due(conn, "0x1", "m0_market", config, 0.0) is True
+    finally:
+        conn.close()

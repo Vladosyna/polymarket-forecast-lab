@@ -178,3 +178,48 @@ data; the M1.x family's realized scope is Polymarket and Kalshi. Second, M1.x's 
 limitation — that it trains on a Polymarket-only historical bootstrap and that between-venue
 variance components are weakly identified with so few groups — stops being a caveat about a future
 state and becomes a permanent property of this study, to be stated in those terms.
+
+**Addendum 9.5 (2026-08-06).** A five-day operational incident materially changed the *shape* of
+the forecast ledger, and this addendum records it before any confirmatory analysis is run.
+
+**What happened.** From 2026-08-02T16:18 to 2026-08-06T16:15 the orchestrator was OOM-killed on a
+~62-minute cycle (19 restarts; full technical account in `docs/OPERATIONS.md`). The nightly bundle
+completed its forecast step on each attempt and died later, before recording success, so the hourly
+missed-run catch-up re-ran it every hour. §6's forecast cadence is "once per market per day per
+model, plus an extra forecast when |24h price move| > 0.10" — and that second clause carried no
+minimum spacing, because under a once-daily bundle it cannot fire more than once a day. Running
+hourly, it fired hourly.
+
+**Measured effect.** In 2026-08-02..06 the ledger received 144,282 rows, of which **54,634 are
+beyond one per (market, model, day)** — 38% of that window and **10.0% of the all-time ledger** at
+the time of writing. Up to 25 forecasts landed on a single market-model-day (maximum 1 on every day
+through 2026-08-01). The excess is concentrated on **1,030 of 5,562 markets (19%)** — and not at
+random: the trigger selects markets whose price moved more than 0.10 in 24 hours, so the
+over-represented rows are precisely the high-information, high-volatility market-days.
+
+**Why nothing is retracted.** Every one of those rows is individually valid: written at its own
+timestamp, paired with its own contemporaneous `p_market_at_ts` (guardrail 13's freshness check
+applied unchanged), with no look-ahead. The ledger is append-only (§5) and its daily hashes are
+already committed in `docs/ledger_commitments.jsonl`; deleting rows to tidy the record is exactly
+the act that discipline exists to make detectable. They stay.
+
+**What this plan commits to instead.** The primary outcome is unchanged: paired Brier skill with
+event-clustered anytime-valid confidence sequences, over all resolved forecasts, exactly as
+pre-registered. Clustering already absorbs the *dependence* these rows introduce (they are the same
+markets), but it does not absorb the *weighting* — a row-weighted mean gives a 25×-duplicated
+market-day 25× the influence. Therefore, as a pre-specified robustness check committed here before
+the analysis window closes: the confirmatory analysis will additionally report the identical
+model × venue × category × window matrix computed on a **deduplicated ledger — the first forecast
+per (market, model, UTC day), which is the pre-registered cadence** — reported alongside, never
+replacing, the primary result. A material disagreement in sign or in CS exclusion between the two
+is itself the finding and will be reported as such.
+
+This is the same construction as 9.2(b)'s disputed-market check and uses the same mechanism (a
+parallel `window_label` suffix, never overwriting primary rows). It is filed under 9.1's discipline:
+a dated operational fact and a robustness check specified before seeing its result — not a primary
+specification changed after seeing how the data behaved.
+
+**Forward fix, for completeness.** `forecast.price_move_min_hours` (default 6h) now gates the
+price-move trigger. It is inert under the intended daily bundle — by the time that runs, the last
+forecast is ~24h old — and exists solely so a catch-up storm cannot re-fire the same 24-hour move.
+The incident window is bounded and closed; no data after 2026-08-06T16:15 is affected.

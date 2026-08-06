@@ -187,8 +187,19 @@ def _due(conn, condition_id: str, model_id: str, config: dict[str, Any],
     age_h = (now_utc() - last).total_seconds() / 3600
     if age_h >= config["forecast"]["cadence_hours"]:
         return True
+    # The price-move trigger needs its own minimum spacing. It reads a 24-HOUR
+    # move, so re-firing on the same move writes the same event repeatedly --
+    # inert while the bundle runs once a day (age is ~24h by then), but during
+    # the 2026-08-02..06 hourly crash loop it fired every hour and produced up
+    # to 25 forecasts per market-day, 54,634 rows in five days. Those rows are
+    # each individually valid (own ts, own paired price) and stay in the
+    # append-only ledger, but they re-weight the scoring population toward
+    # exactly the markets the trigger selects for -- volatile ones. See
+    # docs/pre_analysis_plan.md addendum 9.5.
+    min_gap_h = float(config["forecast"].get("price_move_min_hours", 6))
     return (
         price_move_24h is not None
+        and age_h >= min_gap_h
         and abs(price_move_24h) > config["forecast"]["price_move_trigger"]
     )
 
