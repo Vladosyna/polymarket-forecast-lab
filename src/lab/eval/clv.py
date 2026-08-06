@@ -8,7 +8,6 @@ Positive mean drift = the model tends to be early, not wrong.
 
 from __future__ import annotations
 
-from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -23,14 +22,39 @@ from lab.store.snapshots import SnapshotStore, utc_date_str
 # per call (up to ~30k calls/report render); a report-scale frame made this
 # the single largest cost after gap_windows. See tests/test_clv.py for the
 # differential proof against the prior per-call-filter implementation.
-MidIndex = dict[str, tuple[list[str], list[float]]]
+# Numeric arrays, not Python lists of ISO strings and floats: at ~100 bytes per
+# row the object version took the report render's peak to 1227MB (measured
+# 2026-08-06 -- 444MB after the snapshot read, 1227MB after building this), and
+# the render runs inside the collector's own cgroup. Epoch seconds order
+# identically to the ISO-8601 UTC strings they replace, at 16 bytes per row.
+MidIndex = dict[str, tuple[np.ndarray, np.ndarray]]
 
 
 def build_mid_index(df: pl.DataFrame) -> MidIndex:
     if df.is_empty():
         return {}
-    grouped = df.sort("ts").group_by("condition_id").agg([pl.col("ts"), pl.col("mid")])
-    return {row["condition_id"]: (row["ts"], row["mid"]) for row in grouped.iter_rows(named=True)}
+    grouped = (
+        df.select(
+            pl.col("condition_id"),
+            # Sliced to the naive part and parsed as UTC. Every stored ts is
+            # exactly "YYYY-MM-DDTHH:MM:SS+00:00" (guardrail 6: `now_utc()` is
+            # the only clock; verified uniform across the live archive), and the
+            # string form this replaces was compared lexically, which likewise
+            # only works because the offset never varies.
+            pl.col("ts").str.slice(0, 19)
+              .str.to_datetime(format="%Y-%m-%dT%H:%M:%S", time_unit="us", strict=False)
+              .dt.epoch("s").alias("_epoch"),
+            pl.col("mid").cast(pl.Float64),
+        )
+        .drop_nulls("_epoch")
+        .sort("_epoch")
+        .group_by("condition_id")
+        .agg([pl.col("_epoch"), pl.col("mid")])
+    )
+    return {
+        cid: (np.asarray(epochs, dtype=np.int64), np.asarray(mids, dtype=np.float64))
+        for cid, epochs, mids in grouped.iter_rows()
+    }
 
 
 def _mid_at(index: MidIndex, condition_id: str, target_ts: datetime,
@@ -38,26 +62,24 @@ def _mid_at(index: MidIndex, condition_id: str, target_ts: datetime,
     entry = index.get(condition_id)
     if entry is None:
         return None
-    ts_list, mid_list = entry
-    target = target_ts.isoformat(timespec="seconds")
-    lo = (target_ts - timedelta(hours=tolerance_hours)).isoformat(timespec="seconds")
-    hi = (target_ts + timedelta(hours=tolerance_hours)).isoformat(timespec="seconds")
-    # [i, j) = indices with lo <= ts <= hi (ts_list is sorted, per-market
+    ts_arr, mid_arr = entry
+    exact = target_ts.timestamp()          # sub-second kept, for the tie-break below
+    target = int(exact)                    # the ISO `timespec="seconds"` this replaces
+    lo = target - int(tolerance_hours * 3600)
+    hi = target + int(tolerance_hours * 3600)
+    # [i, j) = indices with lo <= ts <= hi (ts_arr is sorted, per-market
     # timestamps are unique -- SnapshotStore.append dedups on (ts, condition_id)).
-    i = bisect_left(ts_list, lo)
-    j = bisect_right(ts_list, hi)
+    i = int(np.searchsorted(ts_arr, lo, side="left"))
+    j = int(np.searchsorted(ts_arr, hi, side="right"))
     if i >= j:
         return None
     # The minimizer of |ts - target| within a sorted range is always the
     # insertion point or its immediate predecessor -- no need to scan the rest.
-    k = bisect_left(ts_list, target, i, j)
+    k = i + int(np.searchsorted(ts_arr[i:j], target, side="left"))
     best_idx, best_dist = None, None
     for idx in (k - 1, k):
         if i <= idx < j:
-            ts_dt = datetime.fromisoformat(ts_list[idx])
-            if ts_dt.tzinfo is None:
-                ts_dt = ts_dt.replace(tzinfo=timezone.utc)
-            dist = abs((ts_dt - target_ts).total_seconds())
+            dist = abs(float(ts_arr[idx]) - exact)
             # Strict '<': on an exact tie, keep the earlier (lower idx)
             # candidate -- k-1 is tried first, so this prefers it. The prior
             # per-call implementation used polars' unstable sort here, whose
@@ -65,7 +87,12 @@ def _mid_at(index: MidIndex, condition_id: str, target_ts: datetime,
             # rather than changing any currently-reproducible output.
             if best_dist is None or dist < best_dist:
                 best_idx, best_dist = idx, dist
-    return float(mid_list[best_idx]) if best_idx is not None else None
+    if best_idx is None:
+        return None
+    mid = float(mid_arr[best_idx])
+    # A null mid (a venue without an order book, e.g. a hidden Metaculus CP)
+    # arrives as NaN here rather than None -- never impute it (guardrail 16).
+    return None if np.isnan(mid) else mid
 
 
 def _overlaps_gap(window_start: datetime, window_end: datetime,

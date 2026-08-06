@@ -362,3 +362,46 @@ def test_supplied_index_and_frame_give_identical_results():
                 assert math.isnan(b[k]), f"{h}/{k}: NaN vs {b[k]}"
             else:
                 assert a[k] == b[k], f"{h}/{k}: {a[k]} vs {b[k]}"
+
+
+# --- the index must stay numeric (2026-08-06 report OOM) --------------------
+
+def test_mid_index_holds_numeric_arrays_not_python_objects():
+    """Measured on the live host: 444MB after the snapshot read, 1227MB after
+    building this index -- ~100 bytes per row for a Python str + float where 16
+    will do. The report render runs inside the collector's cgroup, so that peak
+    is the collector's too."""
+    import numpy as np
+    import polars as pl
+
+    from lab.eval.clv import build_mid_index
+
+    df = pl.DataFrame([
+        {"ts": "2026-03-01T00:00:00+00:00", "condition_id": "0xA", "mid": 0.4},
+        {"ts": "2026-03-01T00:05:00+00:00", "condition_id": "0xA", "mid": 0.5},
+        {"ts": "2026-03-01T00:00:00+00:00", "condition_id": "0xB", "mid": 0.6},
+    ])
+    index = build_mid_index(df)
+
+    assert set(index) == {"0xA", "0xB"}
+    for epochs, mids in index.values():
+        assert isinstance(epochs, np.ndarray) and epochs.dtype == np.int64
+        assert isinstance(mids, np.ndarray) and mids.dtype == np.float64
+    # sorted, and the epochs really are the instants
+    epochs, mids = index["0xA"]
+    assert list(epochs) == sorted(epochs)
+    assert epochs[1] - epochs[0] == 300
+    assert list(mids) == [0.4, 0.5]
+
+
+def test_mid_index_never_imputes_a_null_mid():
+    """A venue without an order book (a hidden Metaculus CP) stores a null mid.
+    It arrives as NaN in a float64 array, and guardrail 16 forbids imputing it."""
+    import polars as pl
+
+    from lab.eval.clv import _mid_at, build_mid_index
+
+    df = pl.DataFrame([{"ts": "2026-03-01T00:00:00+00:00", "condition_id": "0xN", "mid": None}])
+    index = build_mid_index(df)
+    target = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    assert _mid_at(index, "0xN", target, tolerance_hours=3.0) is None
