@@ -112,7 +112,20 @@ forecast:
     tail: 90
   # M3 runs only on the liquid tier: top-K by liquidity within priority
   # categories -- a deterministic rule, never editorial judgment.
-  m3_top_k: 20
+  #
+  # Raised 20 -> 120 on 2026-08-06, a deliberate operator choice recorded in
+  # docs/pre_analysis_plan.md addendum 9.6. Rationale, measured: at K=20 the
+  # LLM pipeline had accumulated 4 resolved event clusters in five weeks (32
+  # resolved rows from 694 forecasts, 4.6% yield -- the priority-category
+  # liquid pool is 92% longer than 30 days to resolution), which leaves both
+  # the Phase 7 aggregator refit gate (`learn.m3_min_resolved: 150`, never yet
+  # reached) and the Phase 15 boundary-randomization experiment without any
+  # resolved outcomes to work with before the 2026-12-31 analysis freeze.
+  # Cost is not the constraint and never was: $0.00081 per evidence run means
+  # K=120 costs ~$0.097/day against `llm.daily_cost_cap_usd: 5.00` (2% of it).
+  # This does NOT make an M3 skill claim reachable -- 200 clusters is out of
+  # range either way -- and the addendum says so.
+  m3_top_k: 120
   # Phase 15 boundary-randomization experiment (guardrail 12's pre-specified,
   # seeded-randomization carve-out): markets ranked m3_top_k-10..+10 are
   # randomly assigned to M3 coverage instead of a hard cutoff, to identify

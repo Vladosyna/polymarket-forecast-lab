@@ -223,3 +223,35 @@ specification changed after seeing how the data behaved.
 price-move trigger. It is inert under the intended daily bundle — by the time that runs, the last
 forecast is ~24h old — and exists solely so a catch-up storm cannot re-fire the same 24-hour move.
 The incident window is bounded and closed; no data after 2026-08-06T16:15 is affected.
+
+**Addendum 9.6 (2026-08-06).** M3's coverage parameter `forecast.m3_top_k` is raised from 20 to
+120, effective this date. This is a deliberate, dated change to a **collection** parameter, made
+before the confirmatory window closes and recorded here rather than discovered in the data.
+
+**Why.** Measured on this date: M3 had accumulated **4 resolved event clusters** — 32 resolved rows
+from 694 forecasts, a 4.6% resolution yield, because the priority-category liquid pool it draws
+from is 92% longer than 30 days to resolution (921 of 1,001 candidates). At that rate two things
+specified in this project reach the 2026-12-31 freeze with nothing to report: the Phase 7 M3
+**aggregator** walk-forward refit, gated at `learn.m3_min_resolved: 150` resolved M3 forecasts and
+never once triggered; and the Phase 15 **boundary-randomization experiment**, which has assigned
+311 randomized and 383 non-randomized forecasts but has almost no resolved outcomes to identify a
+marginal effect from. Cost was never the binding constraint: at $0.00081 per evidence run, K=120
+costs ~$0.097/day against a $5.00/day cap.
+
+**What this does not do.** It does not make an M3 skill claim reachable. 200 resolved event
+clusters — this plan's own INSUFFICIENT boundary (§7) — is out of range for M3 under any K, and
+**M3 and M3b will be reported at whatever honesty tier their realized n earns, which on present
+evidence is INSUFFICIENT.** This addendum is filed to improve two *secondary* instruments, not to
+rescue a primary claim, and it must not be read at write-up as having done the latter.
+
+**Comparability, stated up front.** M3's covered population changes composition on this date: from
+2026-08-06 it includes markets ranked 21..120 by the same deterministic liquidity ordering, which
+are systematically less liquid than the first 20. The confirmatory analysis will therefore report
+M3 results **split at 2026-08-06** as well as pooled, and will not present a pooled M3 figure
+without that split alongside it. The ordering rule itself is unchanged — still liquidity-DESC
+within priority categories, still no editorial judgment (guardrail 12) — and the randomization band
+continues to sit at K±10, now 110..130.
+
+Nothing else changes: not the primary outcome, not the claim statistic, not the honesty tiers, not
+any hypothesis in §2. Filed under 9.1's discipline: a dated operational decision with its
+consequences stated before its results are seen.

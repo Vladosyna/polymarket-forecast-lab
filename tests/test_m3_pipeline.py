@@ -130,9 +130,20 @@ def test_m3_evidence_tags_randomized_forecasts(config):
     conn.close()
 
 
+def _band_seed_count(config) -> int:
+    """Enough candidates for the configured K plus the whole boundary band.
+
+    Deliberately derived, not a literal: these tests exercise the band logic,
+    which is independent of how much coverage an operator has bought. Hard-coded
+    at 40 they broke the moment `m3_top_k` moved 20 -> 120 (2026-08-06), which
+    told us nothing about the band.
+    """
+    return int(config["forecast"]["m3_top_k"]) + M3_BOUNDARY_BAND_HALF_WIDTH + 20
+
+
 def _seed_many_markets(conn, n):
     for i in range(n):
-        cid = f"0x{i:03d}"
+        cid = f"0x{i:04d}"
         conn.execute(
             """INSERT INTO markets (condition_id, slug, question, category, description,
                                     end_date_iso, tier, active, closed, liquidity_num, volume_num)
@@ -145,7 +156,7 @@ def _seed_many_markets(conn, n):
 
 def test_boundary_randomization_covers_exactly_k_when_enough_candidates(config):
     conn = db.connect(config["storage"]["db_path"])
-    _seed_many_markets(conn, 40)
+    _seed_many_markets(conn, _band_seed_count(config))
     k = config["forecast"]["m3_top_k"]
 
     final_ids, chosen, seed = m3_boundary_randomized_ids(conn, config)
@@ -159,7 +170,7 @@ def test_boundary_randomization_guaranteed_and_excluded_segments_are_fixed(confi
     markets ranked strictly below the band never do -- only the band itself
     (the coin-flip region) is randomized."""
     conn = db.connect(config["storage"]["db_path"])
-    _seed_many_markets(conn, 40)
+    _seed_many_markets(conn, _band_seed_count(config))
     k = config["forecast"]["m3_top_k"]
     half = M3_BOUNDARY_BAND_HALF_WIDTH
 
@@ -176,7 +187,7 @@ def test_boundary_randomization_guaranteed_and_excluded_segments_are_fixed(confi
 
 def test_boundary_randomization_reproducible_from_same_seed(config):
     conn = db.connect(config["storage"]["db_path"])
-    _seed_many_markets(conn, 40)
+    _seed_many_markets(conn, _band_seed_count(config))
 
     final_a, chosen_a, seed_a = m3_boundary_randomized_ids(conn, config)
     final_b, chosen_b, seed_b = m3_boundary_randomized_ids(conn, config)
@@ -189,7 +200,7 @@ def test_boundary_randomization_reproducible_from_same_seed(config):
 
 def test_boundary_randomization_different_seed_picks_different_band_members(config):
     conn = db.connect(config["storage"]["db_path"])
-    _seed_many_markets(conn, 40)
+    _seed_many_markets(conn, _band_seed_count(config))
 
     cfg_a = {**config, "forecast": {**config["forecast"], "m3_boundary_random_seed": "seed-a"}}
     cfg_b = {**config, "forecast": {**config["forecast"], "m3_boundary_random_seed": "seed-b"}}
