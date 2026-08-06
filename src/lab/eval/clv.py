@@ -138,8 +138,11 @@ def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[
         if snapshots is not None:
             df = snapshots
         else:
+            # Filtered to these forecasts' own markets: the date span is the
+            # whole archive, but only a few markets in it are ever looked up.
             df = store.read_range(sorted(clv_dates(forecasts, horizons_hours)),
-                                  columns=CLV_SNAPSHOT_COLUMNS)
+                                  columns=CLV_SNAPSHOT_COLUMNS,
+                                  condition_ids={f["condition_id"] for f in forecasts})
         mid_index = build_mid_index(df)
 
     out: dict[int, dict[str, float]] = {}
@@ -208,7 +211,13 @@ def clv_validity_check(conn, config: dict[str, Any], store: SnapshotStore) -> di
         parsed.append((dict(row), ts))
         all_dates.add(utc_date_str(ts + timedelta(hours=horizon)))
         all_dates.add(utc_date_str(ts + timedelta(hours=horizon) - timedelta(days=1)))
-    df = store.read_range(sorted(all_dates), columns=CLV_SNAPSHOT_COLUMNS)
+    # Null control only. Unfiltered this read every partition in the archive --
+    # 14.9M rows, ~675MB, then a Python index built over all of it -- to score a
+    # handful of sports markets. It OOM-killed the orchestrator every hour from
+    # 2026-08-02 to 08-06, right after `eval complete` and before the bundle
+    # could record its own success, which is what made the loop self-sustaining.
+    df = store.read_range(sorted(all_dates), columns=CLV_SNAPSHOT_COLUMNS,
+                          condition_ids=all_nc_ids)
     mid_index = build_mid_index(df)
 
     drifts: list[float] = []

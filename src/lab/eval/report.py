@@ -465,9 +465,12 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         for model_id in model_ids
     }
     all_clv_dates: set[str] = set()
+    all_clv_cids: set[str] = set()
     for forecasts in forecasts_by_model.values():
         all_clv_dates |= clv_dates(forecasts, clv_horizons)
-    clv_snapshots = store.read_range(sorted(all_clv_dates), columns=CLV_SNAPSHOT_COLUMNS)
+        all_clv_cids |= {f["condition_id"] for f in forecasts}
+    clv_snapshots = store.read_range(sorted(all_clv_dates), columns=CLV_SNAPSHOT_COLUMNS,
+                                     condition_ids=all_clv_cids)
     _phase("clv_snapshots_read")
     # Build the lookup index ONCE for the shared frame. Passing only the frame
     # still had every model rebuild it -- a full sort + group_by + per-market

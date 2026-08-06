@@ -8,6 +8,7 @@ partition -- restart-safe by construction (guardrail 7).
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -108,7 +109,8 @@ class SnapshotStore:
             written += len(part)
         return written
 
-    def read_range(self, dates: list[str], columns: list[str] | None = None) -> pl.DataFrame:
+    def read_range(self, dates: list[str], columns: list[str] | None = None,
+                   condition_ids: Iterable[str] | None = None) -> pl.DataFrame:
         """Read snapshot partitions for the given YYYY-MM-DD dates (missing ones skipped).
 
         `columns`: optional projection. When given, only those columns are read
@@ -121,18 +123,31 @@ class SnapshotStore:
         from an older partition (columns are additive over time, e.g. `venue`,
         `bids_json`) comes back null via the diagonal concat below -- exactly as a
         full read already handles it.
+
+        `condition_ids`: optional row filter, pushed into the same scan. Several
+        callers span the whole archive but care about a handful of markets -- the
+        CLV validity check reads every partition to score the sports null
+        control, the cross-venue correlation reads 90 days to correlate a few
+        confirmed pairs. Projection alone does not save them: 30 partitions at
+        three columns is still 14.9M rows and ~675MB, which is what OOM-killed
+        the orchestrator on 2026-08-06. Filtering at read time is the difference
+        between that and a few tens of thousands of rows.
         """
         present = [self._partition(d) for d in dates if self._partition(d).exists()]
+        wanted = list(dict.fromkeys(condition_ids)) if condition_ids is not None else None
         frames = []
         for p in present:
             try:
-                if columns is None:
+                if columns is None and wanted is None:
                     frames.append(pl.read_parquet(p))
                 else:
-                    available = set(pl.scan_parquet(p).collect_schema().names())
-                    frames.append(
-                        pl.scan_parquet(p).select([c for c in columns if c in available]).collect()
-                    )
+                    lf = pl.scan_parquet(p)
+                    available = set(lf.collect_schema().names())
+                    if columns is not None:
+                        lf = lf.select([c for c in columns if c in available])
+                    if wanted is not None:
+                        lf = lf.filter(pl.col("condition_id").is_in(wanted))
+                    frames.append(lf.collect())
             except Exception:
                 # A truncated or 0-byte partition -- e.g. a write interrupted
                 # before the atomic rename in append() landed, as happens on an

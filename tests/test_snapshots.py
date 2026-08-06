@@ -247,3 +247,75 @@ def test_latest_per_market_returns_a_typed_empty_frame_for_missing_dates(tmp_pat
     assert empty.is_empty()
     assert "bids_json" not in empty.columns
     assert "condition_id" in empty.columns   # typed, so callers can still select
+
+
+def test_read_range_condition_id_filter_matches_reading_everything(tmp_path):
+    """The filter is a memory optimisation, so it has to be provably a no-op on
+    the result: same rows, same order, as reading the window and filtering after."""
+    import polars as pl
+
+    store = _multi_day_store(tmp_path)
+    dates = ["2026-03-01", "2026-03-02", "2026-03-03"]
+
+    filtered = store.read_range(dates, columns=["ts", "condition_id", "mid"],
+                                condition_ids=["0xA", "0xC"])
+    whole = store.read_range(dates, columns=["ts", "condition_id", "mid"])
+    expected = whole.filter(pl.col("condition_id").is_in(["0xA", "0xC"]))
+
+    assert filtered.to_dicts() == expected.to_dicts()
+    assert set(filtered["condition_id"]) == {"0xA", "0xC"}
+    assert filtered.height < whole.height, "fixture has nothing to filter out"
+
+
+def test_read_range_filter_works_without_a_projection(tmp_path):
+    store = _multi_day_store(tmp_path)
+    df = store.read_range(["2026-03-03"], condition_ids=["0xC"])
+    assert set(df["condition_id"]) == {"0xC"}
+    assert "bids_json" in df.columns, "no projection asked for -- full schema expected"
+
+
+def test_read_range_filter_on_an_absent_market_returns_a_typed_empty_frame(tmp_path):
+    store = _multi_day_store(tmp_path)
+    df = store.read_range(["2026-03-01", "2026-03-02"],
+                          columns=["ts", "condition_id", "mid"], condition_ids=["0xZZZ"])
+    assert df.is_empty()
+    assert df.columns == ["ts", "condition_id", "mid"]
+
+
+def test_clv_validity_check_reads_only_the_null_control_markets(tmp_path, monkeypatch):
+    """The read that OOM-killed the orchestrator hourly (2026-08-02..06): it
+    pulled every partition in the archive to score a handful of sports markets,
+    then built a Python index over all of it."""
+    from lab.eval import clv
+
+    seen: list = []
+
+    class _Spy:
+        def read_range(self, dates, columns=None, condition_ids=None):
+            seen.append((columns, condition_ids))
+            import polars as pl
+            from lab.store.snapshots import SNAPSHOT_SCHEMA
+            cols = columns or list(SNAPSHOT_SCHEMA)
+            return pl.DataFrame(schema={c: SNAPSHOT_SCHEMA[c] for c in cols})
+
+    from lab.store import db
+    conn = db.connect(tmp_path / "lab.db")
+    try:
+        conn.execute("INSERT INTO markets (condition_id, question, category, venue, tier,"
+                     " active, closed) VALUES ('0xs1','q','sports','polymarket','liquid',1,0)")
+        conn.execute("INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
+                     " VALUES ('2026-03-01T00:00:00+00:00','0xs1','m0_market',0.4,0.5)")
+        conn.execute("INSERT INTO resolutions (condition_id, resolved_ts, payout_yes, disputed)"
+                     " VALUES ('0xs1','2026-03-05T00:00:00+00:00',1.0,0)")
+        conn.commit()
+        from lab.util import load_config
+        cfg = load_config()
+        clv.clv_validity_check(conn, cfg, _Spy())
+    finally:
+        conn.close()
+
+    assert seen, "clv_validity_check never reached the snapshot read -- fixture is wrong"
+    for columns, condition_ids in seen:
+        assert condition_ids is not None, "clv_validity_check is reading every market again"
+        assert set(condition_ids) == {"0xs1"}
+        assert columns == ["ts", "condition_id", "mid"]

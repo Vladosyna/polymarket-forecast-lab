@@ -314,11 +314,18 @@ def estimate_rho_bar_m7(conn, store, config: dict[str, Any],
     # read_range's own docstring -- for all of it. Unprojected it cost >1.3GB
     # and was OOM-killed on the production host (2026-08-05); this function
     # only ever reads these three columns.
-    df = store.read_range(dates, columns=["ts", "condition_id", "mid"])
+    from lab.store import db as dbmod
+
+    # Only the confirmed pairs' own markets. Projection alone still left this
+    # reading every row of a 90-day window (~14.9M) to correlate a few dozen
+    # markets -- same defect the CLV validity check died of.
+    pair_cids = {cid for cid in by_cid}
+    for pairs in by_cid.values():
+        pair_cids |= {dbmod.venue_condition_id(p["venue"], p["external_id"]) for p in pairs}
+    df = store.read_range(dates, columns=["ts", "condition_id", "mid"],
+                          condition_ids=pair_cids)
     if df.is_empty():
         return None
-
-    from lab.store import db as dbmod
 
     correlations = []
     for cid, pairs in by_cid.items():

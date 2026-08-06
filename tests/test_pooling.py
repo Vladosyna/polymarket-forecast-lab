@@ -281,18 +281,22 @@ def test_estimate_rho_bar_m7_projects_columns_instead_of_reading_order_books(con
     seen: list = []
     real_read_range = store.read_range
 
-    def spy(dates, columns=None):
-        seen.append(columns)
-        return real_read_range(dates, columns=columns)
+    def spy(dates, columns=None, condition_ids=None):
+        seen.append((columns, condition_ids))
+        return real_read_range(dates, columns=columns, condition_ids=condition_ids)
 
     store.read_range = spy
     estimate_rho_bar_m7(conn, store, config, markets_map_path=map_path, min_days=5)
     conn.close()
 
     assert seen, "estimate_rho_bar_m7 never read snapshots -- fixture is wrong"
-    for columns in seen:
+    for columns, condition_ids in seen:
         assert columns is not None, "unprojected read: the order-book blobs come with it"
         assert "bids_json" not in columns and "asks_json" not in columns
+        # Projection alone still read every row of a 90-day window; the pairs
+        # are what this function correlates, so they are what it should read.
+        assert condition_ids is not None, "unfiltered read across the whole window"
+        assert set(condition_ids) == {"0x1", "kalshi:T1"}
 
 
 def test_price_moves_24h_projects_columns_too():
