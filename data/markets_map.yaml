@@ -1403,58 +1403,109 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-06T15:47:06+00:00'
-proposed:
 - condition_id: '0x29271437572fd58353539701b2f2d7717cb27098be8f2d61ac68097ee1a904e2'
   question: Will Josh Elliott win the 2026 Connecticut Governor Democratic primary
     election?
   venue: kalshi
   external_id: KXGOVCTNOMD-26-JELL
   external_question: Will Josh Elliott be the Democratic nominee for Governor in Connecticut?
-  rationale: Both markets resolve on whether Josh Elliott wins the 2026 Connecticut
-    Democratic gubernatorial primary/nomination. The Polymarket question explicitly
-    asks if Elliott wins the primary; the Kalshi market resolves Yes if Elliott wins
-    the Democratic nomination. The nomination is determined by winning the primary
-    (no separate convention or alternative process is indicated in either resolution
-    criteria). The minor difference in wording ('primary winner' vs 'nominee') does
-    not create a distinct event under standard primary rules. The Kalshi ticker and
-    outcome labels confirm the specific outcome matches the Polymarket leg.
-  confidence: 0.95
-  proposed_ts: '2026-08-06T21:00:02+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-07T09:44:27+00:00'
 - condition_id: '0x8377be7973fda37582973f6533625ff035bd7ece986a9762d12b1cfb81baf057'
   question: Will David Bronson win the 2026 Alaska governor election?
   venue: kalshi
   external_id: KXGOVAK-26-DBRO
   external_question: Who will win the governorship in Alaska?
-  rationale: Both markets resolve on the specific outcome of whether Dave Bronson
-    wins the 2026 Alaska governorship. Polymarket asks if Bronson will win the election,
-    while Kalshi's specific outcome is 'Dave Bronson' (Yes if he is sworn in as governor),
-    which implies winning the election. The resolution criteria align on the same
-    electoral event and candidate, with minor differences in confirmation source timing
-    but no substantive divergence in the underlying event.
-  confidence: 0.95
-  proposed_ts: '2026-08-06T21:00:04+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-07T09:44:30+00:00'
 - condition_id: '0x7591555301baf2f0cbfbddce041adcc911e1316dec33f9383a75c977d5191dc2'
   question: Will Brett Hulsey win the 2026 Wisconsin Governor Democratic primary election?
   venue: kalshi
   external_id: KXGOVWINOMD-26-BHUL
   external_question: Will Brett Hulsey be the Democratic nominee for Governor in Wisconsin?
-  rationale: Both markets resolve based on Brett Hulsey winning the 2026 Wisconsin
-    Democratic gubernatorial primary/nomination. The Polymarket question asks whether
-    Hulsey wins the primary, and its resolution criteria confirm that the primary
-    winner is the determinant. The Kalshi market resolves to Yes if Hulsey is the
-    Democratic nominee, which is outcome of the same primary. No material difference
-    in the resolution event exists. The slight disagreement in phrasing ('win primary'
-    vs 'be nominee') is tautological for a single-candidate primary in this context.
-  confidence: 0.98
-  proposed_ts: '2026-08-06T21:00:07+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-07T09:44:32+00:00'
+proposed:
+- condition_id: '0x7129c3b5ca53a5b444969ff721009ccd0f4628797e2d81e3870fca23aaffb7c6'
+  question: Will Ranger Suarez win the 2026 AL Cy Young Award?
+  venue: kalshi
+  external_id: KXMLBALCY-26-RSUA
+  external_question: Will Ranger Suarez win AL Cy Young?
+  rationale: Both markets resolve to 'Yes' if Ranger Suarez is the official winner
+    of the 2026 American League Cy Young Award, with identical event and season. The
+    Polymarket's tie-breaking rule uses alphabetically first last name among multiple
+    winners, and Kalshi's criteria specify the official winner; in the rare case of
+    a tie with multiple official winners, both would still point to the same outcome
+    if Ranger Suarez is among them, as other names are not relevant unless he is the
+    alphabetically first, which is consistent with official winner designation. The
+    slight divergence in tie handling is negligible for practical resolution.
+  confidence: 0.97
+  proposed_ts: '2026-08-07T15:25:31+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xe7daac449fc858f5e86d8021d74cdbff190c7d13f89b96accf7cdcae87a07451'
+  question: Will Jose Soriano win the 2026 AL Cy Young Award?
+  venue: kalshi
+  external_id: KXMLBALCY-26-JSOR
+  external_question: Will Jose Soriano win AL Cy Young?
+  rationale: Both markets resolve to whether Jose Soriano wins the 2026 AL Cy Young
+    Award. The Polymarket question explicitly names Jose Soriano and the resolution
+    criteria specifies the player who wins the 2026 AL Cy Young Award. The Kalshi
+    market's outcome 'Jose Soriano' resolves to Yes if Jose Soriano wins the 2026
+    AL Cy Young. The event, season, award, and candidate are identical. Minor ambiguity
+    in Polymarket's multi-winner tiebreaker (alphabetical first name) differs slightly
+    from Kalshi's criteria, but this is a rare edge case and does not affect the core
+    match.
+  confidence: 0.97
+  proposed_ts: '2026-08-07T15:25:37+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x12df229a62606175655181a6e8cbef0f037ac41612b61d67b0658dcf8633f397'
+  question: Will Tom Tiffany win the 2026 Wisconsin Governor Republican primary election?
+  venue: kalshi
+  external_id: KXGOVWINOMR-26-TT
+  external_question: Will Tom Tiffany be the Republican nominee for Governor in Wisconsin?
+  rationale: 'Both markets ask whether Tom Tiffany will be the Republican nominee
+    for Governor of Wisconsin in 2026. Polymarket frames it as winning the primary,
+    while Kalshi frames it as being the nominee. These are identical outcomes: winning
+    the Republican primary makes him the nominee. Resolution sources are also equivalent
+    (official primary results). The only slight caveat is Kalshi does not explicitly
+    mention a run-off, but if a run-off occurs, the eventual nominee would be the
+    winner of the final primary stage, so the outcomes remain aligned.'
+  confidence: 0.95
+  proposed_ts: '2026-08-07T15:25:39+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x08e4cea3c55ded3bb7d1ab771bb6c14d3963fac75fefd5b59c4f52dce6019a62'
+  question: Will Ned Lamont win the 2026 Connecticut Governor Democratic primary election?
+  venue: kalshi
+  external_id: KXGOVCTNOMD-26-NLAM
+  external_question: Will Ned Lamont be the Democratic nominee for Governor in Connecticut?
+  rationale: Both markets ask whether Ned Lamont will win the 2026 Connecticut Democratic
+    gubernatorial primary/nomination. Polymarket specifies the primary winner; Kalshi
+    asks if he is the Democratic nominee, which is determined by winning the primary.
+    Both have the same event and outcome. The only minor caveat is that the Kalshi
+    market could theoretically resolve differently if Lamont won the primary but then
+    withdrew or was replaced, but such scenarios are not typically considered in these
+    markets and both operate on standard primary/nomination results. The correspondence
+    is accurate.
+  confidence: 0.95
+  proposed_ts: '2026-08-07T15:25:42+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
