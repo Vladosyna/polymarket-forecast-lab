@@ -1510,6 +1510,26 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xc16fade4bbc06895f8e456e1e49c6aa51c1b2dc7f734b3ad8fe8a5900d6a4174'
+  question: Will Jim Schwartzel be the Republican nominee for FL-19?
+  venue: kalshi
+  external_id: KXFL19R-26-JSCH
+  external_question: Will Jim Schwartzel be the Republican nominee for FL-19?
+  rationale: Both markets ask whether Jim Schwartzel will be the Republican nominee
+    for FL-19 in the 2026 election. The Polymarket resolution criteria specify that
+    the market resolves according to who wins the Republican nomination for FL-19,
+    with a 'Other' fallback if no nominee is announced by Nov 3, 2026. Kalshi's specific
+    outcome is 'Jim Schwartzel' winning the Republican nomination for the 2026 FL-19
+    House seat. The candidates and event are identical. Minor differences in fallback
+    timing (Kalshi does not specify a fallback, but the core condition matches) do
+    not undermine the identity of the outcome. The third-party tool's high confidence
+    aligns with my independent assessment.
+  confidence: 0.98
+  proposed_ts: '2026-08-07T21:00:03+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
