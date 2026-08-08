@@ -1434,98 +1434,124 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-07T09:44:32+00:00'
-proposed:
 - condition_id: '0x7129c3b5ca53a5b444969ff721009ccd0f4628797e2d81e3870fca23aaffb7c6'
   question: Will Ranger Suarez win the 2026 AL Cy Young Award?
   venue: kalshi
   external_id: KXMLBALCY-26-RSUA
   external_question: Will Ranger Suarez win AL Cy Young?
-  rationale: Both markets resolve to 'Yes' if Ranger Suarez is the official winner
-    of the 2026 American League Cy Young Award, with identical event and season. The
-    Polymarket's tie-breaking rule uses alphabetically first last name among multiple
-    winners, and Kalshi's criteria specify the official winner; in the rare case of
-    a tie with multiple official winners, both would still point to the same outcome
-    if Ranger Suarez is among them, as other names are not relevant unless he is the
-    alphabetically first, which is consistent with official winner designation. The
-    slight divergence in tie handling is negligible for practical resolution.
-  confidence: 0.97
-  proposed_ts: '2026-08-07T15:25:31+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-08T10:55:17+00:00'
 - condition_id: '0xe7daac449fc858f5e86d8021d74cdbff190c7d13f89b96accf7cdcae87a07451'
   question: Will Jose Soriano win the 2026 AL Cy Young Award?
   venue: kalshi
   external_id: KXMLBALCY-26-JSOR
   external_question: Will Jose Soriano win AL Cy Young?
-  rationale: Both markets resolve to whether Jose Soriano wins the 2026 AL Cy Young
-    Award. The Polymarket question explicitly names Jose Soriano and the resolution
-    criteria specifies the player who wins the 2026 AL Cy Young Award. The Kalshi
-    market's outcome 'Jose Soriano' resolves to Yes if Jose Soriano wins the 2026
-    AL Cy Young. The event, season, award, and candidate are identical. Minor ambiguity
-    in Polymarket's multi-winner tiebreaker (alphabetical first name) differs slightly
-    from Kalshi's criteria, but this is a rare edge case and does not affect the core
-    match.
-  confidence: 0.97
-  proposed_ts: '2026-08-07T15:25:37+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-08T10:55:20+00:00'
 - condition_id: '0x12df229a62606175655181a6e8cbef0f037ac41612b61d67b0658dcf8633f397'
   question: Will Tom Tiffany win the 2026 Wisconsin Governor Republican primary election?
   venue: kalshi
   external_id: KXGOVWINOMR-26-TT
   external_question: Will Tom Tiffany be the Republican nominee for Governor in Wisconsin?
-  rationale: 'Both markets ask whether Tom Tiffany will be the Republican nominee
-    for Governor of Wisconsin in 2026. Polymarket frames it as winning the primary,
-    while Kalshi frames it as being the nominee. These are identical outcomes: winning
-    the Republican primary makes him the nominee. Resolution sources are also equivalent
-    (official primary results). The only slight caveat is Kalshi does not explicitly
-    mention a run-off, but if a run-off occurs, the eventual nominee would be the
-    winner of the final primary stage, so the outcomes remain aligned.'
-  confidence: 0.95
-  proposed_ts: '2026-08-07T15:25:39+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-08T10:55:23+00:00'
 - condition_id: '0x08e4cea3c55ded3bb7d1ab771bb6c14d3963fac75fefd5b59c4f52dce6019a62'
   question: Will Ned Lamont win the 2026 Connecticut Governor Democratic primary election?
   venue: kalshi
   external_id: KXGOVCTNOMD-26-NLAM
   external_question: Will Ned Lamont be the Democratic nominee for Governor in Connecticut?
-  rationale: Both markets ask whether Ned Lamont will win the 2026 Connecticut Democratic
-    gubernatorial primary/nomination. Polymarket specifies the primary winner; Kalshi
-    asks if he is the Democratic nominee, which is determined by winning the primary.
-    Both have the same event and outcome. The only minor caveat is that the Kalshi
-    market could theoretically resolve differently if Lamont won the primary but then
-    withdrew or was replaced, but such scenarios are not typically considered in these
-    markets and both operate on standard primary/nomination results. The correspondence
-    is accurate.
-  confidence: 0.95
-  proposed_ts: '2026-08-07T15:25:42+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-08T10:55:27+00:00'
 - condition_id: '0xc16fade4bbc06895f8e456e1e49c6aa51c1b2dc7f734b3ad8fe8a5900d6a4174'
   question: Will Jim Schwartzel be the Republican nominee for FL-19?
   venue: kalshi
   external_id: KXFL19R-26-JSCH
   external_question: Will Jim Schwartzel be the Republican nominee for FL-19?
-  rationale: Both markets ask whether Jim Schwartzel will be the Republican nominee
-    for FL-19 in the 2026 election. The Polymarket resolution criteria specify that
-    the market resolves according to who wins the Republican nomination for FL-19,
-    with a 'Other' fallback if no nominee is announced by Nov 3, 2026. Kalshi's specific
-    outcome is 'Jim Schwartzel' winning the Republican nomination for the 2026 FL-19
-    House seat. The candidates and event are identical. Minor differences in fallback
-    timing (Kalshi does not specify a fallback, but the core condition matches) do
-    not undermine the identity of the outcome. The third-party tool's high confidence
-    aligns with my independent assessment.
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-08T10:55:31+00:00'
+proposed:
+- condition_id: '0x1541b806c3f5aa8972df76ae6334157ae8435f85837369b83c911796118188e3'
+  question: Will Payton Tolle win the 2026 AL Rookie of the Year award?
+  venue: kalshi
+  external_id: KXMLBALROTY-26-PTOL
+  external_question: Will Payton Tolle win AL ROTY?
+  rationale: Both markets resolve to whether Payton Tolle wins the 2026 American League
+    Rookie of the Year award. The Polymarket question and resolution criteria align
+    with the Kalshi outcome 'Payton Tolle' and its resolution criteria. The event,
+    season, league, and award are identical. The only minor difference is handling
+    of ties, but both ultimately defer to official MLB winner, and the alphabetical
+    tiebreak in Polymarket does not conflict with Kalshi's simple yes/no on the same
+    winner. The high confidence from the tool is consistent with the clear match.
+  confidence: 0.95
+  proposed_ts: '2026-08-08T21:00:02+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x86b0c4565d55389652505bf1f560cd945e3513ab75ed06a014b658be4ece1f73'
+  question: Will Travis Bazzana win the 2026 AL Rookie of the Year award?
+  venue: kalshi
+  external_id: KXMLBALROTY-26-TBAZ
+  external_question: Will Travis Bazzana win AL ROTY?
+  rationale: 'Both markets resolve on whether Travis Bazzana wins the 2026 AL Rookie
+    of the Year award. Polymarket''s question and resolution criteria explicitly target
+    that specific award and season. Kalshi''s ticker and outcome labels confirm the
+    same specific outcome (Travis Bazzana wins AL ROTY 2026). The criteria align:
+    same player, same award, same season. Minor differences in tie-breaker handling
+    (e.g., alphabetically vs. MLB official winner) do not affect the core identity
+    of the event for a single-player market.'
   confidence: 0.98
-  proposed_ts: '2026-08-07T21:00:03+00:00'
+  proposed_ts: '2026-08-08T21:00:05+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x2053d8515f1b8cbeea4ccdb56e60e89c2617e43a8660d95166b8e71d27865277'
+  question: Will Marco Rubio win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-MRUB
+  external_question: Who will win the next presidential election?
+  rationale: 'Both markets resolve on the same specific outcome: whether Marco Rubio
+    wins the 2028 US presidential election. Kalshi''s title is broad but the ticker
+    and outcome labels clearly specify Marco Rubio as the winner, and its resolution
+    criteria match Polymarket''s condition of being the person inaugurated for the
+    term beginning in 2029 (which corresponds to winning the election).'
+  confidence: 0.98
+  proposed_ts: '2026-08-08T21:00:07+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xa9549c44687993a9a154347c6907092341459b927efaa3f2b49009ca2c4e40a1'
+  question: Will Jamie Dimon win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-JDIM
+  external_question: Who will win the next presidential election?
+  rationale: 'Both markets resolve on the same event: whether Jamie Dimon becomes
+    the U.S. President inaugurated for the term beginning January 2029 after the 2028
+    election. The Polymarket question asks if Jamie Dimon wins the 2028 Presidential
+    Election, and its resolution criteria confirm it resolves to the person who wins
+    the election, with inauguration as a fallback. The Kalshi market''s specific outcome
+    (from ticker and outcomes) is ''Jamie Dimon'' as the next person inaugurated as
+    President for the term beginning in 2029. These criteria are equivalent, and the
+    third-party tool''s identity match aligns with the direct comparison.'
+  confidence: 0.95
+  proposed_ts: '2026-08-08T21:00:31+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
