@@ -107,3 +107,20 @@ def test_cron_expressions_are_well_formed(name, expr):
     fields = expr.split()
     assert len(fields) == 5, f"{name}: expected 5 cron fields, got {len(fields)} in {expr!r}"
     assert _cron_hours(expr), f"{name}: no hours parsed from {expr!r}"
+
+
+def test_shadow_is_evaluated_daily_as_the_brief_specifies():
+    """CLAUDE.md section 8: "Entry rule (evaluated daily on liquid tier, using
+    M4)". It ran weekly from inception instead, which cost 7x the entry
+    opportunities and left the portfolio with 3 resolved trades after a month --
+    and PAP H2 uses that portfolio's realized, fee-netted P&L as its
+    net-of-cost proxy, so the drift was load-bearing, not cosmetic.
+    """
+    cfg = yaml.safe_load((PROJECT_ROOT / "config.yaml").read_text(encoding="utf-8"))
+    day_of_week = cfg["schedule"]["shadow_cron"].split()[4]
+    assert day_of_week == "*", (
+        f"shadow_cron restricts the day-of-week to {day_of_week!r}; the brief says daily"
+    )
+    assert cfg["schedule"]["control"]["shadow_max_age_hours"] <= 72, (
+        "the catch-up window still assumes a weekly job"
+    )

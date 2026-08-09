@@ -255,3 +255,40 @@ continues to sit at K±10, now 110..130.
 Nothing else changes: not the primary outcome, not the claim statistic, not the honesty tiers, not
 any hypothesis in §2. Filed under 9.1's discipline: a dated operational decision with its
 consequences stated before its results are seen.
+
+**Addendum 9.7 (2026-08-09).** The shadow portfolio's entry evaluation is restored from weekly to
+**daily**, the cadence `CLAUDE.md` §8 has specified since inception ("Entry rule (evaluated daily on
+liquid tier, using M4)"). This is recorded here because H2 names the shadow portfolio's simulated
+slippage and sizing frictions as its net-of-cost proxy, and that proxy is computed from *realized*
+trades — so how often entries are evaluated is load-bearing for a pre-registered hypothesis, not an
+interpretability detail.
+
+**What was found.** On this date the portfolio held 14 positions total — 3 resolved, 11 open —
+after a month of operation. Three compounding causes, all operational:
+(i) `schedule.shadow_cron` was weekly, not daily, from the start: a 7× reduction in entry
+opportunities against the specified rule;
+(ii) most of even those weekly firings never happened — every analytics cron job carried
+APScheduler's 1-second default `misfire_grace_time`, so a firing landing on a busy event loop was
+discarded silently (fixed the same day). Positions were opened on three dates only — 2026-07-09,
+07-20 and 07-27 — and the latter two are Mondays, i.e. catch-up firings after the 168-hour control
+window expired rather than scheduled runs;
+(iii) exits are hold-to-resolution and the book is long-horizon by construction: of the 11 open
+positions one resolves 2026-08-13 and the rest run to 2026-10-31, 11-30, 12-31 (four), 2027-01-03
+and 2027-12-31. The entry rule requires |p_M4 − p_market| ≥ 0.05, and that disagreement concentrates
+in exactly the long-horizon markets where the recalibration edge is hypothesised to live.
+
+Capital was never the constraint: 25.5% of the simulated bankroll was deployed, the largest category
+at 9.2% of its 20% cap.
+
+**What changes and what does not.** Only the evaluation cadence, back to what §8 already said; the
+entry filter, sizing, slippage model, fee schedule and hold-to-resolution exit are all untouched.
+No hypothesis, outcome, statistic or honesty tier changes.
+
+**Stated plainly, because it is the honest reading:** this does not retroactively create the trades
+that were not opened between 2026-07-09 and 2026-08-09, and it cannot undo (iii). H2's net-of-cost
+proxy will therefore rest on a trade population that is thin in absolute terms and thinner still in
+*resolved* trades before the 2026-12-31 freeze, since most positions opened from here will not have
+resolved by then. H2 will be reported at whatever honesty tier its realized resolved-trade count
+earns, and if that count cannot support the net-of-cost comparison, the paper will say so rather
+than report a P&L figure that reads as evidence. Filed under 9.1's discipline: a dated operational
+correction with its limits stated before its results are seen.

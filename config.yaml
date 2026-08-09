@@ -283,7 +283,16 @@ schedule:
   # heaviest job. It had never been checked against that rule -- report was
   # missing from the test's job list until learn's removal prompted a review.
   report_cron: "0 14 * * 0"     # weekly Sunday 14:00 UTC -> render the report
-  shadow_cron: "0 7 * * 0"      # weekly Sunday 07:00 UTC -> shadow portfolio (was 03:00)
+  # Daily, per CLAUDE.md section 8's own wording ("Entry rule (evaluated daily
+  # on liquid tier, using M4)"). It had been weekly since inception -- a 7x cut
+  # in entry opportunities that went unnoticed until 2026-08-09, when the
+  # portfolio was found holding 3 resolved trades after a month. Combined with
+  # the 1s misfire grace fixed the same day (which dropped most of even the
+  # weekly firings), it had effectively evaluated entries three times in a
+  # month. Exposure was never the constraint: 25.5% of bankroll deployed, the
+  # largest category at 9.2% of its 20% cap. See PAP addendum 9.7 -- this feeds
+  # H2's net-of-cost proxy, so it is disclosed, not just fixed.
+  shadow_cron: "0 7 * * *"      # daily 07:00 UTC -> shadow portfolio (was weekly Sunday)
   # learn_cron REMOVED 2026-08-05: `lab learn` no longer runs from this
   # process. It has its own systemd unit and timer (docs/VPS_OPERATIONS.md),
   # because a child process does not leave its parent's cgroup -- running the
@@ -306,7 +315,7 @@ schedule:
   # startup and again whenever the hourly health check notices a window was missed.
   control:
     forecast_max_age_hours: 24     # nightly bundle should run at least daily
-    shadow_max_age_hours: 168      # weekly -> 7 days
+    shadow_max_age_hours: 48       # daily -> 2 days of slack before catch-up
     # learn_max_age_hours REMOVED 2026-08-05 along with the hourly catch-up
     # that used it. The hold it briefly held (2000h) was only ever suppressing
     # a retry loop whose real cause was db.connect() taking the write lock on
