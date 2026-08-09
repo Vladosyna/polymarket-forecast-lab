@@ -1626,6 +1626,25 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xd2e63f6807c6c6c71e99c3abc2519f0994e0afee026dbde2638eff7b773b9ad6'
+  question: Will Kyle Schwarber win the 2026 National League Hank Aaron Award?
+  venue: kalshi
+  external_id: KXMLBNLHAARON-26-KSCH
+  external_question: Will Kyle Schwarber win NL Hank Aaron Award?
+  rationale: Both markets ask whether Kyle Schwarber will win the 2026 National League
+    Hank Aaron Award. The Polymarket question and resolution criteria specify the
+    same award, season, and league, with a tie-break procedure that only affects multiple
+    winners but does not change the core event. The Kalshi market explicitly resolves
+    to Yes if Kyle Schwarber wins the NL Hank Aaron Award in 2026. The outcomes and
+    timing align. The only minor discrepancy is that Polymarket's criteria mention
+    cancellation/postponement rules, which do not contradict Kalshi's simpler criteria
+    in this context.
+  confidence: 0.98
+  proposed_ts: '2026-08-09T21:00:02+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
