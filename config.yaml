@@ -369,7 +369,18 @@ cross_venue:
   # underpowered on a 5-min grid, and finer history can't be captured
   # retroactively. Bounded fan-out: this only ever touches the small,
   # human-confirmed pair set, never the wider universe.
-  hf_snapshot_interval_minutes: 1
+  #
+  # 1 -> 2 on 2026-08-09, to match measured reality rather than intent. A round
+  # fetches both legs of every confirmed pair (147 and growing) through the
+  # global rate limiter, which takes just over a minute, so APScheduler was
+  # skipping every second firing ("maximum number of running instances
+  # reached") and the realized cadence was already 2 minutes. Two things were
+  # wrong with leaving it at 1: the value stated something untrue about the
+  # collected grid, and the skip warning fired ~720 times a day, which is
+  # exactly the kind of routine noise a real warning hides in. Raise the pair
+  # count further and this will need revisiting again -- the constraint is the
+  # rate limiter (guardrail 8), and it is not negotiable.
+  hf_snapshot_interval_minutes: 2
   # pmxt Router candidates (Claude.md tech-stack row / §12): a THIRD-PARTY
   # tool proposes raw pairs entirely out-of-band via its own separate Windows
   # Scheduled Task (scripts/pmxt_router_scan.py + install-pmxt-scan-task.ps1)
