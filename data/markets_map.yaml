@@ -1484,78 +1484,47 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-08T10:55:31+00:00'
-proposed:
 - condition_id: '0x1541b806c3f5aa8972df76ae6334157ae8435f85837369b83c911796118188e3'
   question: Will Payton Tolle win the 2026 AL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBALROTY-26-PTOL
   external_question: Will Payton Tolle win AL ROTY?
-  rationale: Both markets resolve to whether Payton Tolle wins the 2026 American League
-    Rookie of the Year award. The Polymarket question and resolution criteria align
-    with the Kalshi outcome 'Payton Tolle' and its resolution criteria. The event,
-    season, league, and award are identical. The only minor difference is handling
-    of ties, but both ultimately defer to official MLB winner, and the alphabetical
-    tiebreak in Polymarket does not conflict with Kalshi's simple yes/no on the same
-    winner. The high confidence from the tool is consistent with the clear match.
-  confidence: 0.95
-  proposed_ts: '2026-08-08T21:00:02+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-09T13:00:04+00:00'
 - condition_id: '0x86b0c4565d55389652505bf1f560cd945e3513ab75ed06a014b658be4ece1f73'
   question: Will Travis Bazzana win the 2026 AL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBALROTY-26-TBAZ
   external_question: Will Travis Bazzana win AL ROTY?
-  rationale: 'Both markets resolve on whether Travis Bazzana wins the 2026 AL Rookie
-    of the Year award. Polymarket''s question and resolution criteria explicitly target
-    that specific award and season. Kalshi''s ticker and outcome labels confirm the
-    same specific outcome (Travis Bazzana wins AL ROTY 2026). The criteria align:
-    same player, same award, same season. Minor differences in tie-breaker handling
-    (e.g., alphabetically vs. MLB official winner) do not affect the core identity
-    of the event for a single-player market.'
-  confidence: 0.98
-  proposed_ts: '2026-08-08T21:00:05+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-09T13:00:08+00:00'
 - condition_id: '0x2053d8515f1b8cbeea4ccdb56e60e89c2617e43a8660d95166b8e71d27865277'
   question: Will Marco Rubio win the 2028 US Presidential Election?
   venue: kalshi
   external_id: KXPRESPERSON-28-MRUB
   external_question: Who will win the next presidential election?
-  rationale: 'Both markets resolve on the same specific outcome: whether Marco Rubio
-    wins the 2028 US presidential election. Kalshi''s title is broad but the ticker
-    and outcome labels clearly specify Marco Rubio as the winner, and its resolution
-    criteria match Polymarket''s condition of being the person inaugurated for the
-    term beginning in 2029 (which corresponds to winning the election).'
-  confidence: 0.98
-  proposed_ts: '2026-08-08T21:00:07+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-09T13:00:11+00:00'
 - condition_id: '0xa9549c44687993a9a154347c6907092341459b927efaa3f2b49009ca2c4e40a1'
   question: Will Jamie Dimon win the 2028 US Presidential Election?
   venue: kalshi
   external_id: KXPRESPERSON-28-JDIM
   external_question: Who will win the next presidential election?
-  rationale: 'Both markets resolve on the same event: whether Jamie Dimon becomes
-    the U.S. President inaugurated for the term beginning January 2029 after the 2028
-    election. The Polymarket question asks if Jamie Dimon wins the 2028 Presidential
-    Election, and its resolution criteria confirm it resolves to the person who wins
-    the election, with inauguration as a fallback. The Kalshi market''s specific outcome
-    (from ticker and outcomes) is ''Jamie Dimon'' as the next person inaugurated as
-    President for the term beginning in 2029. These criteria are equivalent, and the
-    third-party tool''s identity match aligns with the direct comparison.'
-  confidence: 0.95
-  proposed_ts: '2026-08-08T21:00:31+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-09T13:00:14+00:00'
+proposed: []
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
