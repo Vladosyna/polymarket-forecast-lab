@@ -232,3 +232,36 @@ def test_learn_is_not_scheduled_by_the_orchestrator_at_all():
     assert "learn" not in _control_max_ages({})
     src = inspect.getsource(runner._register_analytics_jobs)
     assert 'services["learn"]' not in src
+
+
+def test_every_analytics_cron_job_has_an_explicit_misfire_grace():
+    """APScheduler's default is 1 SECOND, and a cron firing that lands while the
+    event loop is busy is discarded with no log line at all -- the job simply
+    never runs until its control window expires days later.
+
+    This was found and fixed for `health_check` on 2026-07-14 and not extended
+    to the jobs that write research data. On 2026-08-09 the weekly shadow job
+    missed its 07:00 slot exactly this way and had gone unrun since 08-03, while
+    the 1-minute matched-pair capture kept the loop busy.
+    """
+    import asyncio
+
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    from lab.collect.runner import _register_analytics_jobs
+    from lab.util import load_config
+
+    async def _check() -> None:
+        scheduler = AsyncIOScheduler(timezone="UTC")
+        _register_analytics_jobs(scheduler, load_config())
+        cron_jobs = [j for j in scheduler.get_jobs() if j.id != "health_check"]
+        assert cron_jobs, "no analytics jobs registered -- fixture is wrong"
+        for job in cron_jobs:
+            assert job.misfire_grace_time is not None and job.misfire_grace_time >= 300, (
+                f"{job.id} runs on APScheduler's 1s default grace and can be "
+                "silently dropped"
+            )
+            # A late firing must still produce exactly one run, not a backlog.
+            assert job.coalesce is True, f"{job.id} would run repeatedly to catch up"
+
+    asyncio.run(_check())

@@ -574,8 +574,20 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
     services = _build_analytics_services(config)
     actx = AnalyticsContext(services=services, max_age_hours=_control_max_ages(config))
 
+    # Every cron job below gets an explicit misfire grace. APScheduler's default
+    # is 1 SECOND: a firing that lands while the event loop is busy is silently
+    # discarded -- no log line, no error, no retry until the control window
+    # expires days later. That exact failure was found and fixed for the health
+    # check on 2026-07-14 and never extended to the jobs that write research
+    # data. On 2026-08-09 the weekly shadow job missed its 07:00 slot that way
+    # and had not run since 08-03; the loop is now routinely busy because the
+    # 1-minute matched-pair capture overruns its own interval. An hour of grace
+    # is far beyond any plausible busy window, and `coalesce=True` means a late
+    # firing still produces exactly one run.
+    GRACE = 3600
+
     scheduler.add_job(services["forecast"], CronTrigger.from_crontab(forecast_cron, timezone="UTC"),
-                      id="nightly", max_instances=1, coalesce=True)
+                      id="nightly", max_instances=1, coalesce=True, misfire_grace_time=GRACE)
     # Weekly, not nightly, and out-of-process (see
     # _run_lab_command_out_of_process): the HTML report renders data the
     # nightly bundle already committed, so its cadence is an operator
@@ -583,24 +595,24 @@ def _register_analytics_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]
     # ~834MB, ~3-minute child on a 967MB host. `lab report` stays available
     # on demand for a fresher page at any time.
     scheduler.add_job(services["report"], CronTrigger.from_crontab(report_cron, timezone="UTC"),
-                      id="report_weekly", max_instances=1, coalesce=True)
+                      id="report_weekly", max_instances=1, coalesce=True, misfire_grace_time=GRACE)
     scheduler.add_job(services["shadow"], CronTrigger.from_crontab(shadow_cron, timezone="UTC"),
-                      id="weekly", max_instances=1, coalesce=True)
+                      id="weekly", max_instances=1, coalesce=True, misfire_grace_time=GRACE)
     # No learn job here: it runs from its own systemd timer (lab-learn.timer),
     # so its memory footprint gets its own cgroup budget instead of competing
     # with the collector's. See the module docstring.
     # M7: proposes candidate matches only -- never auto-confirms. A human still
     # has to run `lab map confirm` before a pair goes live (brief section 6/9).
     scheduler.add_job(services["map_propose"], CronTrigger.from_crontab(map_propose_cron, timezone="UTC"),
-                      id="map_propose_weekly", max_instances=1, coalesce=True)
+                      id="map_propose_weekly", max_instances=1, coalesce=True, misfire_grace_time=GRACE)
     # M7: verifies pmxt's out-of-band Router suggestions (data/pmxt_candidates.json,
     # written by scripts/pmxt_router_scan.py's own separate scheduled task --
     # never called from this process). Same propose-only, never-auto-confirm
     # contract as map_propose above.
     scheduler.add_job(services["pmxt_verify"], CronTrigger.from_crontab(pmxt_verify_cron, timezone="UTC"),
-                      id="pmxt_verify_twice_daily", max_instances=1, coalesce=True)
+                      id="pmxt_verify_twice_daily", max_instances=1, coalesce=True, misfire_grace_time=GRACE)
     scheduler.add_job(services["paper_export"], CronTrigger.from_crontab(paper_export_cron, timezone="UTC"),
-                      id="paper_export_weekly", max_instances=1, coalesce=True)
+                      id="paper_export_weekly", max_instances=1, coalesce=True, misfire_grace_time=GRACE)
     log.info("analytics scheduled",
              extra={"ctx": {"nightly": forecast_cron, "report": report_cron, "weekly": shadow_cron,
                             "map_propose": map_propose_cron,
