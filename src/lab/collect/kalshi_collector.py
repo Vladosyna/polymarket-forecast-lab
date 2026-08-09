@@ -29,6 +29,7 @@ Assumptions (guardrail 1 -- stated rather than silently picked):
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -45,12 +46,24 @@ _CLOSED_STATUSES = ("finalized", "closed")
 
 
 def assign_kalshi_tier(m: KalshiMarket, config: dict[str, Any]) -> str:
+    """Tier on traded volume and open interest, NOT on Kalshi's own
+    `liquidity_dollars`.
+
+    That field reads 0.0 for every market Kalshi publishes -- verified on
+    2026-08-09 across all 4,822 markets this lab had collected and against a
+    live API sample. Keying the liquid gate on it meant no Kalshi market could
+    ever be tiered liquid, which silently excluded the whole venue from the
+    shadow portfolio (it scans the liquid tier only) and from anything else
+    tier-gated. Volume and open interest are both populated.
+    """
     tiers = config["venues"]["kalshi"]["tiers"]
-    liq = m.liquidity_dollars or 0.0
     vol = m.volume_fp or 0.0
-    if liq >= tiers["liquid"]["min_liquidity"] and vol >= tiers["liquid"]["min_volume"]:
+    oi = m.open_interest_fp or 0.0
+    liquid = tiers["liquid"]
+    if vol >= liquid["min_volume"] and oi >= liquid.get("min_open_interest", 0):
         return "liquid"
-    if liq >= tiers["tail"]["min_liquidity"] and vol >= tiers["tail"]["min_volume"]:
+    tail = tiers["tail"]
+    if vol >= tail["min_volume"] and oi >= tail.get("min_open_interest", 0):
         return "tail"
     return "ignored"
 
@@ -128,7 +141,7 @@ async def sync_kalshi_universe(
 
 def tracked_kalshi_markets(conn) -> list[dict]:
     rows = conn.execute(
-        "SELECT condition_id, venue_native_id FROM markets "
+        "SELECT condition_id, venue_native_id, tier FROM markets "
         "WHERE venue = 'kalshi' AND active = 1 AND closed = 0"
     ).fetchall()
     return [dict(r) for r in rows]
@@ -148,11 +161,34 @@ def tracked_kalshi_markets_by_ids(conn, condition_ids: list[str]) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _top_of_book_usd(price: float | None, size: float | None) -> float | None:
+    """price * size, or None when either side of the quote is missing/zero.
+
+    Kalshi sizes are contract counts settling at $1 apiece, so this is USD
+    notional at the best level -- the same quantity `OrderBook.depth_usd`
+    returns for Polymarket, so the two venues' depth columns mean one thing.
+    """
+    if price is None or size is None:
+        return None
+    if price <= 0 or size <= 0:
+        return None
+    return float(price) * float(size)
+
+
 async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
-                                 markets: list[dict], ts_bucket: str) -> int:
+                                 markets: list[dict], ts_bucket: str,
+                                 depth_levels: int = 0) -> int:
     """Snapshot an explicit set of Kalshi markets. Shared by snapshot_kalshi
     (every open Kalshi market) and Phase 17 item 3's per-confirmed-pair
-    high-frequency job (a small, explicit condition_id list)."""
+    high-frequency job (a small, explicit condition_id list).
+
+    `depth_levels > 0` additionally fetches each market's order book and fills
+    the depth columns. That costs one extra request per market, so callers pass
+    it only for the liquid tier. Until 2026-08-09 these columns were written
+    NULL unconditionally, which made every Kalshi market fail the shadow
+    portfolio's own depth filter (brief section 8: top-of-book depth >= $500)
+    even before its tier excluded it.
+    """
     rows: list[dict] = []
     for row in markets:
         ticker = row["venue_native_id"]
@@ -167,6 +203,27 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
         spread = None
         if m.yes_bid_dollars is not None and m.yes_ask_dollars is not None:
             spread = m.yes_ask_dollars - m.yes_bid_dollars
+
+        # Top-of-book depth comes free on the market object we already fetched:
+        # `yes_bid_size_fp`/`yes_ask_size_fp` are contract counts and each
+        # contract settles at $1, so price * size is the same USD notional
+        # `depth_usd` sums for Polymarket. No extra request, and it works for
+        # every tier. A missing or zero size stays NULL, never 0.0 -- a zero
+        # would read as "measured, and there is none" to every downstream
+        # filter, which is a different claim.
+        bid_depth = _top_of_book_usd(m.yes_bid_dollars, m.yes_bid_size_fp)
+        ask_depth = _top_of_book_usd(m.yes_ask_dollars, m.yes_ask_size_fp)
+        bids_json = asks_json = None
+        if depth_levels > 0:
+            # The full ladder, for the liquid tier only: unlike the scalars
+            # above it costs a request each, and unlike them it cannot be
+            # reconstructed later (same reasoning as the Polymarket store).
+            book = await kalshi.orderbook(ticker)
+            if book is not None and book.bids:
+                bids_json = json.dumps(book.top_levels("bid", depth_levels))
+            if book is not None and book.asks:
+                asks_json = json.dumps(book.top_levels("ask", depth_levels))
+
         rows.append({
             "ts": ts_bucket,
             "condition_id": row["condition_id"],
@@ -175,11 +232,11 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
             "best_ask": m.yes_ask_dollars,
             "mid": m.yes_price,
             "spread": spread,
-            "bid_depth_usd": None,
-            "ask_depth_usd": None,
+            "bid_depth_usd": bid_depth,
+            "ask_depth_usd": ask_depth,
             "last_trade_price": m.last_price_dollars,
-            "bids_json": None,
-            "asks_json": None,
+            "bids_json": bids_json,
+            "asks_json": asks_json,
             "venue": "kalshi",
         })
     return store.append(rows)
@@ -194,9 +251,20 @@ async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore, conf
     bucket_minutes = config["venues"]["kalshi"]["snapshot_interval_minutes"]
     ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
 
-    written = await snapshot_kalshi_markets(kalshi, store, markets, ts_bucket)
+    # Order books only for the liquid tier: one extra request each, and the
+    # tail is thousands of markets. The liquid tier is what the shadow
+    # portfolio scans and what depth-based tiering would refine, so that is
+    # where the measurement is worth its request budget (guardrail 8).
+    depth_levels = config["collect"].get("book_depth_levels", 10)
+    liquid = [m for m in markets if m.get("tier") == "liquid"]
+    rest = [m for m in markets if m.get("tier") != "liquid"]
+
+    written = await snapshot_kalshi_markets(kalshi, store, liquid, ts_bucket,
+                                            depth_levels=depth_levels)
+    written += await snapshot_kalshi_markets(kalshi, store, rest, ts_bucket)
     log.info("kalshi snapshot round done",
-             extra={"ctx": {"markets": len(markets), "written": written}})
+             extra={"ctx": {"markets": len(markets), "with_depth": len(liquid),
+                            "written": written}})
     return written
 
 

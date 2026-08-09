@@ -13,6 +13,8 @@ tests meaningful without depending on a plugin that isn't installed.
 
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 
 from lab.api.kalshi import KalshiMarket
@@ -96,24 +98,48 @@ def test_kalshi_market_row_falls_back_to_expiration_time():
 
 
 def test_tier_liquid_and_tail_and_ignored():
-    liquid_tiers = CONFIG["venues"]["kalshi"]["tiers"]["liquid"]
-    m_liquid = _market(
-        liquidity_dollars=str(liquid_tiers["min_liquidity"]),
-        volume_fp=str(liquid_tiers["min_volume"]),
-    )
+    liquid = CONFIG["venues"]["kalshi"]["tiers"]["liquid"]
+    m_liquid = _market(volume_fp=str(liquid["min_volume"]),
+                       open_interest_fp=str(liquid.get("min_open_interest", 0)))
     assert assign_kalshi_tier(m_liquid, CONFIG) == "liquid"
 
-    m_tail = _market(liquidity_dollars="0", volume_fp="0")
+    m_tail = _market(volume_fp="0", open_interest_fp="0")
     assert assign_kalshi_tier(m_tail, CONFIG) == "tail"
 
-    m_ignored = _market(liquidity_dollars=None, volume_fp=None)
-    # tail thresholds are 0/0 in config, so None (-> 0.0) still clears tail;
-    # exercise "ignored" by dropping below tail thresholds explicitly instead.
-    tail_tiers = CONFIG["venues"]["kalshi"]["tiers"]["tail"]
-    if tail_tiers["min_liquidity"] > 0 or tail_tiers["min_volume"] > 0:
-        assert assign_kalshi_tier(m_ignored, CONFIG) == "ignored"
+    tail = CONFIG["venues"]["kalshi"]["tiers"]["tail"]
+    m_none = _market(volume_fp=None, open_interest_fp=None)
+    if tail["min_volume"] > 0 or tail.get("min_open_interest", 0) > 0:
+        assert assign_kalshi_tier(m_none, CONFIG) == "ignored"
     else:
-        assert assign_kalshi_tier(m_ignored, CONFIG) == "tail"
+        assert assign_kalshi_tier(m_none, CONFIG) == "tail"
+
+
+def test_tier_ignores_kalshis_dead_liquidity_field():
+    """Kalshi reports `liquidity_dollars` as 0.0 for every market it
+    publishes -- verified 2026-08-09 across all 4,822 this lab had collected
+    and against a live API sample. Keying the liquid gate on it meant no Kalshi
+    market could ever be liquid, which silently excluded the entire venue from
+    the shadow portfolio (it scans the liquid tier only)."""
+    liquid = CONFIG["venues"]["kalshi"]["tiers"]["liquid"]
+    m = _market(liquidity_dollars="0",
+                volume_fp=str(liquid["min_volume"]),
+                open_interest_fp=str(liquid.get("min_open_interest", 0)))
+    assert assign_kalshi_tier(m, CONFIG) == "liquid", (
+        "a zero liquidity_dollars must not block the liquid tier"
+    )
+
+
+def test_top_of_book_usd_distinguishes_missing_from_zero():
+    """A missing quote is NULL, never 0.0: downstream, 0.0 asserts 'measured,
+    and there is none', which the shadow portfolio's depth filter would read as
+    a real observation."""
+    from lab.collect.kalshi_collector import _top_of_book_usd
+
+    assert _top_of_book_usd(0.91, 2.64) == pytest.approx(2.4024)
+    assert _top_of_book_usd(None, 100.0) is None
+    assert _top_of_book_usd(0.5, None) is None
+    assert _top_of_book_usd(0.0, 100.0) is None
+    assert _top_of_book_usd(0.5, 0.0) is None
 
 
 # --- resolution watcher: finality + idempotency -----------------------------
@@ -198,3 +224,53 @@ def test_watch_kalshi_resolutions_skips_unsettled(tmp_path):
     assert recorded == 0
     assert conn.execute("SELECT COUNT(*) AS n FROM resolutions").fetchone()["n"] == 0
     conn.close()
+
+
+def test_orderbook_inverts_the_no_ladder_into_yes_asks():
+    """Kalshi publishes TWO BID ladders, not a bid and an ask: a NO bid at q is
+    an offer to sell YES at 1 - q. Getting that inversion wrong would silently
+    mirror every Kalshi ask price."""
+    import asyncio
+
+    from lab.api.http import TokenBucket
+    from lab.api.kalshi import KalshiClient
+
+    client = KalshiClient(TokenBucket(rate=100, burst=100))
+
+    async def fake_get_json(path, params=None):
+        return {"orderbook_fp": {
+            "yes_dollars": [["0.40", "100"], ["0.45", "200"]],   # YES bids
+            "no_dollars": [["0.50", "300"], ["0.52", "400"]],    # NO bids
+        }}
+
+    client.get_json = fake_get_json
+    book = asyncio.run(client.orderbook("TEST"))
+
+    assert book.best_bid == pytest.approx(0.45)          # highest YES bid
+    assert book.best_ask == pytest.approx(0.48)          # 1 - highest NO bid (0.52)
+    assert book.depth_usd("bid") == pytest.approx(0.45 * 200)
+    assert book.depth_usd("ask") == pytest.approx(0.48 * 400)
+    # best-first ordering, same contract as the Polymarket book
+    assert book.top_levels("bid", 2)[0][0] == pytest.approx(0.45)
+    assert book.top_levels("ask", 2)[0][0] == pytest.approx(0.48)
+
+
+def test_orderbook_returns_an_empty_book_not_none_when_kalshi_has_no_levels():
+    """Common for markets that have stopped trading but are still flagged open
+    (four of six top-volume markets sampled on 2026-08-09). Must not crash and
+    must not be mistaken for zero depth."""
+    import asyncio
+
+    from lab.api.http import TokenBucket
+    from lab.api.kalshi import KalshiClient
+
+    client = KalshiClient(TokenBucket(rate=100, burst=100))
+
+    async def fake_get_json(path, params=None):
+        return {"orderbook_fp": {"yes_dollars": [], "no_dollars": []}}
+
+    client.get_json = fake_get_json
+    book = asyncio.run(client.orderbook("TEST"))
+    assert book is not None
+    assert book.bids == [] and book.asks == []
+    assert book.best_bid is None and book.best_ask is None

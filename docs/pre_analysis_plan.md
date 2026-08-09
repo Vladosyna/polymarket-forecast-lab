@@ -292,3 +292,45 @@ resolved by then. H2 will be reported at whatever honesty tier its realized reso
 earns, and if that count cannot support the net-of-cost comparison, the paper will say so rather
 than report a P&L figure that reads as evidence. Filed under 9.1's discipline: a dated operational
 correction with its limits stated before its results are seen.
+
+**Addendum 9.8 (2026-08-09).** Kalshi's tier assignment is rekeyed, and Kalshi order-book depth is
+collected for the first time. Both change the composition of the tradeable universe, so both are
+recorded here before any confirmatory analysis runs.
+
+**What was found.** Every one of the 4,822 Kalshi markets this lab tracks was assigned to the
+`tail` tier, and none had ever been `liquid`. The cause is that `assign_kalshi_tier` gated the
+liquid tier on Kalshi's own `liquidity_dollars` field, which reads **0.0 for every market Kalshi
+publishes** — verified on this date across all 4,822 collected and against a live API sample. The
+threshold could therefore never be met. Two consequences followed silently:
+(i) the shadow portfolio scans the liquid tier only, so the entire Kalshi venue — including 2,092
+markets resolving within seven days — was structurally excluded from it; and
+(ii) `bid_depth_usd`/`ask_depth_usd` were written NULL for every Kalshi snapshot (167,564 rows on
+this date, none with depth), so even had the tier been right, §8's own entry filter (top-of-book
+depth ≥ $500) would have rejected every Kalshi market on a null.
+
+This matters because H2's net-of-cost proxy is computed from *realized* shadow trades, and the
+short-horizon stream that could produce resolved trades before the freeze is overwhelmingly
+Kalshi's: Polymarket's liquid tier carried six candidates under 30 days to resolution on this date,
+out of 481.
+
+**What changes.** Kalshi tiers on traded volume and open interest, which are populated
+(`min_volume: 5000`, `min_open_interest: 100`, chosen from the live distribution: volume > 5,000
+selects 788 of 4,822 markets). Top-of-book depth is now recorded from `yes_bid_size_fp`/
+`yes_ask_size_fp`, which arrive with the market object the collector already fetches — no extra
+request — as price × size, the same USD notional the Polymarket depth columns hold. A missing quote
+stays NULL and never becomes 0.0.
+
+**What this is expected to yield, measured rather than hoped.** Kalshi books are far thinner at the
+top than Polymarket's: across the 60 highest-volume Kalshi markets, median non-zero top-of-book
+depth is **$16** against **$415** for Polymarket's liquid tier, and only 6.7% (bid) / 13.3% (ask)
+clear §8's $500 threshold, against 48% on Polymarket. The realistic effect is therefore on the order
+of dozens of newly eligible Kalshi markets, not thousands — but dozens of *short-horizon* ones,
+against the current zero. No filter, threshold or sizing rule in §8 is relaxed to achieve this; if
+Kalshi markets do not clear the same $500 bar Polymarket markets face, they are not traded.
+
+**Watch item, recorded now.** `tier` also selects the price-freshness bound (guardrail 13: 15 min
+for liquid, 90 for tail), while the tier-wide Kalshi snapshot round runs every 15 minutes. Kalshi
+markets promoted to `liquid` therefore sit near that bound, and if the round lengthens, forecasts on
+them would be skipped as stale rather than paired against an old price — the safe direction, but a
+coverage loss. Kalshi forecast counts will be checked against their pre-change level, and this
+addendum amended if the bound has to move.

@@ -45,8 +45,16 @@ class KalshiMarket(BaseModel):
     settlement_ts: str | None = None
     liquidity_dollars: float | None = Field(default=None, alias="liquidity_dollars")
     volume_fp: float | None = Field(default=None, alias="volume_fp")
+    # Kalshi's own `liquidity_dollars` reads 0.0 for every market (verified
+    # against 4,822 collected and a live API sample), so tiering keys on these
+    # two instead -- both are populated. See assign_kalshi_tier.
+    open_interest_fp: float | None = Field(default=None, alias="open_interest_fp")
     yes_bid_dollars: float | None = Field(default=None, alias="yes_bid_dollars")
     yes_ask_dollars: float | None = Field(default=None, alias="yes_ask_dollars")
+    # Top-of-book sizes, in contracts. These arrive with the market object, so
+    # depth costs no extra request -- see kalshi_collector._top_of_book_usd.
+    yes_bid_size_fp: float | None = Field(default=None, alias="yes_bid_size_fp")
+    yes_ask_size_fp: float | None = Field(default=None, alias="yes_ask_size_fp")
     last_price_dollars: float | None = Field(default=None, alias="last_price_dollars")
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
@@ -56,9 +64,11 @@ class KalshiMarket(BaseModel):
         mode="before",
     )(_dollars)
 
-    # volume_fp is a contract count (like Gamma's volumeNum), not a price -- no
-    # _dollars clamp/rounding semantics apply, just a plain float coercion.
-    @field_validator("volume_fp", mode="before")
+    # volume_fp and open_interest_fp are contract counts (like Gamma's
+    # volumeNum), not prices -- no _dollars clamp/rounding semantics apply,
+    # just a plain float coercion.
+    @field_validator("volume_fp", "open_interest_fp", "yes_bid_size_fp",
+                     "yes_ask_size_fp", mode="before")
     @classmethod
     def _coerce_volume(cls, value: Any) -> float | None:
         if value in (None, ""):
@@ -83,6 +93,55 @@ class KalshiMarket(BaseModel):
 class KalshiClient(BaseClient):
     def __init__(self, bucket: TokenBucket, base_url: str = KALSHI_BASE_URL) -> None:
         super().__init__(base_url, bucket)
+
+    async def orderbook(self, ticker: str) -> "OrderBook | None":
+        """Kalshi's book as the same `OrderBook` the CLOB client returns, so
+        every existing helper (best_bid/best_ask/spread/depth_usd/top_levels)
+        works unchanged for both venues.
+
+        Kalshi publishes TWO BID ladders, not a bid and an ask: `yes_dollars`
+        are bids to buy YES, `no_dollars` are bids to buy NO. A NO bid at q is
+        an offer to sell YES at 1 - q, which is where the ask side comes from.
+        Sizes are contracts and each contract settles at $1, so price * size is
+        USD notional -- the same quantity `depth_usd` already sums for
+        Polymarket.
+
+        Returns None when the book is absent or unreadable, and an EMPTY book
+        (not None) when Kalshi legitimately returns no levels -- common for
+        markets that have effectively finished trading but are still flagged
+        open. Callers must treat both as "no depth", never as zero depth.
+        """
+        from lab.api.clob import BookLevel, OrderBook
+
+        try:
+            raw = await self.get_json(f"/markets/{ticker}/orderbook")
+        except Exception:
+            log.warning("kalshi: orderbook fetch failed", extra={"ctx": {"ticker": ticker}})
+            return None
+        book = (raw or {}).get("orderbook_fp") or (raw or {}).get("orderbook")
+        if not isinstance(book, dict):
+            return None
+
+        def _levels(raw_levels: Any, invert: bool) -> list[BookLevel]:
+            out: list[BookLevel] = []
+            for entry in raw_levels or []:
+                try:
+                    price, size = float(entry[0]), float(entry[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if size <= 0:
+                    continue
+                price = 1.0 - price if invert else price
+                if not (0.0 <= price <= 1.0):
+                    continue
+                out.append(BookLevel(price=price, size=size))
+            return out
+
+        return OrderBook(
+            market=ticker,
+            bids=_levels(book.get("yes_dollars") or book.get("yes"), invert=False),
+            asks=_levels(book.get("no_dollars") or book.get("no"), invert=True),
+        )
 
     async def market(self, ticker: str) -> KalshiMarket | None:
         try:

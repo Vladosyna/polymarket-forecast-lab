@@ -427,9 +427,18 @@ venues:
     # crypto price-target markets, the market price IS the forecast.
     excluded_series_categories: ["Crypto", "Financials"]
     max_series_per_sync: 40   # bounds per-cycle series fan-out (politeness + runtime)
+    # Rekeyed 2026-08-09 off Kalshi's own `liquidity_dollars`, which reads 0.0
+    # for every market it publishes (verified across all 4,822 collected and
+    # against a live API sample) -- so the liquid gate could never be met and
+    # the whole venue sat in `tail`, invisible to the shadow portfolio. Volume
+    # and open interest are both populated. Thresholds from the live
+    # distribution on that date: volume > 5,000 selects 788 of 4,822 markets,
+    # > 50,000 selects 143. 5,000 keeps the liquid tier around 800, which is
+    # one order-book request each per 15-minute round -- comfortably inside
+    # Kalshi's ~10 req/s (guardrail 8). Raise it if that round starts to crowd.
     tiers:
-      liquid: { min_liquidity: 1000, min_volume: 5000 }
-      tail: { min_liquidity: 0, min_volume: 0 }
+      liquid: { min_volume: 5000, min_open_interest: 100 }
+      tail: { min_volume: 0, min_open_interest: 0 }
 
   metaculus:
     snapshot_interval_minutes: 60
