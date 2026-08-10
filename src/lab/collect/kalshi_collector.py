@@ -109,21 +109,33 @@ def kalshi_market_row(m: KalshiMarket, category: str) -> dict[str, Any]:
     }
 
 
-def _series_sync_order(conn, tickers: list[str]) -> list[str]:
-    """Least-recently-synced series first, never-synced ahead of all of them.
+def _series_sync_order(conn, candidates: list[tuple[str, str]], max_series: int,
+                       discovery_share: float = 0.2) -> list[str]:
+    """Which series this cycle syncs: mostly the stalest ones we know carry
+    markets, plus a small discovery slice of ones we have never seen.
 
     `max_series_per_sync` bounds each cycle for politeness, but the loop it
-    bounded walked a fixed category/API order and simply stopped at the cap --
-    so the same head of the list was re-synced every hour and the tail was never
-    reached at all. Measured 2026-08-10 across 5,009 Kalshi markets in ~285
-    series: 82% had not been re-synced in over three days, and 1,772 were still
-    flagged active with an end date in the past, because only a sync refreshes
-    that flag. Forecasts kept being written on them.
+    bounded walked a fixed category/API order and stopped at the cap -- so the
+    same head was re-synced hourly and the tail was never reached. Measured
+    2026-08-10 across 5,009 Kalshi markets in ~285 series: 82% unsynced for 3+
+    days, and 1,772 still flagged active past their end date, because only a
+    sync clears that flag.
 
-    Same shape of fix as the resolution watcher's round-robin cursor: order by
-    staleness so the cap becomes a rotation instead of a permanent cutoff.
+    The budget has to be SPLIT rather than simply staleness-ordered, and that
+    is not obvious -- ordering never-synced first (the resolution watcher's
+    rule, which is right there) starves the productive series here: Kalshi's
+    /series listing returns 10,502 series against the ~285 that actually carry
+    open markets, so a never-seen-first rotation spends every cycle on empty
+    ones. The first cycle that shipped that ordering synced 40 series and saw
+    zero markets. The series payload carries no volume or open-market count, so
+    empties cannot be filtered out cheaply -- hence a reserved slice instead.
+
+    Known series are ordered oldest-synced first, so ~285 of them turn over in
+    about nine cycles. Unseen ones are ordered by the series' own
+    `last_updated_ts` (most recent first), which needs no persisted cursor and
+    puts genuinely active new series ahead of dormant ones.
     """
-    if not tickers:
+    if not candidates:
         return []
     rows = conn.execute(
         """
@@ -133,8 +145,21 @@ def _series_sync_order(conn, tickers: list[str]) -> list[str]:
         """
     ).fetchall()
     seen = {r["series"]: r["synced"] for r in rows if r["series"]}
-    # None sorts first: a series we have never synced has the strongest claim.
-    return sorted(tickers, key=lambda t: (seen.get(t) is not None, seen.get(t) or ""))
+
+    known = [(t, u) for t, u in candidates if t in seen]
+    unseen = [(t, u) for t, u in candidates if t not in seen]
+    known.sort(key=lambda tu: seen.get(tu[0]) or "")
+    unseen.sort(key=lambda tu: tu[1] or "", reverse=True)
+
+    n_discovery = min(len(unseen), int(max_series * discovery_share))
+    n_known = min(len(known), max_series - n_discovery)
+    # Unused discovery budget falls back to known series, and vice versa, so a
+    # cycle is never short just because one pool is small.
+    picked = [t for t, _ in known[:n_known]] + [t for t, _ in unseen[:n_discovery]]
+    if len(picked) < max_series:
+        extra = [t for t, _ in known[n_known:]] + [t for t, _ in unseen[n_discovery:]]
+        picked += extra[:max_series - len(picked)]
+    return picked
 
 
 async def sync_kalshi_universe(
@@ -157,7 +182,7 @@ async def sync_kalshi_universe(
     # Collect every category's series FIRST, then order the whole set by
     # staleness -- the cap has to be a rotation over all of them, not a cutoff
     # that keeps re-reading whichever category happens to be iterated first.
-    candidates: list[tuple[str, str]] = []      # (series_ticker, our_category)
+    candidates: list[tuple[str, str, str | None]] = []   # (ticker, our_category, last_updated_ts)
     for kalshi_category, our_category in category_map.items():
         if kalshi_category in excluded:
             counts["skipped_category"] += 1
@@ -171,10 +196,10 @@ async def sync_kalshi_universe(
         for s in series_list:
             ticker = s.get("ticker")
             if ticker:
-                candidates.append((ticker, our_category))
+                candidates.append((ticker, our_category, s.get("last_updated_ts")))
 
-    by_ticker = dict(candidates)
-    order = _series_sync_order(conn, [t for t, _ in candidates])[:max_series]
+    by_ticker = {t: cat for t, cat, _ in candidates}
+    order = _series_sync_order(conn, [(t, upd) for t, _, upd in candidates], max_series)
     counts["series_available"] = len(candidates)
     for ticker in order:
         our_category = by_ticker[ticker]

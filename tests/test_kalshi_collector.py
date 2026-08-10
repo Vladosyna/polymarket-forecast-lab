@@ -313,11 +313,8 @@ def test_orderbook_returns_an_empty_book_not_none_when_kalshi_has_no_levels():
 def test_series_sync_order_rotates_instead_of_starving_the_tail(tmp_path):
     """`max_series_per_sync` bounded each cycle but the loop walked a fixed
     order and stopped at the cap, so the same head was re-synced hourly and the
-    tail was never reached. Measured 2026-08-10 over 5,009 Kalshi markets in
-    ~285 series: 82% unsynced for 3+ days, and 1,772 still flagged active past
-    their end date -- only a sync clears that flag, and forecasts kept being
-    written on them.
-    """
+    tail was never reached: 82% of 5,009 Kalshi markets unsynced for 3+ days,
+    1,772 still flagged active past their end date (2026-08-10)."""
     from lab.collect.kalshi_collector import _series_sync_order
     from lab.store import db
 
@@ -333,12 +330,75 @@ def test_series_sync_order_rotates_instead_of_starving_the_tail(tmp_path):
         add("MIDDLE", "2026-08-05T12:00:00+00:00")
         conn.commit()
 
-        order = _series_sync_order(conn, ["FRESH", "MIDDLE", "STALE", "NEVERSEEN"])
+        cands = [("FRESH", "economics", None), ("MIDDLE", "economics", None),
+                 ("STALE", "economics", None)]
+        order = _series_sync_order(conn, [(t, u) for t, _, u in cands], max_series=3,
+                                   discovery_share=0.0)
     finally:
         conn.close()
 
-    assert order[0] == "NEVERSEEN", "a series never synced has the strongest claim"
-    assert order[1:] == ["STALE", "MIDDLE", "FRESH"], "then oldest-synced first"
+    assert order == ["STALE", "MIDDLE", "FRESH"], "oldest-synced series go first"
+
+
+def test_discovery_slice_cannot_starve_the_series_that_carry_markets(tmp_path):
+    """The non-obvious half. Ordering never-synced first -- the resolution
+    watcher's rule -- is wrong here: Kalshi's /series listing returns 10,502
+    series against the ~285 that carry open markets, so a never-seen-first
+    rotation spends every cycle on empties. The cycle that shipped that
+    ordering synced 40 series and saw ZERO markets (2026-08-10).
+    """
+    from lab.collect.kalshi_collector import _series_sync_order
+    from lab.store import db
+
+    conn = db.connect(tmp_path / "lab.db")
+    try:
+        for i in range(4):
+            conn.execute(
+                "INSERT INTO markets (condition_id, venue, venue_native_id, question,"
+                " tier, active, closed, last_synced_ts) VALUES (?,'kalshi',?,?,'tail',1,0,?)",
+                (f"kalshi:KNOWN{i}-1", f"KNOWN{i}-26AUG", "q", "2026-08-01T00:00:00+00:00"))
+        conn.commit()
+
+        known = [(f"KNOWN{i}", None) for i in range(4)]
+        # Valid, strictly increasing timestamps -- EMPTY199 is the most recent.
+        from datetime import datetime, timedelta, timezone
+
+        base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        empties = [(f"EMPTY{i}", (base + timedelta(minutes=i)).isoformat(timespec="seconds"))
+                   for i in range(200)]
+        order = _series_sync_order(conn, known + empties, max_series=10,
+                                   discovery_share=0.2)
+    finally:
+        conn.close()
+
+    picked_known = [t for t in order if t.startswith("KNOWN")]
+    picked_empty = [t for t in order if t.startswith("EMPTY")]
+    assert len(order) == 10
+    assert len(picked_known) == 4, "every known series must be in a 10-slot cycle"
+    assert len(picked_empty) == 6, "the rest goes to discovery, not the other way round"
+    # discovery prefers the most recently updated series
+    assert picked_empty[0] == "EMPTY199"
+
+
+def test_unused_discovery_budget_falls_back_to_known_series(tmp_path):
+    """A cycle must never be short just because one pool is small."""
+    from lab.collect.kalshi_collector import _series_sync_order
+    from lab.store import db
+
+    conn = db.connect(tmp_path / "lab.db")
+    try:
+        for i in range(8):
+            conn.execute(
+                "INSERT INTO markets (condition_id, venue, venue_native_id, question,"
+                " tier, active, closed, last_synced_ts) VALUES (?,'kalshi',?,?,'tail',1,0,?)",
+                (f"kalshi:K{i}-1", f"K{i}-26AUG", "q", "2026-08-0%dT00:00:00+00:00" % (i + 1)))
+        conn.commit()
+        order = _series_sync_order(conn, [(f"K{i}", None) for i in range(8)],
+                                   max_series=5, discovery_share=0.2)
+    finally:
+        conn.close()
+    assert len(order) == 5, "no unseen series exist, so all five slots go to known ones"
+    assert order[0] == "K0", "still oldest-first"
 
 
 def test_the_series_cap_is_applied_after_ordering_not_before():
@@ -349,8 +409,8 @@ def test_the_series_cap_is_applied_after_ordering_not_before():
     from lab.collect import kalshi_collector
 
     src = inspect.getsource(kalshi_collector.sync_kalshi_universe)
-    assert "_series_sync_order(conn, [t for t, _ in candidates])[:max_series]" in src, (
-        "series must be ordered by staleness before the cap is applied"
+    assert "_series_sync_order(conn, [(t, upd) for t, _, upd in candidates], max_series)" in src, (
+        "series must be ordered and budgeted before the cap is applied"
     )
     # and the old early-break out of the category loop must be gone
     assert "if series_processed >= max_series:\n            break" not in src
