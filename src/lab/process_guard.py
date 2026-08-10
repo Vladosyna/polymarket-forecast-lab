@@ -131,21 +131,40 @@ def _pid_alive(pid: Any) -> bool:
 
 
 def classify_cmdline(cmdline: list[str]) -> str | None:
-    """Map a command line to one of our roles, or None if it is not ours."""
+    """Map a command line to one of our roles, or None if it is not ours.
+
+    The role is the `lab` SUBCOMMAND -- the token straight after the `lab`
+    executable -- not any token anywhere in the line. Matching "run" anywhere
+    classified every `uv run lab <anything>` as an orchestrator, because `uv`
+    contributes its own "run": `uv run lab eval`, `uv run lab report` and
+    `uv run lab learn` all came back "orchestrator", so each looked like a
+    duplicate of the live one and was SIGTERMed by it. That is how a manual
+    `lab eval` died twice at ~12 minutes on 2026-08-10 (guard log:
+    `stopped=[115023]` at the exact second), and it would have killed the
+    monthly `lab-learn.service` run mid-flight for the same reason.
+
+    Only long-running roles are named here. A one-shot subcommand returns None
+    and is never a stand-down candidate -- it is not a duplicate of anything.
+    """
     tokens = [t.lower() for t in cmdline]
     joined = " ".join(tokens)
     if "streamlit" in joined and "dashboard" in joined:
         return "dashboard"
-    has_lab = any(("lab" == t or t.endswith("lab.exe") or t.endswith("\\lab")
-                   or "lab" in t.split(os.sep)[-1]) for t in tokens) or " lab" in f" {joined}"
-    if not has_lab:
-        return None
     if "watchdog" in tokens:
         return "watchdog"
-    # collector check precedes orchestrator so "uv run lab collect" is a collector
-    if "collect" in tokens:
+
+    lab_at = None
+    for i, t in enumerate(tokens):
+        base = t.split(os.sep)[-1].split("/")[-1]
+        if base in ("lab", "lab.exe") or t == "lab":
+            lab_at = i
+            break
+    if lab_at is None:
+        return None
+    subcommand = tokens[lab_at + 1] if lab_at + 1 < len(tokens) else None
+    if subcommand == "collect":
         return "collector"
-    if "run" in tokens:
+    if subcommand == "run":
         return "orchestrator"
     return None
 

@@ -174,3 +174,50 @@ def test_cleanup_stops_duplicate_without_register(tmp_path, monkeypatch):
     result = process_guard.cleanup(config)
     assert result["stopped"] == [60]
     assert stopped == [60]
+
+
+# --- one-shot subcommands are not duplicate orchestrators (2026-08-10) ------
+
+def test_uv_run_lab_subcommands_are_not_classified_as_orchestrators():
+    """`uv` contributes its own "run" token, and the classifier matched "run"
+    anywhere -- so `uv run lab eval`, `... report`, `... learn` and
+    `... shadow` all came back "orchestrator", looked like duplicates of the
+    live one, and were SIGTERMed by it.
+
+    Observed twice on 2026-08-10: a manual `lab eval` died at ~12 minutes with
+    a bare exit 143, guard log `stopped=[115023]` at the exact second. The same
+    mechanism would have killed `lab-learn.service` mid-run on its monthly
+    timer -- the unit created that same day precisely so the job would be
+    reliable.
+    """
+    from lab.process_guard import classify_cmdline
+
+    for sub in ("eval", "report", "learn", "shadow", "status", "export"):
+        assert classify_cmdline(["/root/.local/bin/uv", "run", "lab", sub]) is None, (
+            f"`uv run lab {sub}` must not look like a second orchestrator"
+        )
+
+
+def test_the_long_running_roles_are_still_recognised():
+    """The guard's actual job -- standing down a leftover orchestrator or a
+    collector made redundant by one -- must be untouched."""
+    from lab.process_guard import classify_cmdline
+
+    assert classify_cmdline(["/root/.local/bin/uv", "run", "lab", "run"]) == "orchestrator"
+    assert classify_cmdline(["python", "-m", "lab", "run"]) == "orchestrator"
+    assert classify_cmdline(["/root/.local/bin/uv", "run", "lab", "collect"]) == "collector"
+    assert classify_cmdline(["python", "-m", "streamlit", "run",
+                             "src/lab/dashboard.py"]) == "dashboard"
+    # not ours at all
+    assert classify_cmdline(["python", "-m", "http.server"]) is None
+    assert classify_cmdline(["/root/.local/bin/uv", "run", "--with", "pmxt",
+                             "python", "scripts/pmxt_router_scan.py"]) is None
+
+
+def test_the_orchestrators_own_out_of_process_children_are_not_candidates():
+    """`_run_lab_command_out_of_process` spawns `python -m lab report`. It is
+    protected as a descendant anyway, but it must not be classifiable either --
+    belt and braces on the path that already took the host down once."""
+    from lab.process_guard import classify_cmdline
+
+    assert classify_cmdline(["python", "-m", "lab", "report"]) is None
