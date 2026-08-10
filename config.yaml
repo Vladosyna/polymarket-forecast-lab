@@ -414,7 +414,15 @@ venues:
     # scheduler (max_instances=1, prior sweep still running). 15 gives honest
     # headroom above the observed worst case instead of a cadence that was
     # covertly running at ~2x its configured interval.
-    snapshot_interval_minutes: 15
+    # 15 -> 30 on 2026-08-10, to match measured reality rather than intent.
+    # A round covers ~3,800 markets sequentially and takes about 30 minutes, so
+    # APScheduler was skipping every second firing and the collected grid has
+    # been 30-minute for some time. The data is intact -- an even 30-minute
+    # spacing, no gaps -- but the value stated something untrue, and `tier` also
+    # selects the price-freshness bound (guardrail 13), which should be read
+    # against the cadence actually achieved. Polymarket's loops are measured at
+    # exactly their configured 5/60 minutes and are unchanged.
+    snapshot_interval_minutes: 30
     resolution_poll_minutes: 30
     rate_limit:
       requests_per_second: 8   # brief section 3: Kalshi tolerates ~10 req/s; stay under it
