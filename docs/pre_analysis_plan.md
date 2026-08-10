@@ -408,3 +408,47 @@ is therefore not made.
 
 Realized Kalshi forecast volume will be reported before and after this change, so the coverage cost
 appears in the paper as a number rather than as an absence.
+
+**Addendum 9.11 (2026-08-10).** A defect in Kalshi's universe sync put forecasts into the ledger on
+markets that had already ended. This addendum records it, its measured effect, and a pre-specified
+robustness check — before the confirmatory analysis is run.
+
+**What happened.** `sync_kalshi_universe` bounded each cycle at `max_series_per_sync` (40) but
+walked a fixed category and API order and simply stopped at the cap. The same head of the list was
+re-synced every hour and the tail was never reached at all. Because only a sync refreshes a market's
+`active`/`closed` flags, markets in the starved tail stayed flagged open indefinitely. Measured on
+2026-08-10 across 5,009 Kalshi markets in ~285 series: **82% had not been re-synced in over three
+days**, and **1,772 were still flagged active with an end date in the past**.
+
+Those markets stayed in the forecast-eligible set, so **39,583 forecasts were written on Kalshi
+markets already past their end date at the moment of writing** — across 549 distinct markets, and
+all 39,583 have since resolved, so all are in the scoring population. That is **38% of Kalshi's
+resolved rows** (8,028 of 21,356 for `m1_debiased`).
+
+**Why it matters, and in which direction.** A market past its end date has stopped trading and its
+outcome is determined; the price we pair against is a frozen last quote. Both the model and the
+market baseline therefore sit on the known answer and the paired Brier difference collapses toward
+zero. This is dilution, not inflation — measured on the live data, excluding these rows moves Kalshi
+skill *away* from zero in every case:
+
+| model | all rows | past-dated only | live-only |
+|---|---|---|---|
+| `m1_debiased` | −0.001852 | −0.000759 | **−0.002510** |
+| `m1_hier@kalshi` | −0.001380 | −0.000773 | **−0.001747** |
+| `m4_ensemble` | +0.000935 | +0.001201 | **+0.000779** |
+
+The bias is conservative for a positive skill claim, but it is still a specification defect, and it
+inflates n — this study's binding constraint — by 38% on its largest venue with rows that carry
+almost no information. The honesty tiers (§7) are computed on that n.
+
+**What is committed.** The rows stay: the ledger is append-only and their hashes are already in
+`docs/ledger_commitments.jsonl`. As a pre-specified robustness check, the confirmatory analysis will
+report the identical model × venue × category × window matrix **excluding forecasts written on or
+after their market's end date**, alongside — never replacing — the primary result. This is the same
+construction as 9.5's deduplicated-ledger check and 9.2(b)'s disputed-market check, and uses the
+same parallel `window_label` mechanism.
+
+**Forward fixes, both landed today.** The forecast loop now refuses any market past its own end date,
+independent of how fresh the sync is. And the sync's cap became a rotation: series are ordered
+least-recently-synced first (never-synced ahead of all), so the bound stays a politeness limit
+rather than a permanent cutoff. The incident window is closed as of 2026-08-10.

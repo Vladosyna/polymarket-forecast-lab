@@ -109,6 +109,34 @@ def kalshi_market_row(m: KalshiMarket, category: str) -> dict[str, Any]:
     }
 
 
+def _series_sync_order(conn, tickers: list[str]) -> list[str]:
+    """Least-recently-synced series first, never-synced ahead of all of them.
+
+    `max_series_per_sync` bounds each cycle for politeness, but the loop it
+    bounded walked a fixed category/API order and simply stopped at the cap --
+    so the same head of the list was re-synced every hour and the tail was never
+    reached at all. Measured 2026-08-10 across 5,009 Kalshi markets in ~285
+    series: 82% had not been re-synced in over three days, and 1,772 were still
+    flagged active with an end date in the past, because only a sync refreshes
+    that flag. Forecasts kept being written on them.
+
+    Same shape of fix as the resolution watcher's round-robin cursor: order by
+    staleness so the cap becomes a rotation instead of a permanent cutoff.
+    """
+    if not tickers:
+        return []
+    rows = conn.execute(
+        """
+        SELECT substr(venue_native_id, 1, instr(venue_native_id || '-', '-') - 1) AS series,
+               MAX(last_synced_ts) AS synced
+        FROM markets WHERE venue = 'kalshi' GROUP BY series
+        """
+    ).fetchall()
+    seen = {r["series"]: r["synced"] for r in rows if r["series"]}
+    # None sorts first: a series we have never synced has the strongest claim.
+    return sorted(tickers, key=lambda t: (seen.get(t) is not None, seen.get(t) or ""))
+
+
 async def sync_kalshi_universe(
     kalshi: KalshiClient, conn, config: dict[str, Any], store: SnapshotStore | None = None
 ) -> dict[str, int]:
@@ -126,12 +154,14 @@ async def sync_kalshi_universe(
     counts = {"series": 0, "markets_seen": 0, "liquid": 0, "tail": 0, "ignored": 0, "skipped_category": 0}
     series_processed = 0
 
+    # Collect every category's series FIRST, then order the whole set by
+    # staleness -- the cap has to be a rotation over all of them, not a cutoff
+    # that keeps re-reading whichever category happens to be iterated first.
+    candidates: list[tuple[str, str]] = []      # (series_ticker, our_category)
     for kalshi_category, our_category in category_map.items():
         if kalshi_category in excluded:
             counts["skipped_category"] += 1
             continue
-        if series_processed >= max_series:
-            break
         try:
             series_list = await kalshi.series_by_category(kalshi_category)
         except Exception:
@@ -139,32 +169,36 @@ async def sync_kalshi_universe(
                         extra={"ctx": {"category": kalshi_category}})
             continue
         for s in series_list:
-            if series_processed >= max_series:
-                break
             ticker = s.get("ticker")
-            if not ticker:
-                continue
-            series_processed += 1
-            counts["series"] += 1
-            try:
-                markets = await kalshi.markets_for_series(ticker, status="open")
-            except Exception:
-                log.warning("kalshi universe: markets fetch failed",
-                            extra={"ctx": {"series_ticker": ticker}})
-                continue
-            for m in markets:
-                counts["markets_seen"] += 1
-                row = kalshi_market_row(m, our_category)
-                tier, reason = assign_kalshi_tier(
-                    m, config, depth_by_market.get(row["condition_id"]))
-                counts[tier] += 1
-                if reason:
-                    # Phase 15: Kalshi exclusions were never recorded, though
-                    # this venue carries ~80% of the lab's daily forecasts --
-                    # "why isn't X in the ledger" has to be answerable for it too.
-                    log_universe_exclusion(conn, "kalshi", m.ticker, reason)
-                db.upsert_market(conn, {**row, "tier": tier})
-            conn.commit()
+            if ticker:
+                candidates.append((ticker, our_category))
+
+    by_ticker = dict(candidates)
+    order = _series_sync_order(conn, [t for t, _ in candidates])[:max_series]
+    counts["series_available"] = len(candidates)
+    for ticker in order:
+        our_category = by_ticker[ticker]
+        series_processed += 1
+        counts["series"] += 1
+        try:
+            markets = await kalshi.markets_for_series(ticker, status="open")
+        except Exception:
+            log.warning("kalshi universe: markets fetch failed",
+                        extra={"ctx": {"series_ticker": ticker}})
+            continue
+        for m in markets:
+            counts["markets_seen"] += 1
+            row = kalshi_market_row(m, our_category)
+            tier, reason = assign_kalshi_tier(
+                m, config, depth_by_market.get(row["condition_id"]))
+            counts[tier] += 1
+            if reason:
+                # Phase 15: Kalshi exclusions were never recorded, though this
+                # venue carries ~80% of the lab's daily forecasts -- "why isn't
+                # X in the ledger" has to be answerable for it too.
+                log_universe_exclusion(conn, "kalshi", m.ticker, reason)
+            db.upsert_market(conn, {**row, "tier": tier})
+        conn.commit()
 
     log.info("kalshi universe sync complete", extra={"ctx": counts})
     return counts

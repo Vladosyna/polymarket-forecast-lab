@@ -235,3 +235,62 @@ def test_daily_cadence_is_unaffected_by_the_spacing_guard():
         assert _due(conn, "0x1", "m0_market", config, 0.0) is True
     finally:
         conn.close()
+
+
+# --- a market past its end date is not forecastable (2026-08-10) ------------
+
+def test_markets_past_their_end_date_are_not_forecast():
+    """39,583 forecasts had been written on already-ended Kalshi markets -- 38%
+    of that venue's scoring population -- because `active`/`closed` are only as
+    fresh as the last universe sync and Kalshi's was starving its own tail.
+
+    These are not weak observations. Trading has stopped, the outcome is
+    determined, and both the model and the market baseline sit on the known
+    answer, so the paired Brier difference collapses toward zero: measured on
+    the live data, excluding them moved m1_debiased's Kalshi skill from
+    -0.00185 to -0.00251 and m4_ensemble's from +0.00094 to +0.00078. They
+    dilute the effect and inflate n at the same time.
+    """
+    from datetime import timedelta
+    from pathlib import Path
+    import tempfile
+
+    import polars as pl
+
+    from lab.forecast import eligible_market_states
+    from lab.store import db
+    from lab.store.snapshots import SnapshotStore, floor_ts_bucket
+    from lab.util import load_config, now_utc
+
+    tmp = Path(tempfile.mkdtemp())
+    config = load_config()
+    config["storage"] = {**config["storage"],
+                         "db_path": str(tmp / "lab.db"),
+                         "snapshots_dir": str(tmp / "snapshots")}
+    conn = db.connect(tmp / "lab.db")
+    store = SnapshotStore(str(tmp / "snapshots"))
+    now = now_utc()
+    ts = floor_ts_bucket(now, 5)
+    try:
+        for cid, end in (("0xlive", now + timedelta(days=3)),
+                         ("0xended", now - timedelta(days=2)),
+                         ("0xtoday", now - timedelta(minutes=1))):
+            conn.execute(
+                "INSERT INTO markets (condition_id, question, category, description,"
+                " end_date_iso, venue, tier, active, closed) VALUES (?,?,?,?,?,"
+                "'kalshi','liquid',1,0)",
+                (cid, "Q?", "economics", "rules", end.isoformat(timespec="seconds")))
+            store.append([{
+                "ts": ts, "condition_id": cid, "token_id_yes": None,
+                "best_bid": 0.49, "best_ask": 0.51, "mid": 0.5, "spread": 0.02,
+                "bid_depth_usd": 900.0, "ask_depth_usd": 900.0,
+                "last_trade_price": None, "venue": "kalshi"}])
+        conn.commit()
+
+        ids = {s.condition_id for s in eligible_market_states(conn, store, config)}
+    finally:
+        conn.close()
+
+    assert "0xlive" in ids, "a market still trading must stay eligible"
+    assert "0xended" not in ids, "a market two days past its end date is not forecastable"
+    assert "0xtoday" not in ids, "past the end date by a minute is still past it"

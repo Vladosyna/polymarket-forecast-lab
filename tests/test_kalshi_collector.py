@@ -308,3 +308,49 @@ def test_orderbook_returns_an_empty_book_not_none_when_kalshi_has_no_levels():
     assert book is not None
     assert book.bids == [] and book.asks == []
     assert book.best_bid is None and book.best_ask is None
+
+
+def test_series_sync_order_rotates_instead_of_starving_the_tail(tmp_path):
+    """`max_series_per_sync` bounded each cycle but the loop walked a fixed
+    order and stopped at the cap, so the same head was re-synced hourly and the
+    tail was never reached. Measured 2026-08-10 over 5,009 Kalshi markets in
+    ~285 series: 82% unsynced for 3+ days, and 1,772 still flagged active past
+    their end date -- only a sync clears that flag, and forecasts kept being
+    written on them.
+    """
+    from lab.collect.kalshi_collector import _series_sync_order
+    from lab.store import db
+
+    conn = db.connect(tmp_path / "lab.db")
+    try:
+        def add(ticker, synced):
+            conn.execute(
+                "INSERT INTO markets (condition_id, venue, venue_native_id, question,"
+                " tier, active, closed, last_synced_ts) VALUES (?,'kalshi',?,?,'tail',1,0,?)",
+                (f"kalshi:{ticker}-1", f"{ticker}-26AUG", "q", synced))
+        add("FRESH", "2026-08-10T12:00:00+00:00")
+        add("STALE", "2026-08-01T12:00:00+00:00")
+        add("MIDDLE", "2026-08-05T12:00:00+00:00")
+        conn.commit()
+
+        order = _series_sync_order(conn, ["FRESH", "MIDDLE", "STALE", "NEVERSEEN"])
+    finally:
+        conn.close()
+
+    assert order[0] == "NEVERSEEN", "a series never synced has the strongest claim"
+    assert order[1:] == ["STALE", "MIDDLE", "FRESH"], "then oldest-synced first"
+
+
+def test_the_series_cap_is_applied_after_ordering_not_before():
+    """The cap has to slice a staleness-ordered list. Slicing the API's own
+    order is what made it a permanent cutoff rather than a rotation."""
+    import inspect
+
+    from lab.collect import kalshi_collector
+
+    src = inspect.getsource(kalshi_collector.sync_kalshi_universe)
+    assert "_series_sync_order(conn, [t for t, _ in candidates])[:max_series]" in src, (
+        "series must be ordered by staleness before the cap is applied"
+    )
+    # and the old early-break out of the category loop must be gone
+    assert "if series_processed >= max_series:\n            break" not in src

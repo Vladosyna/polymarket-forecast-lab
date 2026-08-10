@@ -139,8 +139,25 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
         """
     ).fetchall()
     skipped_stale = 0
+    skipped_ended = 0
     for m in rows:
         if m["category"] == nc_category and m["condition_id"] not in nc_ids:
+            continue
+        # A market past its own end date is not forecastable: trading has
+        # stopped, the outcome is determined, and the "market price" we would
+        # pair against is a frozen last quote. Such rows are not weak
+        # observations, they are near-degenerate ones -- both the model and the
+        # baseline sit on the known answer, so the paired difference collapses
+        # toward zero and dilutes the measurement while inflating n.
+        #
+        # `active`/`closed` should already have caught this, but they are only
+        # as fresh as the last universe sync, and Kalshi's sync was starving its
+        # own tail (see docs/OPERATIONS.md, 2026-08-10): 39,583 forecasts had
+        # been written on already-ended Kalshi markets, 38% of that venue's
+        # scoring population. This guard does not depend on sync timeliness.
+        days_left = _days_to_resolution(m["end_date_iso"], now)
+        if days_left is not None and days_left <= 0:
+            skipped_ended += 1
             continue
         snap = snap_by_cid.get(m["condition_id"])
         if snap is None or snap["mid"] is None:
@@ -172,6 +189,9 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
     if skipped_stale:
         log.warning("forecast: skipped markets with stale snapshots",
                     extra={"ctx": {"count": skipped_stale}})
+    if skipped_ended:
+        log.info("forecast: skipped markets already past their end date",
+                 extra={"ctx": {"count": skipped_ended}})
     return states
 
 
