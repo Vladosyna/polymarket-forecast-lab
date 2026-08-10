@@ -379,3 +379,32 @@ will be checked and this addendum amended if it crowds. And 9.8's freshness watc
 `tier` also selects the price-freshness bound, and a much larger liquid tier is a much larger
 exposure to it. Kalshi forecast counts have not dropped so far (11,164 → 13,507 across 08-07..08-10)
 and will keep being compared against that level.
+
+**Addendum 9.10 (2026-08-10).** Measured consequences of 9.9, recorded before the reassignment
+takes effect rather than after, and one decision stated explicitly so it cannot be re-read later as
+convenient.
+
+Applying the shared depth bar to the 4,808 live Kalshi markets moves them as follows: **444 to
+`liquid`** (from 26), 1,865 to `tail`, **649 to `ignored`**, and 1,876 fall through to the
+volume/open-interest fallback because they have no measured depth yet. Twenty-two of the 26 markets
+9.8's open-interest rule had made liquid stay liquid; eleven drop to `tail` and eleven to `ignored`
+on their actual books, which is the point of preferring measurement to a proxy.
+
+**The 649 exclusions are the part that costs something.** They are all `economics`, and 154 of them
+(24%) resolve within seven days — a *higher* short-horizon share than the 444 being promoted (5%).
+Short-horizon resolved observations are this study's scarcest resource, so this cuts against the
+direction 9.7–9.9 were working in. Two facts about them: their measured top-of-book depth is below
+$10, and none of the 649 has ever produced a resolved forecast to date.
+
+**The exclusion stands, and the reason is not n.** A market with under $10 of top-of-book depth has
+no price anyone is meaningfully making, and this study's entire claim is skill measured *against the
+market price*. Pairing a forecast with a quote that thin does not produce a weak observation; it
+produces a comparison whose baseline is noise, in both directions. The same bar applies to
+Polymarket and lands at the same place in each venue's own distribution (roughly p25: $9 on
+Polymarket, $10 on Kalshi), so this is not a venue-specific harshness either. Choosing a laxer bar
+for Kalshi after seeing that it would retain more short-horizon markets would be fitting the
+specification to the sample — the precise move the pre-analysis discipline exists to prevent — and
+is therefore not made.
+
+Realized Kalshi forecast volume will be reported before and after this change, so the coverage cost
+appears in the paper as a number rather than as an absence.
