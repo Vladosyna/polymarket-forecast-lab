@@ -294,3 +294,74 @@ def test_markets_past_their_end_date_are_not_forecast():
     assert "0xlive" in ids, "a market still trading must stay eligible"
     assert "0xended" not in ids, "a market two days past its end date is not forecastable"
     assert "0xtoday" not in ids, "past the end date by a minute is still past it"
+
+
+# --- Phase 15 microstructure covariates (implemented 2026-08-10) ------------
+
+def test_forecast_rows_carry_the_phase_15_covariates():
+    """Specified in CLAUDE.md section 5 and in Phase 15's acceptance criteria
+    since the phase was written, and never implemented -- only `spread_at_ts`,
+    which predates Phase 15, existed. The brief is explicit that these are
+    "populated going forward, never backfilled by reconstruction", so every day
+    without them was a day lost.
+    """
+    from datetime import timedelta
+    from pathlib import Path
+    import tempfile
+
+    from lab.forecast import run_forecasts
+    from lab.models.base import ForecastResult
+    from lab.store import db
+    from lab.store.snapshots import SnapshotStore, floor_ts_bucket
+    from lab.util import load_config, now_utc
+
+    class _Fixed:
+        model_id = "m0_market"
+
+        def forecast(self, state, context=None):
+            return ForecastResult(p_yes=0.5, meta={})
+
+    tmp = Path(tempfile.mkdtemp())
+    config = load_config()
+    config["storage"] = {**config["storage"], "db_path": str(tmp / "lab.db"),
+                         "snapshots_dir": str(tmp / "snapshots")}
+    conn = db.connect(tmp / "lab.db")
+    store = SnapshotStore(str(tmp / "snapshots"))
+    now = now_utc()
+    try:
+        conn.execute(
+            "INSERT INTO markets (condition_id, question, category, description,"
+            " end_date_iso, venue, tier, active, closed, volume_24h_num)"
+            " VALUES ('0x1','Q','economics','rules',?,'kalshi','liquid',1,0,4242.0)",
+            ((now + timedelta(days=5)).isoformat(timespec="seconds"),))
+        store.append([{
+            "ts": floor_ts_bucket(now, 5), "condition_id": "0x1", "token_id_yes": None,
+            "best_bid": 0.49, "best_ask": 0.51, "mid": 0.5, "spread": 0.02,
+            "bid_depth_usd": 700.0, "ask_depth_usd": 300.0,
+            "last_trade_price": None, "venue": "kalshi"}])
+        conn.commit()
+
+        run_forecasts(conn, store, [_Fixed()], config)
+        row = conn.execute(
+            "SELECT depth_covariate, volume_24h, trades_24h, hour_utc, spread_at_ts"
+            " FROM forecasts WHERE condition_id='0x1'").fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None, "no forecast written -- fixture is wrong"
+    assert row["depth_covariate"] == pytest.approx(1000.0)   # both sides summed
+    assert row["volume_24h"] == pytest.approx(4242.0)        # from the venue's own object
+    assert row["hour_utc"] == now.hour
+    assert row["spread_at_ts"] == pytest.approx(0.02)
+    assert row["trades_24h"] is None    # no venue reports it on what we already fetch
+
+
+def test_unmeasured_depth_is_null_not_zero():
+    """0.0 asserts "measured, and there is none" -- a different claim from "not
+    measured", and the one that would quietly bias any depth-conditioned
+    heterogeneity split."""
+    from lab.forecast import _depth_usd
+
+    assert _depth_usd({"bid_depth_usd": 700.0, "ask_depth_usd": 300.0}) == pytest.approx(1000.0)
+    assert _depth_usd({"bid_depth_usd": 700.0, "ask_depth_usd": None}) == pytest.approx(700.0)
+    assert _depth_usd({"bid_depth_usd": None, "ask_depth_usd": None}) is None

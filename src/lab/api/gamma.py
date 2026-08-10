@@ -55,6 +55,9 @@ class GammaMarket(BaseModel):
     accepting_orders: bool | None = Field(default=None, alias="acceptingOrders")
     liquidity_num: float | None = Field(default=None, alias="liquidityNum")
     volume_num: float | None = Field(default=None, alias="volumeNum")
+    # 24h volume, a Phase 15 forecast covariate. Free: it rides along on the
+    # same market object the universe sync already fetches.
+    volume_24h: float | None = Field(default=None, alias="volume24hr")
     uma_resolution_statuses: list[str] = Field(
         default_factory=list, alias="umaResolutionStatuses"
     )

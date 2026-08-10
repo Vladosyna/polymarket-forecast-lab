@@ -142,6 +142,8 @@ def market_row(m: GammaMarket, tier: str, category: str | None = None) -> dict[s
         # Covariate only, not used for tiering (Phase 17 item 2): Gamma's
         # volume_num is wash-trading-contaminated, concentrated in sports.
         "volume_num": m.volume_num,
+        "volume_24h_num": m.volume_24h,   # Phase 15 forecast covariate
+
         "tier": tier,
     }
 

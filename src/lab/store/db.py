@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "11"
+SCHEMA_VERSION = "12"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS markets (
   token_id_yes TEXT, token_id_no TEXT,
   neg_risk INTEGER DEFAULT 0,
   active INTEGER, closed INTEGER,
-  liquidity_num REAL, volume_num REAL,
+  liquidity_num REAL, volume_num REAL, volume_24h_num REAL,
   tier TEXT CHECK(tier IN ('liquid','tail','ignored')),
   first_seen_ts TEXT, last_synced_ts TEXT
 );
@@ -322,6 +322,41 @@ def migrate_distributional_scoring(conn: sqlite3.Connection) -> dict[str, bool]:
     return applied
 
 
+
+def migrate_microstructure_covariates(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Phase 15's remaining `forecasts` covariates, added 2026-08-10.
+
+    Specified in CLAUDE.md section 5 and in Phase 15's acceptance criteria
+    ("covariate columns populate on live forecasts") since the phase was
+    written, and never implemented -- `migrate_m3_boundary_randomization`'s own
+    docstring records them as "a separate sub-task", which was then never picked
+    up. Only `spread_at_ts`, which predates Phase 15, existed.
+
+    Nullable and forward-only by design: the brief is explicit that these are
+    "populated going forward, never backfilled by reconstruction", so every row
+    written before this migration keeps NULL and the paper reports the date the
+    covariates start. `trades_24h` is added for schema completeness but stays
+    NULL for now -- neither venue returns a 24h trade count on the objects the
+    collector already fetches, and the collector is running at ~9.6 req/s, so
+    a per-market Data API call is not free to add.
+    """
+    applied = {}
+    for column, sql_type in (("depth_covariate", "REAL"), ("volume_24h", "REAL"),
+                             ("trades_24h", "INTEGER"), ("hour_utc", "INTEGER")):
+        applied[column] = False
+        if not _column_exists(conn, "forecasts", column):
+            conn.execute(f"ALTER TABLE forecasts ADD COLUMN {column} {sql_type}")
+            applied[column] = True
+    if not _column_exists(conn, "markets", "volume_24h_num"):
+        # Carries the venue's own 24h volume from the universe sync to forecast
+        # time. Both venues already return it on objects we fetch anyway
+        # (Gamma `volume24hr`, Kalshi `volume_24h_fp`), so this costs no requests.
+        conn.execute("ALTER TABLE markets ADD COLUMN volume_24h_num REAL")
+        applied["markets_volume_24h_num"] = True
+    conn.commit()
+    return applied
+
+
 def migrate_m3_boundary_randomization(conn: sqlite3.Connection) -> dict[str, bool]:
     """Idempotent v2.7 migration (Phase 15): ALTER `forecasts` with the M3
     boundary-randomization columns only -- the other Phase 15 `forecasts`
@@ -545,6 +580,7 @@ def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     migrate_universe_log_dedup(conn)
     migrate_resolution_checked_ts(conn)
     migrate_close_resolved_markets(conn)
+    migrate_microstructure_covariates(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )
@@ -606,17 +642,18 @@ def upsert_market(conn: sqlite3.Connection, row: dict) -> None:
     excluded from the ON CONFLICT UPDATE -- a cross-venue link minted by
     `lab map confirm` must survive the next routine universe re-sync.
     """
-    row = {"venue": "polymarket", "venue_native_id": row.get("condition_id"), "event_id": None, **row}
+    row = {"venue": "polymarket", "venue_native_id": row.get("condition_id"), "event_id": None,
+           "volume_24h_num": None, **row}
     conn.execute(
         """
         INSERT INTO markets (condition_id, slug, question, category, description,
                              end_date_iso, token_id_yes, token_id_no, neg_risk,
-                             active, closed, liquidity_num, volume_num, tier,
+                             active, closed, liquidity_num, volume_num, volume_24h_num, tier,
                              venue, venue_native_id, event_id,
                              first_seen_ts, last_synced_ts)
         VALUES (:condition_id, :slug, :question, :category, :description,
                 :end_date_iso, :token_id_yes, :token_id_no, :neg_risk,
-                :active, :closed, :liquidity_num, :volume_num, :tier,
+                :active, :closed, :liquidity_num, :volume_num, :volume_24h_num, :tier,
                 :venue, :venue_native_id, :event_id,
                 :now, :now)
         ON CONFLICT(condition_id) DO UPDATE SET
@@ -625,6 +662,7 @@ def upsert_market(conn: sqlite3.Connection, row: dict) -> None:
             token_id_yes=excluded.token_id_yes, token_id_no=excluded.token_id_no,
             neg_risk=excluded.neg_risk, active=excluded.active, closed=excluded.closed,
             liquidity_num=excluded.liquidity_num, volume_num=excluded.volume_num,
+            volume_24h_num=excluded.volume_24h_num,
             tier=excluded.tier, last_synced_ts=excluded.last_synced_ts
         """,
         {**row, "now": now_utc_iso()},
@@ -706,10 +744,12 @@ def append_forecast(conn: sqlite3.Connection, row: dict) -> int:
         """
         INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts,
                                spread_at_ts, inputs_hash, evidence_run_id, cost_usd,
-                               m3_randomized, m3_random_seed)
+                               m3_randomized, m3_random_seed,
+                               depth_covariate, volume_24h, trades_24h, hour_utc)
         VALUES (:ts, :condition_id, :model_id, :p_yes, :p_market_at_ts,
                 :spread_at_ts, :inputs_hash, :evidence_run_id, :cost_usd,
-                :m3_randomized, :m3_random_seed)
+                :m3_randomized, :m3_random_seed,
+                :depth_covariate, :volume_24h, :trades_24h, :hour_utc)
         """,
         {
             "spread_at_ts": None,
@@ -718,6 +758,12 @@ def append_forecast(conn: sqlite3.Connection, row: dict) -> int:
             "cost_usd": 0.0,
             "m3_randomized": 0,
             "m3_random_seed": None,
+            # Phase 15 covariates: nullable, so a caller that does not supply
+            # them (a test fixture, an older path) still writes a valid row.
+            "depth_covariate": None,
+            "volume_24h": None,
+            "trades_24h": None,
+            "hour_utc": None,
             **row,
         },
     )

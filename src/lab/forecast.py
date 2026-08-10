@@ -104,6 +104,19 @@ def _days_to_resolution(end_date_iso: str | None, now: datetime) -> float | None
     return max(0.0, (end - now).total_seconds() / 86400)
 
 
+def _depth_usd(snap: dict) -> float | None:
+    """Top-of-book depth from the snapshot backing this forecast's price.
+
+    None, not 0.0, when neither side was measured: a venue can quote with no
+    size, and downstream a 0.0 asserts "measured, and there is none" -- a
+    different claim from "not measured". Mirrors `_depth_lookup`'s contract.
+    """
+    bid, ask = snap.get("bid_depth_usd"), snap.get("ask_depth_usd")
+    if bid is None and ask is None:
+        return None
+    return float(bid or 0.0) + float(ask or 0.0)
+
+
 def _inputs_hash(model_id: str, meta: dict, config: dict[str, Any], snapshot_ts: str) -> str:
     payload = json.dumps(
         {
@@ -134,7 +147,8 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
     states: list[MarketState] = []
     rows = conn.execute(
         """
-        SELECT condition_id, question, category, description, end_date_iso, tier, venue
+        SELECT condition_id, question, category, description, end_date_iso, tier, venue,
+               volume_24h_num
         FROM markets WHERE tier IN ('liquid','tail') AND active = 1 AND closed = 0
         """
     ).fetchall()
@@ -184,6 +198,8 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
                 snapshot_ts=snap["ts"],
                 days_to_resolution=_days_to_resolution(m["end_date_iso"], now),
                 venue=m["venue"] or "polymarket",
+                depth_usd=_depth_usd(snap),
+                volume_24h=m["volume_24h_num"],
             )
         )
     if skipped_stale:
@@ -288,6 +304,15 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
                 "cost_usd": result.cost_usd,
                 "m3_randomized": result.m3_randomized,
                 "m3_random_seed": result.m3_random_seed,
+                # Phase 15 covariates, frozen with the forecast rather than
+                # reconstructed later. hour_utc is derivable from ts and stored
+                # anyway because the brief's schema names it; trades_24h stays
+                # NULL -- neither venue returns a 24h trade count on the objects
+                # the collector already fetches.
+                "depth_covariate": state.depth_usd,
+                "volume_24h": state.volume_24h,
+                "hour_utc": datetime.fromisoformat(ts).hour,
+                "trades_24h": None,
             })
             counts["written"] += 1
     conn.commit()

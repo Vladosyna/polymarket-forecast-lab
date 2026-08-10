@@ -452,3 +452,28 @@ same parallel `window_label` mechanism.
 independent of how fresh the sync is. And the sync's cap became a rotation: series are ordered
 least-recently-synced first (never-synced ahead of all), so the bound stays a politeness limit
 rather than a permanent cutoff. The incident window is closed as of 2026-08-10.
+
+**Addendum 9.12 (2026-08-10).** Phase 15's microstructure covariates on the forecast ledger begin
+today. They were specified in `CLAUDE.md` §5 and in Phase 15's own acceptance criteria ("covariate
+columns populate on live forecasts") when the phase was written, and were never implemented: an
+audit on this date found only `spread_at_ts`, which predates Phase 15, and a code comment recording
+the rest as "a separate sub-task" that was then never picked up.
+
+From 2026-08-10, every forecast row carries `depth_covariate` (top-of-book depth in USD, from the
+same snapshot that supplies `p_market_at_ts`), `volume_24h` (the venue's own 24-hour volume, from the
+market object the universe sync already fetches), and `hour_utc`, alongside the `spread_at_ts` that
+was already there. `trades_24h` remains NULL: neither venue returns a 24-hour trade count on the
+objects the collector already fetches, and adding a per-market Data API call is not free at the
+collector's current load. The paper will report it as not collected rather than as missing data.
+
+**Consequence to state plainly.** The brief requires these to be "populated going forward, never
+backfilled by reconstruction", and that rule is kept. Forecast rows written before today therefore
+have NULL covariates, and the heterogeneity analyses that use them — the pre-registered exclusion
+and stratification work is unaffected, but any depth-, volume- or hour-conditioned split is not —
+run on the window from 2026-08-10 to the 2026-12-31 freeze, not on the full collection period. That
+window is stated with each such result rather than left implicit, and no covariate is reconstructed
+for earlier rows even where the archive would technically permit it: a reconstructed covariate is a
+different measurement from a frozen one, and mixing them silently is the failure this rule exists to
+prevent.
+
+Nothing else changes: no hypothesis, outcome, statistic, honesty tier or exclusion rule.

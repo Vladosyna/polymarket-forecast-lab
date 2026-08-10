@@ -45,6 +45,7 @@ class KalshiMarket(BaseModel):
     settlement_ts: str | None = None
     liquidity_dollars: float | None = Field(default=None, alias="liquidity_dollars")
     volume_fp: float | None = Field(default=None, alias="volume_fp")
+    volume_24h_fp: float | None = Field(default=None, alias="volume_24h_fp")
     # Kalshi's own `liquidity_dollars` reads 0.0 for every market (verified
     # against 4,822 collected and a live API sample), so tiering keys on these
     # two instead -- both are populated. See assign_kalshi_tier.
@@ -67,7 +68,7 @@ class KalshiMarket(BaseModel):
     # volume_fp and open_interest_fp are contract counts (like Gamma's
     # volumeNum), not prices -- no _dollars clamp/rounding semantics apply,
     # just a plain float coercion.
-    @field_validator("volume_fp", "open_interest_fp", "yes_bid_size_fp",
+    @field_validator("volume_fp", "volume_24h_fp", "open_interest_fp", "yes_bid_size_fp",
                      "yes_ask_size_fp", mode="before")
     @classmethod
     def _coerce_volume(cls, value: Any) -> float | None:

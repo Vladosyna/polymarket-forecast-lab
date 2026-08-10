@@ -106,6 +106,8 @@ def kalshi_market_row(m: KalshiMarket, category: str) -> dict[str, Any]:
         "closed": int(m.status in _CLOSED_STATUSES),
         "liquidity_num": m.liquidity_dollars,
         "volume_num": m.volume_fp,
+        "volume_24h_num": m.volume_24h_fp,   # Phase 15 forecast covariate
+
     }
 
 

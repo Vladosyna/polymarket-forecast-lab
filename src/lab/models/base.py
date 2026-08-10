@@ -21,6 +21,14 @@ class MarketState:
     snapshot_ts: str         # ts of the snapshot backing p_market
     days_to_resolution: float | None
     venue: str = "polymarket"  # Phase 10 venue tag; default preserves pre-Phase-12 behavior
+    # Phase 15 microstructure covariates, frozen into the ledger alongside the
+    # forecast so heterogeneity analysis needs no ex-post reconstruction. Both
+    # come from data the collector already has at freeze time: depth from the
+    # same snapshot that supplies p_market, 24h volume from the venue's own
+    # market object captured at universe sync. None when the venue did not
+    # report one -- never 0.0, which would assert a measurement.
+    depth_usd: float | None = None
+    volume_24h: float | None = None
 
 
 @dataclass
