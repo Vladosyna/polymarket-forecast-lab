@@ -285,35 +285,33 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
                 )
                 if summary:
                     out.append(summary)
-            # H1 is stated over HORIZON BUCKETS ("paired Brier skill in the
-            # >=30-day horizon buckets", PAP section 2), and until 2026-08-10
-            # nothing computed that: run_eval's dimensions were
-            # model x venue x category x window, with no horizon at all. The
-            # primary hypothesis therefore had no primary statistic, and its
-            # realized n went unseen for months -- it turned out to be 13-33
-            # event clusters against this plan's own 200-cluster INSUFFICIENT
-            # floor. Scored here through the same machinery as everything else
-            # so it inherits the anytime-valid CS, the event clustering and the
-            # honesty tiers rather than being computed ad hoc at the freeze.
-            for label, days in WINDOWS.items():
-                all_rows = resolved_forecast_rows(
-                    conn, model_id, days, venue=venue, null_control_ids=nc_ids,
-                    include_disputed=include_disputed,
-                )
+
+                # Horizon buckets are scored from the rows just fetched, not
+                # from a second identical query: this loop is per model x venue
+                # x window and the eval already runs for tens of minutes inside
+                # the collector's own cgroup.
                 by_bucket: dict[str, list[dict]] = {}
-                for row in all_rows:
+                for row in rows:
                     bucket = _horizon_bucket(row)
                     if bucket:
                         by_bucket.setdefault(bucket, []).append(row)
                 for bucket, bucket_rows in by_bucket.items():
-                    summary = evaluate_model(
+                    h_summary = evaluate_model(
                         conn, model_id, f"{label}_h_{bucket}" + label_suffix,
                         bucket_rows, config, venue=venue,
                         category=ALL_CATEGORIES, window_days=days,
                     )
-                    if summary:
-                        out.append(summary)
-
+                    if h_summary:
+                        out.append(h_summary)
+            # (H1 is stated over HORIZON BUCKETS -- "paired Brier skill in the
+            # >=30-day horizon buckets", PAP section 2. Until 2026-08-10 nothing
+            # computed that: run_eval's dimensions were model x venue x category
+            # x window, with no horizon at all, so the primary hypothesis had no
+            # primary statistic and its realized n went unseen for months -- it
+            # turned out to be 13-33 event clusters against this plan's own
+            # 200-cluster INSUFFICIENT floor. Scored in the loop above so it
+            # inherits the anytime-valid CS, the event clustering and the
+            # honesty tiers rather than being computed ad hoc at the freeze.)
             # Null control scored separately, same math, shown side by side --
             # one venue-scoped sample per forecastable venue. window_days=None
             # (all-time) since nc_rows above isn't window-scoped either.
