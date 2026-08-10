@@ -166,3 +166,42 @@ def test_eval_runs_rps_columns_populate_only_with_enough_bucketed_events(config)
     assert row["rps"] is not None
     assert row["rps_market"] is not None
     conn.close()
+
+
+# --- H1's horizon buckets must actually be scored (2026-08-10) --------------
+
+def test_horizon_bucket_classification_uses_resolution_time():
+    """`m1_resolved_rows`' own convention: resolved_ts - forecast_ts, not the
+    market's stated end date, so a market that settles early or late is
+    bucketed by what actually happened."""
+    from lab.eval.run import _horizon_bucket
+
+    def row(ts, res):
+        return {"forecast_ts": ts, "resolved_ts": res}
+
+    assert _horizon_bucket(row("2026-01-01T00:00:00+00:00", "2026-01-04T00:00:00+00:00")) == "lt7d"
+    assert _horizon_bucket(row("2026-01-01T00:00:00+00:00", "2026-01-20T00:00:00+00:00")) == "7to30d"
+    assert _horizon_bucket(row("2026-01-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00")) == "30to90d"
+    assert _horizon_bucket(row("2026-01-01T00:00:00+00:00", "2026-07-01T00:00:00+00:00")) == "gt90d"
+    # a forecast written at or after resolution is not a horizon observation
+    assert _horizon_bucket(row("2026-01-05T00:00:00+00:00", "2026-01-01T00:00:00+00:00")) is None
+    assert _horizon_bucket(row(None, "2026-01-01T00:00:00+00:00")) is None
+
+
+def test_run_eval_emits_horizon_bucket_rows():
+    """H1 is stated over horizon buckets ("paired Brier skill in the >=30-day
+    horizon buckets"). Until 2026-08-10 run_eval's dimensions were
+    model x venue x category x window with no horizon at all, so the primary
+    hypothesis had no primary statistic and its realized n went unseen for
+    months -- 13-33 event clusters against the plan's own 200-cluster floor.
+    """
+    import inspect
+
+    from lab.eval import run as evalrun
+
+    src = inspect.getsource(evalrun.run_eval)
+    assert "_horizon_bucket(row)" in src, "run_eval no longer buckets by horizon"
+    assert 'f"{label}_h_{bucket}"' in src, (
+        "horizon rows must carry their own window_label so they never overwrite "
+        "a primary row"
+    )

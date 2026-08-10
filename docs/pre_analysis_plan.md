@@ -477,3 +477,42 @@ different measurement from a frozen one, and mixing them silently is the failure
 prevent.
 
 Nothing else changes: no hypothesis, outcome, statistic, honesty tier or exclusion rule.
+
+**Addendum 9.13 (2026-08-10).** H1's primary statistic was never being computed, and its realized
+sample size is far smaller than this plan assumed. Both facts are recorded here, before the
+confirmatory analysis, because the second is the one that matters for what this paper can claim.
+
+**The measurement gap.** §2 states H1 over horizon buckets — `m1_debiased` and `m1_hier@polymarket`
+beating `m0_market` "on paired Brier skill in the ≥30-day horizon buckets". `run_eval`'s dimensions
+were model × venue × category × window, with no horizon dimension at all, so no row in `eval_runs`
+has ever corresponded to H1's stated stratification. Everything downstream that keys off an
+`eval_runs` row — the anytime-valid confidence sequence, event-cluster counts, honesty tiers, the
+report — therefore never covered the primary hypothesis either. Fixed on this date: horizon buckets
+are scored through the same machinery as every other cell, under `window_label` suffixes
+(`all_time_h_30to90d` and so on) that sit alongside primary rows and never overwrite them.
+
+**What computing it revealed.** Resolved paired forecasts on Polymarket, by M1's own horizon
+buckets, in **event clusters** (the unit §7's honesty tiers count):
+
+| model | <7d | 7–30d | **30–90d** | **>90d** |
+|---|---|---|---|---|
+| `m1_debiased` | 993 | 316 | **33** | **22** |
+| `m1_hier@polymarket` | 771 | 267 | **13** | **18** |
+
+H1's pre-registered stratum holds **13–33 clusters against this plan's own 200-cluster INSUFFICIENT
+floor** — roughly an order of magnitude short, while the short-horizon buckets it is *not* stated
+over are well populated. The cause is structural rather than operational: a forecast enters the
+≥30-day stratum only once its market resolves, which for that stratum is by construction ≥30 days
+later, and the confirmatory window closes 2026-12-31.
+
+**What this plan commits to.** No change to H1, its statistic, or the honesty tiers: the discipline
+that matters here is reporting the tier the realized n earns. On present trajectory **H1 will be
+reported as INSUFFICIENT DATA in its own pre-registered stratum**, and the paper will say so plainly
+rather than substituting the well-populated short-horizon buckets, which test a different claim —
+substituting them after seeing which strata filled would be precisely the specification-fitting this
+plan exists to prevent. The horizon-bucket table will be reported in full, including the
+short-horizon cells, so the reader sees both the result and why the stratum H1 names is thin.
+
+Recorded now rather than at write-up so that the shortfall is a pre-registered expectation, not a
+post-hoc discovery. Had the statistic been computed when the pipeline was built, this would have
+been visible months earlier.

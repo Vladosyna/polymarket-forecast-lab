@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
@@ -202,6 +202,33 @@ def evaluate_model(
     }
 
 
+
+def _horizon_bucket(row: dict) -> str | None:
+    """Which of M1's own horizon buckets a resolved forecast falls in.
+
+    Measured resolution-time minus forecast-time, matching `m1_resolved_rows`'s
+    convention (`julianday(r.resolved_ts) - julianday(f.ts)`) rather than the
+    market's stated end date, so a market that settles early or late is bucketed
+    by what actually happened.
+    """
+    from lab.learn.refit import HORIZON_BUCKETS
+
+    ts, res = row.get("forecast_ts"), row.get("resolved_ts")
+    if not ts or not res:
+        return None
+    try:
+        days = (datetime.fromisoformat(res.replace("Z", "+00:00"))
+                - datetime.fromisoformat(ts.replace("Z", "+00:00"))).total_seconds() / 86400
+    except ValueError:
+        return None
+    if days <= 0:
+        return None
+    for name, (lo, hi) in HORIZON_BUCKETS.items():
+        if lo <= days < hi:
+            return name
+    return None
+
+
 def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> list[dict[str, Any]]:
     """include_disputed=False (default) is the unchanged nightly path.
     include_disputed=True is PAP Addendum 9.2(b)'s robustness re-run: same
@@ -258,6 +285,35 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
                 )
                 if summary:
                     out.append(summary)
+            # H1 is stated over HORIZON BUCKETS ("paired Brier skill in the
+            # >=30-day horizon buckets", PAP section 2), and until 2026-08-10
+            # nothing computed that: run_eval's dimensions were
+            # model x venue x category x window, with no horizon at all. The
+            # primary hypothesis therefore had no primary statistic, and its
+            # realized n went unseen for months -- it turned out to be 13-33
+            # event clusters against this plan's own 200-cluster INSUFFICIENT
+            # floor. Scored here through the same machinery as everything else
+            # so it inherits the anytime-valid CS, the event clustering and the
+            # honesty tiers rather than being computed ad hoc at the freeze.
+            for label, days in WINDOWS.items():
+                all_rows = resolved_forecast_rows(
+                    conn, model_id, days, venue=venue, null_control_ids=nc_ids,
+                    include_disputed=include_disputed,
+                )
+                by_bucket: dict[str, list[dict]] = {}
+                for row in all_rows:
+                    bucket = _horizon_bucket(row)
+                    if bucket:
+                        by_bucket.setdefault(bucket, []).append(row)
+                for bucket, bucket_rows in by_bucket.items():
+                    summary = evaluate_model(
+                        conn, model_id, f"{label}_h_{bucket}" + label_suffix,
+                        bucket_rows, config, venue=venue,
+                        category=ALL_CATEGORIES, window_days=days,
+                    )
+                    if summary:
+                        out.append(summary)
+
             # Null control scored separately, same math, shown side by side --
             # one venue-scoped sample per forecastable venue. window_days=None
             # (all-time) since nc_rows above isn't window-scoped either.
