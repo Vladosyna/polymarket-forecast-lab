@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "10"
+SCHEMA_VERSION = "11"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -361,6 +361,35 @@ def migrate_shadow_fees(conn: sqlite3.Connection) -> dict[str, bool]:
     return applied
 
 
+
+def migrate_close_resolved_markets(conn: sqlite3.Connection) -> dict[str, int]:
+    """Idempotent 2026-08-10 migration: a market with a recorded resolution is
+    marked closed.
+
+    Nothing had been clearing the flag. A venue drops a settled market from its
+    listing, so the universe sync never sees it again and cannot update it, and
+    `record_resolution` did not touch `markets` at all. The rows therefore stayed
+    `active=1, closed=0` forever and kept being snapshotted -- 1,772 on Kalshi
+    alone, every one of them with a resolution row already written.
+
+    Only corrects rows that already carry a resolution, so it cannot invent a
+    closure. `markets` is upserted rather than append-only (unlike `forecasts`),
+    so updating it is ordinary maintenance, not a rewrite of the record.
+    """
+    before = conn.execute(
+        """SELECT COUNT(*) FROM markets m JOIN resolutions r
+           ON r.condition_id = m.condition_id
+           WHERE m.closed = 0 OR m.active = 1"""
+    ).fetchone()[0]
+    conn.execute(
+        """UPDATE markets SET closed = 1, active = 0
+           WHERE condition_id IN (SELECT condition_id FROM resolutions)
+             AND (closed = 0 OR active = 1)"""
+    )
+    conn.commit()
+    return {"closed": before}
+
+
 def migrate_resolution_checked_ts(conn: sqlite3.Connection) -> dict[str, bool]:
     """Idempotent 2026-07-25 migration: give the resolution watcher a cursor.
 
@@ -515,6 +544,7 @@ def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     migrate_shadow_fees(conn)
     migrate_universe_log_dedup(conn)
     migrate_resolution_checked_ts(conn)
+    migrate_close_resolved_markets(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )
@@ -655,6 +685,18 @@ def record_resolution(
             disputed=excluded.disputed, source=excluded.source
         """,
         (condition_id, resolved_ts, payout_yes, int(disputed), source),
+    )
+    # A resolved market is closed by definition, and nothing else reliably says
+    # so: a venue's market listing simply stops returning it, so the universe
+    # sync -- which can only update what it receives -- never clears the flag.
+    # 1,772 Kalshi markets sat `active=1, closed=0` with resolutions already
+    # recorded (2026-08-10), which kept them in the snapshot loop forever.
+    # Safe against both resolution watchers: each selects markets with NO
+    # resolution row, so by the time this runs the market has already left
+    # their candidate set.
+    conn.execute(
+        "UPDATE markets SET closed = 1, active = 0 WHERE condition_id = ?",
+        (condition_id,),
     )
 
 

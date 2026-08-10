@@ -359,3 +359,75 @@ def test_connect_reruns_migrations_when_the_version_is_stale(tmp_path):
             "SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == db.SCHEMA_VERSION
     finally:
         conn.close()
+
+
+# --- a resolved market is closed (2026-08-10) -------------------------------
+
+def test_recording_a_resolution_closes_the_market(tmp_path):
+    """Nothing else clears the flag: a venue drops a settled market from its
+    listing, so the universe sync never sees it again and cannot update it.
+    1,772 Kalshi markets sat active=1/closed=0 with resolutions already
+    recorded, and kept being snapshotted every 15 minutes."""
+    conn = db.connect(tmp_path / "lab.db")
+    try:
+        conn.execute(
+            "INSERT INTO markets (condition_id, question, venue, tier, active, closed)"
+            " VALUES ('0x1','Q','kalshi','tail',1,0)")
+        conn.commit()
+
+        db.record_resolution(conn, "0x1", "2026-08-10T00:00:00+00:00", 1.0, False, "kalshi")
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT active, closed FROM markets WHERE condition_id='0x1'").fetchone()
+        assert (row["active"], row["closed"]) == (0, 1)
+    finally:
+        conn.close()
+
+
+def test_closing_on_resolution_does_not_starve_the_resolution_watcher(tmp_path):
+    """Both watchers select markets with NO resolution row, so a market is out
+    of their candidate set before this ever runs. Asserted rather than assumed:
+    closing markets from under a watcher is exactly how the 2026-07-25 stall
+    happened."""
+    from lab.collect.resolutions import unresolved_closed_markets
+
+    conn = db.connect(tmp_path / "lab.db")
+    try:
+        for cid in ("0xresolved", "0xpending"):
+            conn.execute(
+                "INSERT INTO markets (condition_id, question, venue, tier, active, closed)"
+                " VALUES (?,'Q','polymarket','tail',0,1)", (cid,))
+        conn.commit()
+        db.record_resolution(conn, "0xresolved", "2026-08-10T00:00:00+00:00", 1.0, False, "gamma")
+        conn.commit()
+
+        pending = unresolved_closed_markets(conn, limit=50)
+    finally:
+        conn.close()
+
+    assert "0xpending" in pending, "an unresolved closed market must stay a candidate"
+    assert "0xresolved" not in pending, "a resolved one is already out of the queue"
+
+
+def test_migration_closes_resolved_markets_and_only_those(tmp_path):
+    conn = db.connect(tmp_path / "lab.db")
+    try:
+        conn.execute("INSERT INTO markets (condition_id, question, venue, tier, active, closed)"
+                     " VALUES ('0xres','Q','kalshi','tail',1,0)")
+        conn.execute("INSERT INTO markets (condition_id, question, venue, tier, active, closed)"
+                     " VALUES ('0xopen','Q','kalshi','tail',1,0)")
+        conn.execute("INSERT INTO resolutions (condition_id, resolved_ts, payout_yes, disputed)"
+                     " VALUES ('0xres','2026-08-10T00:00:00+00:00',1.0,0)")
+        conn.commit()
+
+        db.migrate_close_resolved_markets(conn)
+
+        rows = dict(conn.execute(
+            "SELECT condition_id, closed FROM markets").fetchall())
+        assert rows["0xres"] == 1
+        assert rows["0xopen"] == 0, "a market without a resolution must not be closed"
+        # idempotent
+        assert db.migrate_close_resolved_markets(conn)["closed"] == 0
+    finally:
+        conn.close()
