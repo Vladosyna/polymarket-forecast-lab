@@ -436,6 +436,14 @@ venues:
     # > 50,000 selects 143. 5,000 keeps the liquid tier around 800, which is
     # one order-book request each per 15-minute round -- comfortably inside
     # Kalshi's ~10 req/s (guardrail 8). Raise it if that round starts to crowd.
+    # FALLBACK ONLY, from 2026-08-10. Kalshi now tiers on the same measured
+    # order-book depth and the same `universe.tiers.*.min_depth_usd` thresholds
+    # as Polymarket (Phase 17 item 2) -- one rule, one bar, both venues. The
+    # two depth distributions are close enough to share it: p25/p50 was $10/$45
+    # on Kalshi against $9/$66 on Polymarket. These volume/open-interest numbers
+    # apply only to a market with no snapshot yet, since depth is unknowable
+    # until one exists -- 1,715 of 4,803 Kalshi markets were in that state on
+    # the day depth collection started.
     tiers:
       liquid: { min_volume: 5000, min_open_interest: 100 }
       tail: { min_volume: 0, min_open_interest: 0 }

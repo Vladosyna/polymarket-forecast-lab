@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
 from datetime import datetime, timedelta, timezone
 
 from lab.api.gamma import GammaEvent, GammaMarket
@@ -384,3 +386,37 @@ def test_sync_universe_does_not_link_non_negrisk_event_legs(tmp_path):
     ).fetchall()
     assert all(r["event_id"] is None for r in rows)
     conn.close()
+
+
+def test_depth_lookup_treats_a_present_but_empty_quote_as_no_data(tmp_path):
+    """`_depth_lookup`'s docstring promises "absent means no data yet, not zero",
+    but a row can exist with BOTH depth columns null -- a quote with no size.
+    `fill_null(0)` alone turned that into a measured $0 and tiered the market
+    'ignored', the opposite of the contract. Invisible while Polymarket was the
+    only venue with depth; on Kalshi 1,715 of 4,803 markets were in exactly that
+    state when depth collection started (2026-08-10).
+    """
+    from lab.collect.universe import _depth_lookup
+    from lab.store.snapshots import SnapshotStore, floor_ts_bucket
+    from lab.util import now_utc
+
+    store = SnapshotStore(str(tmp_path / "snapshots"))
+    ts = floor_ts_bucket(now_utc(), 5)
+
+    def _row(cid, bid, ask):
+        return {"ts": ts, "condition_id": cid, "token_id_yes": None,
+                "best_bid": 0.49, "best_ask": 0.51, "mid": 0.5, "spread": 0.02,
+                "bid_depth_usd": bid, "ask_depth_usd": ask,
+                "last_trade_price": None, "venue": "kalshi"}
+
+    store.append([_row("0xmeasured", 100.0, 200.0),
+                  _row("0xnodepth", None, None),
+                  _row("0xonesided", 50.0, None)])
+
+    depth = _depth_lookup(store, now_utc())
+    assert depth["0xmeasured"] == pytest.approx(300.0)
+    assert depth["0xonesided"] == pytest.approx(50.0)   # one side measured is data
+    assert "0xnodepth" not in depth, (
+        "a quote with no size on either side must be absent, not $0 -- "
+        "absent falls back to the proxy rule, $0 tiers the market 'ignored'"
+    )

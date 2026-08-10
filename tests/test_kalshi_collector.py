@@ -97,36 +97,70 @@ def test_kalshi_market_row_falls_back_to_expiration_time():
     assert row["end_date_iso"] == "2026-06-12T09:00:00Z"
 
 
-def test_tier_liquid_and_tail_and_ignored():
+def test_tier_falls_back_to_volume_and_open_interest_without_depth():
+    """Depth is unknowable until a market has been snapshotted once, and 1,715
+    of 4,803 Kalshi markets were in that state when depth collection started."""
     liquid = CONFIG["venues"]["kalshi"]["tiers"]["liquid"]
     m_liquid = _market(volume_fp=str(liquid["min_volume"]),
                        open_interest_fp=str(liquid.get("min_open_interest", 0)))
-    assert assign_kalshi_tier(m_liquid, CONFIG) == "liquid"
+    assert assign_kalshi_tier(m_liquid, CONFIG) == ("liquid", None)
 
     m_tail = _market(volume_fp="0", open_interest_fp="0")
-    assert assign_kalshi_tier(m_tail, CONFIG) == "tail"
-
+    tier, reason = assign_kalshi_tier(m_tail, CONFIG)
     tail = CONFIG["venues"]["kalshi"]["tiers"]["tail"]
-    m_none = _market(volume_fp=None, open_interest_fp=None)
     if tail["min_volume"] > 0 or tail.get("min_open_interest", 0) > 0:
-        assert assign_kalshi_tier(m_none, CONFIG) == "ignored"
+        assert (tier, reason) == ("ignored", "low_liquidity")
     else:
-        assert assign_kalshi_tier(m_none, CONFIG) == "tail"
+        assert (tier, reason) == ("tail", None)
 
 
 def test_tier_ignores_kalshis_dead_liquidity_field():
-    """Kalshi reports `liquidity_dollars` as 0.0 for every market it
-    publishes -- verified 2026-08-09 across all 4,822 this lab had collected
-    and against a live API sample. Keying the liquid gate on it meant no Kalshi
-    market could ever be liquid, which silently excluded the entire venue from
-    the shadow portfolio (it scans the liquid tier only)."""
+    """Kalshi reports `liquidity_dollars` as 0.0 for every market it publishes
+    -- verified 2026-08-09 across all 4,822 collected and against a live API
+    sample. Keying the liquid gate on it meant no Kalshi market could ever be
+    liquid, which silently excluded the entire venue from the shadow portfolio
+    (it scans the liquid tier only)."""
     liquid = CONFIG["venues"]["kalshi"]["tiers"]["liquid"]
     m = _market(liquidity_dollars="0",
                 volume_fp=str(liquid["min_volume"]),
                 open_interest_fp=str(liquid.get("min_open_interest", 0)))
-    assert assign_kalshi_tier(m, CONFIG) == "liquid", (
+    assert assign_kalshi_tier(m, CONFIG)[0] == "liquid", (
         "a zero liquidity_dollars must not block the liquid tier"
     )
+
+
+def test_measured_depth_overrides_the_proxies_on_both_sides():
+    """Phase 17 item 2: a tier means "this much real depth", so measured depth
+    decides regardless of what volume/open interest say -- in either direction.
+    """
+    depth_tiers = CONFIG["universe"]["tiers"]
+    rich_proxies = _market(volume_fp="10000000", open_interest_fp="1000000")
+    poor_proxies = _market(volume_fp="0", open_interest_fp="0")
+
+    # Deep book, worthless proxies -> liquid.
+    assert assign_kalshi_tier(
+        poor_proxies, CONFIG, depth_usd=depth_tiers["liquid"]["min_depth_usd"]
+    ) == ("liquid", None)
+    # Empty book, spectacular proxies -> not liquid. Volume is lifetime and
+    # says nothing about whether anyone is quoting now.
+    assert assign_kalshi_tier(rich_proxies, CONFIG, depth_usd=0.0) == (
+        "ignored", "low_liquidity")
+
+
+def test_kalshi_and_polymarket_share_one_depth_bar():
+    """One rule, one threshold, both venues -- not two similar rules that can
+    drift apart."""
+    import inspect
+
+    from lab.collect import kalshi_collector, universe
+
+    for src in (inspect.getsource(kalshi_collector.assign_kalshi_tier),
+                inspect.getsource(universe.assign_tier_with_category)):
+        assert 'tiers["liquid"]["min_depth_usd"]' in src
+        assert 'tiers["tail"]["min_depth_usd"]' in src
+    # and the Kalshi rule reads them out of the SHARED universe block
+    ksrc = inspect.getsource(kalshi_collector.assign_kalshi_tier)
+    assert 'config["universe"]["tiers"]' in ksrc
 
 
 def test_top_of_book_usd_distinguishes_missing_from_zero():

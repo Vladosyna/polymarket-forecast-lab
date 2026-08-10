@@ -334,3 +334,48 @@ markets promoted to `liquid` therefore sit near that bound, and if the round len
 them would be skipped as stale rather than paired against an old price — the safe direction, but a
 coverage loss. Kalshi forecast counts will be checked against their pre-change level, and this
 addendum amended if the bound has to move.
+
+**Addendum 9.9 (2026-08-10).** Kalshi's tier assignment moves onto the lab's own measured
+order-book depth, using the same thresholds already applied to Polymarket. This supersedes the
+volume/open-interest keys introduced one day earlier in 9.8, which are retained only as a fallback
+for markets not yet snapshotted.
+
+**Why now, and why this rather than tuning the proxies.** `CLAUDE.md` Phase 17 item 2 already
+requires tiering on collected depth rather than venue-reported fields, and Polymarket was moved to
+it on 2026-07-07. Kalshi could not follow because no depth was collected for it; that changed on
+2026-08-09 (addendum 9.8). With depth in hand, keeping Kalshi on volume and open interest would
+have left the two venues on different definitions of the same word — and the proxies are the weaker
+signal in both directions: lifetime volume says nothing about whether anyone is quoting now, and a
+market can be deeply quoted with no volume recorded at all.
+
+**One bar, both venues.** The measured distributions are close enough to share the existing
+`universe.tiers.*.min_depth_usd` thresholds rather than inventing venue-specific ones: on
+2026-08-10, per-market top-of-book depth was p25 $10 / p50 $45 on Kalshi against p25 $9 / p50 $66 on
+Polymarket. At the shared liquid bar ($250) this selects 484 of 4,803 Kalshi markets, against 26
+under 9.8's open-interest rule. Polymarket's assignment is unchanged — verified by differential
+comparison against the previous implementation across every depth × liquidity × volume combination
+tested, with zero mismatches.
+
+**A contract defect found and fixed in the same pass.** `_depth_lookup` documents that a market with
+no depth data is *absent* from its result, so tiering falls back rather than treating it as $0. The
+implementation summed `fill_null(0)` over both columns, so a row whose quote had no size on either
+side became a measured $0 and tiered `ignored`. This was unobservable while Polymarket was the only
+venue with depth (every row has it); on Kalshi 1,715 of 4,803 markets were in exactly that state,
+and shipping the change without this fix would have excluded all of them from the universe. The
+implementation now matches its documented contract for both venues.
+
+**Also closed here:** Kalshi universe exclusions were never written to `universe_log`, though this
+venue carries roughly 80% of the lab's daily forecast rows. Phase 15's commitment — that "why isn't
+X in the ledger" is answerable for every considered market — now holds for Kalshi too.
+
+**What this does not change.** No hypothesis, outcome, statistic or honesty tier. The shadow
+portfolio's entry filters (§8) are untouched: a Kalshi market still has to clear the same $500
+top-of-book depth, the same 0.03 spread and the same 0.05 edge as a Polymarket one. Widening the
+liquid tier changes which markets are *considered*, never the bar they must clear.
+
+**Watch items.** The liquid tier drives one order-book-ladder request per market per 15-minute
+round, so 484 markets adds ~0.5 req/s against Kalshi's ~10 (guardrail 8) -- the round's duration
+will be checked and this addendum amended if it crowds. And 9.8's freshness watch item stands:
+`tier` also selects the price-freshness bound, and a much larger liquid tier is a much larger
+exposure to it. Kalshi forecast counts have not dropped so far (11,164 → 13,507 across 08-07..08-10)
+and will keep being compared against that level.

@@ -23,6 +23,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import polars as pl
+
 from lab.api.gamma import GammaClient, GammaMarket
 from lab.collect.categories import (
     category_from_polymarket_tags,
@@ -169,6 +171,17 @@ def _depth_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> di
     liquidity/volume tiering), not as zero depth."""
     dates = [utc_date_str(now - timedelta(days=d)) for d in range(days_back + 1)]
     df = store.latest_per_market(dates)
+    if df.is_empty():
+        return {}
+    # A row can exist with BOTH depth columns null -- a venue whose quote had no
+    # size at that moment. `fill_null(0)` alone would turn that into a measured
+    # $0 and tier the market 'ignored', which is the opposite of this function's
+    # documented contract. Invisible while Polymarket was the only venue with
+    # depth (every row has it); on Kalshi 1,715 of 4,803 markets had none at all
+    # when depth collection started (2026-08-10), so it decides their tier.
+    df = df.filter(
+        pl.col("bid_depth_usd").is_not_null() | pl.col("ask_depth_usd").is_not_null()
+    )
     if df.is_empty():
         return {}
     depth = df["bid_depth_usd"].fill_null(0) + df["ask_depth_usd"].fill_null(0)

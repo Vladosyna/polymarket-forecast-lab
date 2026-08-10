@@ -45,27 +45,48 @@ _OPEN_STATUSES = ("active", "initialized")
 _CLOSED_STATUSES = ("finalized", "closed")
 
 
-def assign_kalshi_tier(m: KalshiMarket, config: dict[str, Any]) -> str:
-    """Tier on traded volume and open interest, NOT on Kalshi's own
-    `liquidity_dollars`.
+def assign_kalshi_tier(m: KalshiMarket, config: dict[str, Any],
+                       depth_usd: float | None = None) -> tuple[str, str | None]:
+    """Tier a Kalshi market, on our own measured order-book depth where we have
+    it and on traded volume / open interest where we do not.
 
-    That field reads 0.0 for every market Kalshi publishes -- verified on
-    2026-08-09 across all 4,822 markets this lab had collected and against a
-    live API sample. Keying the liquid gate on it meant no Kalshi market could
-    ever be tiered liquid, which silently excluded the whole venue from the
-    shadow portfolio (it scans the liquid tier only) and from anything else
-    tier-gated. Volume and open interest are both populated.
+    This is deliberately the SAME rule and the SAME thresholds
+    (`universe.tiers.*.min_depth_usd`) `assign_tier_with_category` applies to
+    Polymarket -- Phase 17 item 2's whole point is that a tier means "this much
+    real depth", not "this venue's self-reported field cleared a venue-specific
+    number". The two distributions turned out close enough to share one bar:
+    measured 2026-08-10, p25/p50 depth was $10/$45 on Kalshi against $9/$66 on
+    Polymarket.
+
+    The fallback exists because depth is only knowable after a market has been
+    snapshotted at least once, and 1,715 of 4,803 Kalshi markets had no depth at
+    all on that date (a quote with no size). It is NOT Kalshi's
+    `liquidity_dollars`, which reads 0.0 for every market they publish -- keying
+    the liquid gate on that is what kept the entire venue out of the liquid tier,
+    and out of the shadow portfolio with it, until 2026-08-09.
+
+    Returns (tier, reason_code), mirroring `assign_tier_with_category`:
+    reason_code is populated only for 'ignored', so the caller can record it in
+    `universe_log` (Phase 15).
     """
-    tiers = config["venues"]["kalshi"]["tiers"]
+    tiers = config["universe"]["tiers"]
+    if depth_usd is not None:
+        if depth_usd >= tiers["liquid"]["min_depth_usd"]:
+            return "liquid", None
+        if depth_usd >= tiers["tail"]["min_depth_usd"]:
+            return "tail", None
+        return "ignored", "low_liquidity"
+
+    fallback = config["venues"]["kalshi"]["tiers"]
     vol = m.volume_fp or 0.0
     oi = m.open_interest_fp or 0.0
-    liquid = tiers["liquid"]
+    liquid = fallback["liquid"]
     if vol >= liquid["min_volume"] and oi >= liquid.get("min_open_interest", 0):
-        return "liquid"
-    tail = tiers["tail"]
+        return "liquid", None
+    tail = fallback["tail"]
     if vol >= tail["min_volume"] and oi >= tail.get("min_open_interest", 0):
-        return "tail"
-    return "ignored"
+        return "tail", None
+    return "ignored", "low_liquidity"
 
 
 def kalshi_market_row(m: KalshiMarket, category: str) -> dict[str, Any]:
@@ -89,12 +110,15 @@ def kalshi_market_row(m: KalshiMarket, category: str) -> dict[str, Any]:
 
 
 async def sync_kalshi_universe(
-    kalshi: KalshiClient, conn, config: dict[str, Any]
+    kalshi: KalshiClient, conn, config: dict[str, Any], store: SnapshotStore | None = None
 ) -> dict[str, int]:
     """Fetch open markets per configured category (deterministic, bounded fan-out)
     and upsert (idempotent). Returns a summary counts dict, mirroring
     sync_universe()'s shape/logging in collect/universe.py."""
+    from lab.collect.universe import _depth_lookup, log_universe_exclusion
+
     kalshi_cfg = config["venues"]["kalshi"]
+    depth_by_market = _depth_lookup(store, now_utc()) if store is not None else {}
     category_map: dict[str, str] = load_categories()["kalshi_series"]
     excluded = set(kalshi_cfg.get("excluded_series_categories", []))
     max_series = kalshi_cfg.get("max_series_per_sync", 40)
@@ -130,9 +154,16 @@ async def sync_kalshi_universe(
                 continue
             for m in markets:
                 counts["markets_seen"] += 1
-                tier = assign_kalshi_tier(m, config)
+                row = kalshi_market_row(m, our_category)
+                tier, reason = assign_kalshi_tier(
+                    m, config, depth_by_market.get(row["condition_id"]))
                 counts[tier] += 1
-                db.upsert_market(conn, {**kalshi_market_row(m, our_category), "tier": tier})
+                if reason:
+                    # Phase 15: Kalshi exclusions were never recorded, though
+                    # this venue carries ~80% of the lab's daily forecasts --
+                    # "why isn't X in the ledger" has to be answerable for it too.
+                    log_universe_exclusion(conn, "kalshi", m.ticker, reason)
+                db.upsert_market(conn, {**row, "tier": tier})
             conn.commit()
 
     log.info("kalshi universe sync complete", extra={"ctx": counts})

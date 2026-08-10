@@ -231,7 +231,7 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
 
     async def job_kalshi_sync() -> None:
         if not is_paused(config):
-            await sync_kalshi_universe(kalshi, conn, config)
+            await sync_kalshi_universe(kalshi, conn, config, store)
 
     async def job_kalshi_snapshot() -> None:
         if not is_paused(config):
