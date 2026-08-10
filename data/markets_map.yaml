@@ -1645,6 +1645,49 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xe35b9f1d3febb6ef61a75482f6329f16fbcce16ce49aa8fbdb9f0770b33646c8'
+  question: Will Matt Gaetz be the Republican nominee for Florida Governor?
+  venue: kalshi
+  external_id: KXGOVFLNOMR-26-MG
+  external_question: Will Matt Gaetz be the Republican nominee for Governor in Florida?
+  rationale: 'Both markets ask whether Matt Gaetz will be the Republican nominee for
+    Florida Governor in the 2026 election. The Polymarket resolution criteria specify
+    resolution based on the winner of the Republican Primary for Governor of Florida
+    on August 18, 2026, with ''Other'' if no primary occurs. The Kalshi resolution
+    criteria explicitly state ''if Matt Gaetz wins the nomination for the Republican
+    Party to contest the 2026 Florida Governorship, then the market resolves to Yes.''
+    The outcomes align: Polymarket''s ''Other'' (if Gaetz does not win) matches Kalshi''s
+    ''Not Matt Gaetz''. Both depend on the same event: the outcome of the Florida
+    Republican gubernatorial primary. The minor difference in resolution source (official
+    party announcement vs. general nomination) does not create a substantive mismatch,
+    as both refer to the same real-world outcome.'
+  confidence: 0.98
+  proposed_ts: '2026-08-10T15:41:05+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xf77bd5682beec44a135a9ab814a28e4b69481e84365243bc6a86f1cea39dfd76'
+  question: Will Aly Richards win the 2026 Vermont Governor Democratic primary election?
+  venue: kalshi
+  external_id: KXGOVVTNOMD-26-ARIC
+  external_question: Will Aly Richards be the Democratic nominee for Governor in Vermont?
+  rationale: Both markets ask whether Aly Richards will be the Democratic nominee
+    for Governor of Vermont, which is determined by winning the 2026 Democratic primary.
+    The Polymarket question explicitly asks about winning the primary, while the Kalshi
+    market resolves Yes if Aly Richards wins the Democratic nomination. Winning the
+    primary and becoming the party's nominee are the same event in this context, as
+    Vermont's primary selects the nominee. The resolution sources (official primary
+    results or credible reporting) are consistent, and no conflicting criteria (such
+    as separate rounds or conventions) are indicated. The only minor uncertainty is
+    the potential for run-off mechanics, but both markets' criteria appear to treat
+    the overall primary winner as the nominee, so they align.
+  confidence: 0.9
+  proposed_ts: '2026-08-10T15:41:07+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
