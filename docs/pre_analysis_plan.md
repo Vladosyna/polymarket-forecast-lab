@@ -516,3 +516,37 @@ short-horizon cells, so the reader sees both the result and why the stratum H1 n
 Recorded now rather than at write-up so that the shortfall is a pre-registered expectation, not a
 post-hoc discovery. Had the statistic been computed when the pipeline was built, this would have
 been visible months earlier.
+
+**Addendum 9.14 (2026-08-10).** Correcting addendum 9.13's projection, filed the same day. 9.13
+concluded that "on present trajectory H1 will be reported as INSUFFICIENT DATA in its own
+pre-registered stratum". That conclusion was reached by reading a stock of resolved observations
+without checking how old the stratum was, how fast it was filling, or how many open markets could
+still enter it. All three were measurable, and all three say otherwise.
+
+**The stratum is ten days old, not starved.** The earliest Polymarket forecast in the ledger is
+2026-07-02. A forecast can enter the ≥30-day stratum only once its market resolves at least thirty
+days after it was written, so the first such observation could not exist before about 2026-08-01.
+In the ten days since, the stratum has accrued **79 event clusters** — roughly eight per day.
+
+**The pipeline is large enough.** Polymarket markets currently in the forecastable universe whose
+end dates fall at least thirty days from now and before the freeze number **1,159 event clusters**
+— 611 that would land in the 30–90d bucket and 548 in >90d. Both exceed this plan's 200-cluster
+INSUFFICIENT floor several times over, and the daily accrual rate is consistent with that pipeline.
+
+**Two corrections of record, not of specification.** First, 9.13's per-bucket table (13–33 clusters)
+was computed with `end_date_iso − forecast_ts`, while the statistic actually implemented and stored
+in `eval_runs` buckets on `resolved_ts − forecast_ts`, matching `m1_resolved_rows`. The stored
+statistic is the one this plan refers to; 9.13's table is superseded and should not be quoted.
+Second, the expectation 9.13 recorded is withdrawn: on present measurement H1 is expected to clear
+the 200-cluster floor in both ≥30-day buckets well before 2026-12-31.
+
+**What does not change, and is the point of filing this rather than editing 9.13.** The commitment
+stands exactly as written: H1 is reported at whatever honesty tier its realized n earns, with no
+substitution of the well-populated short-horizon buckets, whichever way the n turns out. This
+addendum revises a *sample-size forecast* on better measurement, before any skill result in the
+stratum has been examined — not a specification, and not a threshold.
+
+**The residual risk is timing, not sample size.** Those 1,159 clusters count only if their markets
+resolve on or before 2026-12-31, and prediction-market end dates slip. Accrual against this ceiling
+will be tracked monthly and reported with the result, so a shortfall appears as a measured slippage
+rather than as an unexplained thin cell.
