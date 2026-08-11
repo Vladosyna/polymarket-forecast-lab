@@ -575,3 +575,28 @@ deterministic aggregation against a direct LLM probability — has produced zero
 is specified as optional and is not part of any pre-registered hypothesis, so its absence changes
 nothing in this plan; it is noted here so that its absence is on the record rather than discovered
 at write-up.
+
+**Addendum 9.16 (2026-08-11).** `m3b_direct` begins producing forecasts today. §6 of `CLAUDE.md`
+specifies it as an optional experiment — the same LLM states a probability directly instead of the
+deterministic aggregator computing one from extracted evidence — and describes the comparison as "a
+genuinely useful result either way". It had been fully implemented and never wired into the model
+list, so it had produced zero forecasts since the project began.
+
+**What makes it a clean comparison.** M3b runs on the *same* markets as M3 (it shares M3's target
+list), reads the *same* dossier M3 has just written for that market, and calls the *same* model. The
+arms therefore differ in one thing only: whether the final probability comes from
+`news/aggregate.py`'s deterministic log-odds arithmetic or from the LLM stating a number. It is
+appended after M3 in the model list so it reads today's dossier rather than a stale one, and it is
+not in `POOLABLE` — a comparison arm must not feed the ensemble that is partly being compared.
+
+**Standing under this plan.** M3b gates no pre-registered hypothesis and is not a primary or
+secondary outcome; it is an exploratory comparison reported as such. Like any new `model_id`
+(`CLAUDE.md` §6's forward-only rule), it earns skill only from forecasts written after today and is
+never scored against history that predates it — the append-only ledger enforces that mechanically.
+
+**Cost and scope, stated because they bound what it can show.** One additional completion per M3
+target, about 120 a day, with no additional retrieval; combined M3 + M3b spend is on the order of
+$0.15/day against a $5.00 cap. Starting today, it has roughly 142 days to the freeze, so its
+resolved-forecast count will be small — on M3's own observed resolution yield, plausibly tens of
+event clusters rather than hundreds. It will be reported at whatever honesty tier that earns, and a
+null result on this comparison is a reportable result, not a failed experiment.

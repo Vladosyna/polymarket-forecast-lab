@@ -377,9 +377,22 @@ def build_default_models(conn, config: dict[str, Any], store=None) -> list[Forec
                                      model_id=m3_model_id(config),
                                      randomized_ids=randomized_ids, random_seed=seed))
         else:
-            models.append(M3Evidence(conn, llm, providers, config,
-                                     m3_target_ids(conn, config, store),
+            target_ids = m3_target_ids(conn, config, store)
+            randomized_ids = None
+            models.append(M3Evidence(conn, llm, providers, config, target_ids,
                                      model_id=m3_model_id(config)))
+
+        # M3b: the same LLM states a probability directly, on the SAME markets,
+        # from the SAME stored dossier -- that pairing is the experiment
+        # (brief section 6: "measure whether deterministic aggregation beats
+        # direct LLM estimates -- a genuinely useful result either way").
+        # Appended AFTER M3 so it reads the dossier M3 just wrote rather than
+        # yesterday's. Never in POOLABLE: it is a comparison arm, not an
+        # ensemble member.
+        if config["forecast"].get("m3b_direct_enabled", False):
+            from lab.models.m3_evidence import M3bDirect
+
+            models.append(M3bDirect(conn, llm, config, target_ids))
     else:
         key_env = config.get("llm", {}).get("api_key_env", "ANTHROPIC_API_KEY")
         log.warning("forecast: no %s; M3 disabled", key_env)

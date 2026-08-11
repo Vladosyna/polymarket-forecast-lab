@@ -224,3 +224,32 @@ def test_cost_cap_breach_skips_remaining(config, caplog):
     assert llm.calls == 1  # no further calls after the breach
     assert any("cost cap hit" in r.message for r in caplog.records)
     conn.close()
+
+
+def test_m3b_is_wired_on_the_same_targets_and_after_m3(config):
+    """The experiment is the PAIRING: same LLM, same markets, same dossier, and
+    the only difference is whether the final number comes from the
+    deterministic aggregator or straight from the model (brief section 6). It
+    had been implemented and never wired in, so it produced zero forecasts
+    until 2026-08-11.
+    """
+    import inspect
+
+    from lab import forecast as fc
+
+    src = inspect.getsource(fc.build_default_models)
+    assert "M3bDirect(conn, llm, config, target_ids)" in src, (
+        "M3b must share M3's target list, or the arms are not comparable"
+    )
+    # ordering: M3 writes the dossier that M3b reads, so it must come first
+    assert src.index("M3Evidence(") < src.index("M3bDirect("), (
+        "M3b must be appended after M3 so it reads today's dossier, not yesterday's"
+    )
+
+
+def test_m3b_is_never_an_ensemble_member():
+    """It is a comparison arm. Pooling it into M4 would let the thing being
+    measured contribute to the thing measuring it."""
+    from lab.models.m4_ensemble import POOLABLE
+
+    assert not any("m3b" in m for m in POOLABLE)

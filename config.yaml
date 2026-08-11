@@ -126,6 +126,14 @@ forecast:
   # This does NOT make an M3 skill claim reachable -- 200 clusters is out of
   # range either way -- and the addendum says so.
   m3_top_k: 120
+  # M3b (brief section 6): the same LLM states a probability directly, on the
+  # same markets, reading the same dossier M3 just built -- so the arms differ
+  # only in whether the final number comes from the deterministic aggregator or
+  # from the model. Enabled 2026-08-11; it had been implemented and never wired
+  # in, so it had produced zero forecasts. Costs one extra completion per M3
+  # target (~120/day) and no extra retrieval. Never joins POOLABLE: it is a
+  # comparison arm, not an ensemble member. See PAP addendum 9.16.
+  m3b_direct_enabled: true
   # Phase 15 boundary-randomization experiment (guardrail 12's pre-specified,
   # seeded-randomization carve-out): markets ranked m3_top_k-10..+10 are
   # randomly assigned to M3 coverage instead of a hard cutoff, to identify
