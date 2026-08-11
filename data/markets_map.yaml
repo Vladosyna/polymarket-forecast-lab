@@ -1610,7 +1610,206 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-10T18:35:23+00:00'
-proposed: []
+proposed:
+- condition_id: '0x2c03c41e5032364cb7166e842bdd22913f28aa2c837d8432704aa89c338875c8'
+  question: Will Pete Buttigieg win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-PBUT
+  external_question: Who will win the next presidential election?
+  rationale: Both markets resolve on whether Pete Buttigieg wins the 2028 U.S. presidential
+    election and is inaugurated for the term beginning in 2029. Polymarket's resolution
+    uses AP/Fox/NBC calls or inauguration as fallback; Kalshi uses inauguration. These
+    are equivalent event definitions for this specific outcome.
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:35+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x65b039f40f57f889e739d599d0d16e1d3f7ea19937204c92771a95f2d7dc7120'
+  question: Will Jennifer Jenkins be the Democratic nominee for Senate in Florida?
+  venue: kalshi
+  external_id: KXSENATEFLD-26-JJEN
+  external_question: Will Jennifer Jenkins be the Democratic nominee for the Senate
+    in Florida?
+  rationale: 'Both markets ask whether Jennifer Jenkins will be the Democratic nominee
+    for the U.S. Senate seat in Florida, and both resolve based on the outcome of
+    the Democratic primary. The Polymarket resolution criteria refer to the winner
+    of the Democratic Primary for United States Senator from Florida, and the specific
+    question names Jennifer Jenkins. The Kalshi market has the same outcome: whether
+    Jenkins wins the Democratic nomination for the 2026 special election. The only
+    minor difference is the reference to the special election versus the primary,
+    but they are effectively the same event. The third-party tool''s high confidence
+    aligns with this assessment.'
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:39+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xe0f1dded8b5bfdb89efcc0cfad007b6ea36edeac220128215f8e2ab22ececb0d'
+  question: Will Josh Weil be the Democratic nominee for Senate in Florida?
+  venue: kalshi
+  external_id: KXSENATEFLD-26-JWEI
+  external_question: Will Josh Weil be the Democratic nominee for the Senate in Florida?
+  rationale: Both markets resolve to whether Josh Weil wins the 2026 Florida Democratic
+    Senate primary for the Class III seat. The Polymarket question is specific to
+    Josh Weil within the broader Democratic primary context, and Kalshi's outcome
+    'Josh Weil' matches this. The minor nuance about a possible 'Other' resolution
+    if no primary occurs is a standard edge case that does not conflict with the identity
+    of the event described. The third-party tool's high confidence aligns with this
+    assessment.
+  confidence: 0.92
+  proposed_ts: '2026-08-11T11:26:40+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x998ee2bd25cea8e07eaf1b1f1be82ba6c3ecfd74c28a87497786103d84fd06d8'
+  question: Will Richard Grayson win the Alaska Senate race in 2026?
+  venue: kalshi
+  external_id: KXAKSENATE-26NOV03-RGRA
+  external_question: Will Richard Grayson win the 2026 Alaska Senate race?
+  rationale: 'Both markets resolve on the same specific event: whether Richard Grayson
+    wins the 2026 Alaska Senate election. The Polymarket question and resolution criteria
+    directly match the Kalshi outcome ''Richard Grayson'' and its resolution criteria.
+    The minor differences in wording (''Will Richard Grayson win...'' vs. ''If Richard
+    Grayson wins...'') do not affect the underlying event or resolution conditions.'
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:42+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x433587daba653f972f1bf49d41712ff02a0e73196c3a498a1e9d8e80c6587861'
+  question: Will Alex Padilla win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-ALEX
+  external_question: Who will win the governorship in California?
+  rationale: Both markets resolve on whether Alex Padilla wins the 2026 California
+    gubernatorial election. The Polymarket question explicitly names Alex Padilla
+    and uses the same election. The Kalshi market's ticker and outcome labels specify
+    'Alex Padilla' as the yes outcome, matching the same event and resolution condition.
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:44+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x3319143adbbf4fc8349fa7fdc362dcd35f48800cc3dd231266f5c2e6023d6000'
+  question: Will David Jolly be the Democratic nominee for Florida Governor?
+  venue: kalshi
+  external_id: KXGOVFLNOMD-26-DJOL
+  external_question: Will David Jolly be the Democratic nominee for Governor in Florida?
+  rationale: Both markets ask whether David Jolly will be the Democratic nominee for
+    Governor of Florida in 2026, with resolution based on the outcome of the Democratic
+    primary. The Polymarket resolution criteria explicitly reference the Democratic
+    primary winner, and the Kalshi resolution criteria specify Jolly winning the Democratic
+    nomination for the 2026 Florida governorship. The events and criteria are identical.
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:46+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x1a5b898bbfa1e697c19afeef356d9c1a6ecb95d2493c31524d3c75f16f782c3e'
+  question: Will Chad Bianco win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-CBIA
+  external_question: Who will win the governorship in California?
+  rationale: Both markets resolve on whether Chad Bianco wins the 2026 California
+    gubernatorial election. The Polymarket question explicitly asks if Chad Bianco
+    will win, and the resolution criteria specify the winner of the November 3, 2026
+    election. The Kalshi market's ticker and outcome labels (Chad Bianco vs. Not Chad
+    Bianco) and resolution criteria also confirm it resolves on the same event. The
+    slight difference in title phrasing (Polymarket using 'Will Chad Bianco win' vs.
+    Kalshi's broader 'Who will win the governorship') does not affect the specific
+    outcome, as the Kalshi ticker explicitly narrows it to Chad Bianco. The timing
+    and election are identical, and no substantive discrepancy exists in resolution
+    sources or criteria.
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:48+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x2153374302d7d3fec49657493f076e49f3235c3b69a3b5ce4e8bb86c9e2e47d8'
+  question: Will Alexandre Kalil win the 2026 Minas Gerais gubernatorial election?
+  venue: kalshi
+  external_id: KXMINASGOV-26OCT04-AKAL
+  external_question: Will Alexandre Kalil win the 2026 Minas Gerais gubernatorial
+    election?
+  rationale: Both Polymarket and Kalshi markets specifically ask whether Alexandre
+    Kalil will win the 2026 Minas Gerais gubernatorial election. The resolution criteria
+    on both sides refer to the same election outcome, with the Polymarket criteria
+    clarifying that interim or placeholder governors are excluded and that official
+    TSE results or credible consensus resolve the market. The Kalshi outcome label
+    and ticker suffix (AKAL) confirm the same specific candidate and election. No
+    material discrepancy exists in the event or condition.
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:50+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x9a18a2fdc18e058946a97c15df7f4b599260b3983caf8da3037becfb09356e37'
+  question: Will Gwen Graham be the Democratic nominee for Florida Governor?
+  venue: kalshi
+  external_id: KXGOVFLNOMD-26-GGRA
+  external_question: Will Gwen Graham be the Democratic nominee for Governor in Florida?
+  rationale: 'Both markets ask specifically whether Gwen Graham will be the Democratic
+    nominee for Florida Governor in 2026. The Polymarket question names her and the
+    resolution criteria confirm it resolves to the winner of the 2026 Democratic primary,
+    with ''Other'' if no primary occurs. The Kalshi market''s ticker and outcome labels
+    clearly indicate resolution on ''Gwen Graham'' winning the Democratic nomination
+    for the 2026 Florida governorship, matching the specific outcome. The resolution
+    standards are functionally equivalent: both rely on official party results or
+    credible consensus. The only minor discrepancy is the handling of a non-event
+    (no primary), which is a standard edge case and does not affect the substantive
+    match. The third-party tool''s high confidence aligns with the clear alignment.'
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:53+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xb2fddc90e11d6c55351bfbd5c01e67323f4d177f55f612274a90da92d1ae68db'
+  question: Will Click Bishop win the 2026 Alaska governor election?
+  venue: kalshi
+  external_id: KXGOVAK-26-CBIS
+  external_question: Who will win the governorship in Alaska?
+  rationale: Both markets resolve on whether Click Bishop wins the 2026 Alaska governor
+    election. The Polymarket question explicitly asks if Bishop will win, with resolution
+    criteria based on the election outcome. The Kalshi market's specific outcome (ticker
+    KXGOVAK-26-CBIS, outcome 'Click Bishop') resolves to Yes if Bishop is elected
+    governor in 2026. The event, election, and candidate are identical, and the resolution
+    criteria are equivalent despite minor differences in source confirmation. The
+    third-party tool's high confidence is corroborated by the clear alignment of the
+    specific outcomes.
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:55+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x81538f0c03fc3a29c8f67fca7d098c0ec43c125840be3110298b6b471b0ed9a0'
+  question: Will Angie Nixon be the Democratic nominee for Florida Governor?
+  venue: kalshi
+  external_id: KXGOVFLNOMD-26-ANIX
+  external_question: Will Angie Nixon be the Democratic nominee for Governor in Florida?
+  rationale: Both markets resolve identically on the event that Angie Nixon wins the
+    2026 Florida Democratic gubernatorial primary/nomination. The Polymarket question
+    explicitly asks if she will be the Democratic nominee, and its resolution criteria
+    confirm it resolves to the winner of the Florida Democratic primary. The Kalshi
+    market resolves to Yes if she wins the nomination for the 2026 Florida governorship.
+    The titles align, the specific outcomes align, and the criteria match. There is
+    no meaningful discrepancy in the resolution conditions.
+  confidence: 0.95
+  proposed_ts: '2026-08-11T11:26:57+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
