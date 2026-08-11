@@ -1524,65 +1524,38 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-09T13:00:14+00:00'
-proposed:
 - condition_id: '0x27282c44ca837461bf943fb95753d3cbc436cb88ccdf657c85635ac940cb1992'
   question: Will Keith Ellison be the Democratic nominee for Senate in Minnesota?
   venue: kalshi
   external_id: KXSENATEMND-26-KELL
   external_question: Will Keith Ellison be the Democratic nominee for the Senate in
     Minnesota?
-  rationale: 'Both markets resolve on exactly the same proposition: whether Keith
-    Ellison becomes the Democratic nominee for the U.S. Senate in Minnesota in 2026.
-    The Polymarket question and Kalshi''s specific outcome (ticker KXSENATEMND-26-KELL)
-    both target the Democratic primary winner for that seat. Resolution criteria are
-    consistent: each follows the Democratic primary outcome or, if no primary occurs,
-    a fallback (Polymarket explicitly resolves to ''Other''; Kalshi''s criteria imply
-    an outcome based on the eventual nomination process). The close alignment of names,
-    office, party, state, and election year confirms identity.'
-  confidence: 0.98
-  proposed_ts: '2026-08-09T15:41:05+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-10T18:34:36+00:00'
 - condition_id: '0x9340c7ff30ef563b6ed07ff4d45982157b930f3b068ca5d6bb1a07d5c91d43b9'
   question: Will Ilhan Omar be the Democratic nominee for Senate in Minnesota?
   venue: kalshi
   external_id: KXSENATEMND-26-IOMA
   external_question: Will Ilhan Omar be the Democratic nominee for the Senate in Minnesota?
-  rationale: "Both markets ask whether Ilhan Omar will be the Democratic nominee for\
-    \ U.S. Senate in Minnesota in 2026. The Polymarket question explicitly names Ilhan\
-    \ Omar and resolves on the Democratic primary winner for that seat. The Kalshi\
-    \ market's specific outcome (Ilhan Omar) resolves Yes if she wins the Democratic\
-    \ nomination for the 2026 Class II Minnesota Senate seat. The wording is materially\
-    \ identical, and the resolution criteria \u2014 nomination winner per the primary\
-    \ \u2014 align. No conflicting definitions of nominee or primary are evident."
-  confidence: 0.95
-  proposed_ts: '2026-08-09T15:41:08+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-10T18:34:40+00:00'
 - condition_id: '0x6415588e3e9bef8cae256e5cc0be3d0d7bd9d9621d42e7acd97157e7fbf844c8'
   question: Will Wilton Simpson be the Republican nominee for Florida Governor?
   venue: kalshi
   external_id: KXGOVFLNOMR-26-WS
   external_question: Will Wilton Simpson be the Republican nominee for Governor in
     Florida?
-  rationale: 'Both markets resolve on the same specific event: whether Wilton Simpson
-    becomes the Republican nominee for Governor of Florida in 2026. Polymarket question
-    and criteria target the winner of the Republican primary; Kalshi''s specific outcome
-    (ticker suffix ''WS'' and outcome labels) is exactly ''Wilton Simpson wins the
-    Republican nomination''. No substantive discrepancy in resolution source or conditions
-    (both reference the primary; Polymarket''s no-primary fallback to ''Other'' mirrors
-    Kalshi''s ''Not Wilton Simpson'' if no nomination occurs, as Simpson would not
-    be nominee). The titles align and the outcome scopes are identical.'
-  confidence: 0.99
-  proposed_ts: '2026-08-09T15:41:11+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-10T18:34:42+00:00'
 - condition_id: '0xfdecbfa0d8a556dfc232a543d0d70cfe95b53e1a5d0537bca57556a7b1b8492f'
   question: Will Bill Gates Jr. win the 2026 Minnesota Governor Democratic primary
     election?
@@ -1590,20 +1563,11 @@ proposed:
   external_id: KXGOVMNNOMD-26-BGAT
   external_question: Will Bill Gates Jr. be the Democratic nominee for Governor in
     Minnesota?
-  rationale: 'Both markets ask whether Bill Gates Jr. will win the Democratic nomination
-    for Governor of Minnesota in 2026. The Polymarket question specifically asks about
-    winning the Democratic primary election, and its resolution criteria confirm it
-    resolves based on the winner of the primary, which determines the nominee. The
-    Kalshi market resolves Yes if Bill Gates Jr. wins the Democratic nomination. These
-    are equivalent events: winning the primary equals becoming the nominee. The resolution
-    sources and conditions are consistent, with no meaningful discrepancy. The high
-    confidence reflects the clear identity between the specified outcomes.'
-  confidence: 0.95
-  proposed_ts: '2026-08-09T15:41:13+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-10T18:34:46+00:00'
 - condition_id: '0x8a5b58be1592ac07fd0667bd3d034f290c7ea7df17b11221f28dc2b9e7e4f350'
   question: Will Rebecca Kleefisch win the 2026 Wisconsin Governor Republican primary
     election?
@@ -1611,83 +1575,42 @@ proposed:
   external_id: KXGOVWINOMR-26-RK
   external_question: Will Rebecca Kleefisch be the Republican nominee for Governor
     in Wisconsin?
-  rationale: 'Both the Polymarket question and the Kalshi outcome definitively ask
-    whether Rebecca Kleefisch will win the 2026 Wisconsin Republican gubernatorial
-    primary/nomination. Their resolution criteria are aligned: the Polymarket market
-    resolves to ''Yes'' (i.e., ''Other'' excludes her) if she wins the primary, and
-    the Kalshi market resolves to ''Yes'' if she wins the Republican nomination. Both
-    reference the same event and same candidate. The only minor difference is that
-    Polymarket explicitly notes potential run-off and official source, but Kalshi''s
-    ''wins the nomination'' inherently covers that. The third-party tool''s high confidence
-    is well-supported.'
-  confidence: 0.95
-  proposed_ts: '2026-08-09T15:41:16+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-10T18:34:49+00:00'
 - condition_id: '0xd2e63f6807c6c6c71e99c3abc2519f0994e0afee026dbde2638eff7b773b9ad6'
   question: Will Kyle Schwarber win the 2026 National League Hank Aaron Award?
   venue: kalshi
   external_id: KXMLBNLHAARON-26-KSCH
   external_question: Will Kyle Schwarber win NL Hank Aaron Award?
-  rationale: Both markets ask whether Kyle Schwarber will win the 2026 National League
-    Hank Aaron Award. The Polymarket question and resolution criteria specify the
-    same award, season, and league, with a tie-break procedure that only affects multiple
-    winners but does not change the core event. The Kalshi market explicitly resolves
-    to Yes if Kyle Schwarber wins the NL Hank Aaron Award in 2026. The outcomes and
-    timing align. The only minor discrepancy is that Polymarket's criteria mention
-    cancellation/postponement rules, which do not contradict Kalshi's simpler criteria
-    in this context.
-  confidence: 0.98
-  proposed_ts: '2026-08-09T21:00:02+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-10T18:34:54+00:00'
 - condition_id: '0xe35b9f1d3febb6ef61a75482f6329f16fbcce16ce49aa8fbdb9f0770b33646c8'
   question: Will Matt Gaetz be the Republican nominee for Florida Governor?
   venue: kalshi
   external_id: KXGOVFLNOMR-26-MG
   external_question: Will Matt Gaetz be the Republican nominee for Governor in Florida?
-  rationale: 'Both markets ask whether Matt Gaetz will be the Republican nominee for
-    Florida Governor in the 2026 election. The Polymarket resolution criteria specify
-    resolution based on the winner of the Republican Primary for Governor of Florida
-    on August 18, 2026, with ''Other'' if no primary occurs. The Kalshi resolution
-    criteria explicitly state ''if Matt Gaetz wins the nomination for the Republican
-    Party to contest the 2026 Florida Governorship, then the market resolves to Yes.''
-    The outcomes align: Polymarket''s ''Other'' (if Gaetz does not win) matches Kalshi''s
-    ''Not Matt Gaetz''. Both depend on the same event: the outcome of the Florida
-    Republican gubernatorial primary. The minor difference in resolution source (official
-    party announcement vs. general nomination) does not create a substantive mismatch,
-    as both refer to the same real-world outcome.'
-  confidence: 0.98
-  proposed_ts: '2026-08-10T15:41:05+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-10T18:34:57+00:00'
 - condition_id: '0xf77bd5682beec44a135a9ab814a28e4b69481e84365243bc6a86f1cea39dfd76'
   question: Will Aly Richards win the 2026 Vermont Governor Democratic primary election?
   venue: kalshi
   external_id: KXGOVVTNOMD-26-ARIC
   external_question: Will Aly Richards be the Democratic nominee for Governor in Vermont?
-  rationale: Both markets ask whether Aly Richards will be the Democratic nominee
-    for Governor of Vermont, which is determined by winning the 2026 Democratic primary.
-    The Polymarket question explicitly asks about winning the primary, while the Kalshi
-    market resolves Yes if Aly Richards wins the Democratic nomination. Winning the
-    primary and becoming the party's nominee are the same event in this context, as
-    Vermont's primary selects the nominee. The resolution sources (official primary
-    results or credible reporting) are consistent, and no conflicting criteria (such
-    as separate rounds or conventions) are indicated. The only minor uncertainty is
-    the potential for run-off mechanics, but both markets' criteria appear to treat
-    the overall primary winner as the nominee, so they align.
-  confidence: 0.9
-  proposed_ts: '2026-08-10T15:41:07+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-10T18:35:23+00:00'
+proposed: []
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
