@@ -550,3 +550,28 @@ stratum has been examined — not a specification, and not a threshold.
 resolve on or before 2026-12-31, and prediction-market end dates slip. Accrual against this ceiling
 will be tracked monthly and reported with the result, so a shortfall appears as a measured slippage
 rather than as an unexplained thin cell.
+
+**Addendum 9.15 (2026-08-11).** Phase 15's crowd-size covariates, audited and partly closed.
+
+The phase lists three — "Metaculus forecaster counts, Polymarket holder counts (Data API), Kalshi
+open interest — stored with snapshots" — and none was being stored. Their status now:
+
+- **Kalshi open interest: collected from today.** The collector already fetches the field (it tiers
+  on it since addendum 9.8), so storing it in the snapshot rows costs no request. Forward-only,
+  like every other Phase 15 covariate: earlier partitions keep NULL and nothing is reconstructed.
+- **Metaculus forecaster counts: will never exist.** Addendum 9.4 records that Metaculus access was
+  declined; this covariate goes with it.
+- **Polymarket holder counts: not collected, and this is a decision rather than an oversight.** They
+  require a per-market Data API call, and the collector sustains ~9.6 req/s against its budget
+  already. The paper will report them as not collected rather than as missing data — the same
+  treatment `trades_24h` gets under addendum 9.12.
+
+**Consequence.** Any crowd-size-conditioned analysis is Kalshi-only, on the window from 2026-08-11
+to the freeze, and will be reported with that scope stated rather than implied. No hypothesis,
+outcome, statistic, honesty tier or exclusion rule changes.
+
+Recorded because the audit that found this also found `m3b_direct` — the §6 experiment comparing
+deterministic aggregation against a direct LLM probability — has produced zero forecasts to date. It
+is specified as optional and is not part of any pre-registered hypothesis, so its absence changes
+nothing in this plan; it is noted here so that its absence is on the record rather than discovered
+at write-up.

@@ -327,6 +327,7 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
             "bid_depth_usd": bid_depth,
             "ask_depth_usd": ask_depth,
             "last_trade_price": m.last_price_dollars,
+            "open_interest": m.open_interest_fp,   # Phase 15 crowd-size covariate
             "bids_json": bids_json,
             "asks_json": asks_json,
             "venue": "kalshi",

@@ -414,3 +414,37 @@ def test_the_series_cap_is_applied_after_ordering_not_before():
     )
     # and the old early-break out of the category loop must be gone
     assert "if series_processed >= max_series:\n            break" not in src
+
+
+def test_kalshi_snapshots_carry_open_interest():
+    """Phase 15's crowd-size covariates name "Kalshi open interest -- stored
+    with snapshots". It was never stored, though the collector already fetches
+    the field (it tiers on it), so this costs no request. Forward-only like the
+    other Phase 15 covariates: earlier partitions keep NULL."""
+    import asyncio
+    import tempfile
+    from pathlib import Path
+
+    from lab.api.kalshi import KalshiMarket
+    from lab.collect.kalshi_collector import snapshot_kalshi_markets
+    from lab.store.snapshots import SnapshotStore
+
+    class _Client:
+        async def market(self, ticker):
+            return KalshiMarket.model_validate({
+                "ticker": ticker, "yes_bid_dollars": "0.40", "yes_ask_dollars": "0.42",
+                "yes_bid_size_fp": "100", "yes_ask_size_fp": "200",
+                "open_interest_fp": "1234", "volume_fp": "5000",
+            })
+
+    store = SnapshotStore(str(Path(tempfile.mkdtemp()) / "snapshots"))
+    written = asyncio.run(snapshot_kalshi_markets(
+        _Client(), store, [{"condition_id": "kalshi:T1", "venue_native_id": "T1"}],
+        "2026-08-11T00:00:00+00:00"))
+
+    assert written == 1
+    df = store.read_range(["2026-08-11"])
+    assert df["open_interest"][0] == pytest.approx(1234.0)
+    # and a venue that reports none leaves it NULL rather than 0
+    from lab.store.snapshots import SNAPSHOT_SCHEMA
+    assert "open_interest" in SNAPSHOT_SCHEMA

@@ -34,6 +34,12 @@ SNAPSHOT_SCHEMA = {
     # Null in partitions written before the change.
     "bids_json": pl.String,
     "asks_json": pl.String,
+    # Phase 15 crowd-size covariate, added 2026-08-11 (additive/non-breaking).
+    # Kalshi reports open interest on the market object the collector already
+    # fetches, so this costs no request. NULL for venues that do not report one:
+    # Polymarket's equivalent (holder counts) lives behind a separate Data API
+    # call, which is not free at this collector's load and is not taken here.
+    "open_interest": pl.Float64,
     # v1.9 multi-venue (Phase 10, additive/non-breaking): 'polymarket' (default,
     # so every pre-existing row and call site is unaffected), 'kalshi',
     # 'metaculus'. Venues without an order book (Metaculus community
