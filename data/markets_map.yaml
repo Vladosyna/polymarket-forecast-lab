@@ -1828,6 +1828,58 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xb120cb1c26ad4568844f8e7ee7a91487d5cf4d246fd40410c1f3d4061bfd3587'
+  question: Will Tom Begich win the 2026 Alaska governor election?
+  venue: kalshi
+  external_id: KXGOVAK-26-TBEG
+  external_question: Who will win the governorship in Alaska?
+  rationale: Both markets resolve on whether Tom Begich wins the 2026 Alaska gubernatorial
+    election. Polymarket's question directly asks if Begich wins, and its resolution
+    criteria confirm it resolves based on the same election, with a fallback to 'Other'
+    if not confirmed (which does not alter the core outcome for Begich). Kalshi's
+    specific outcome (Tom Begich) matches the Polymarket leg exactly, despite the
+    broader title. The event, election cycle, candidate, and office are identical,
+    with both relying on official election results.
+  confidence: 0.95
+  proposed_ts: '2026-08-12T15:26:37+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x43cedce4a6af0136d37d53408fc965388baee3145db6da72a5b5da8d2746ced3'
+  question: Will Jonathan Kreiss-Tomkins win the 2026 Alaska governor election?
+  venue: kalshi
+  external_id: KXGOVAK-26-JKRE
+  external_question: Who will win the governorship in Alaska?
+  rationale: 'Both markets resolve on the same specific outcome: whether Jonathan
+    Kreiss-Tomkins wins the 2026 Alaska gubernatorial election. The Polymarket question
+    asks exactly that, with criteria referencing Associated Press, Fox News, and NBC
+    calls, while Kalshi''s specific outcome (ticker KXGOVAK-26-JKRE) resolves to Yes
+    if he is elected governor in 2026. The resolution criteria align on the election
+    and candidate. The only minor difference is timing of confirmation, but both target
+    the same real-world event and outcome.'
+  confidence: 0.95
+  proposed_ts: '2026-08-12T15:26:39+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x12923582cca8ff08ea1bb23e4e042b80e11fae9974d528d9f19249e5ad131f2a'
+  question: Will Shelley Hughes win the 2026 Alaska governor election?
+  venue: kalshi
+  external_id: KXGOVAK-26-SHUG
+  external_question: Who will win the governorship in Alaska?
+  rationale: Both markets resolve on whether Shelley Hughes wins the 2026 Alaska gubernatorial
+    election. Polymarket's question names Shelley Hughes specifically, and Kalshi's
+    ticker KXGOVAK-26-SHUG with outcome 'Shelley Hughes' resolves to Yes exactly if
+    she is elected governor in 2026. The resolution criteria align on the same event
+    and candidate.
+  confidence: 0.95
+  proposed_ts: '2026-08-12T15:26:41+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
