@@ -1880,6 +1880,26 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xc9ef2ba4100af1b7f48643b74a1e21ad94de7b3cc7c0bb63c2a191669b0ef456'
+  question: Will Fentrice Driskell be the Democratic nominee for Florida Governor?
+  venue: kalshi
+  external_id: KXGOVFLNOMD-26-FDRI
+  external_question: Will Fentrice Driskell be the Democratic nominee for Governor
+    in Florida?
+  rationale: 'Both markets resolve on the same binary event: Fentrice Driskell winning
+    the 2026 Florida Democratic gubernatorial primary/nomination. The Polymarket market
+    resolves to ''Yes'' if she wins the primary, and Kalshi resolves to ''Yes'' if
+    she wins the nomination to contest the governorship. The resolution criteria are
+    effectively identical, with both relying on official primary results. The only
+    minor difference is the exact wording of the source (official announcement vs.
+    nomination), but these are functionally equivalent for this event. The match is
+    strong.'
+  confidence: 0.9
+  proposed_ts: '2026-08-13T21:00:01+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
