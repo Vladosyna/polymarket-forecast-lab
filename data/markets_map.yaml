@@ -1809,6 +1809,105 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x6f685174c7b5f11a8b7cd7bc7d2d368e634a0ca9016434d323b4cd8c9d8c71b7'
+  question: Will Aaron Judge win the 2026 American League MVP Award?
+  venue: kalshi
+  external_id: KXMLBALMVP-26-AJUD
+  external_question: Will Aaron Judge win AL MVP?
+  rationale: Both markets resolve on whether Aaron Judge wins the 2026 American League
+    MVP. The Polymarket resolution criteria confirm the specific award and season,
+    with tie/season-cancellation provisions that don't affect the core outcome. The
+    Kalshi ticker and outcome labels explicitly target the same event. The only minor
+    difference is handling of ties (Polymarket alphabetical vs. Kalshi unspecified),
+    but both ultimately resolve to Judge as the winner (or not). Season cancellation
+    would resolve Polymarket to 'Other' and likely Kalshi to No, but this edge case
+    doesn't undermine the central identity.
+  confidence: 0.98
+  proposed_ts: '2026-08-16T21:00:03+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xfa9f31ee9de9bdd91bc6d4729487a7facbc13cb8ca346d8228e8baf231ba6aa5'
+  question: "Will Mateus Sim\xF5es win the 2026 Minas Gerais gubernatorial election?"
+  venue: kalshi
+  external_id: KXMINASGOV-26OCT04-MSIM
+  external_question: "Will Mateus Sim\xF5es win the 2026 Minas Gerais gubernatorial\
+    \ election?"
+  rationale: "Both markets explicitly name Mateus Sim\xF5es as the candidate and the\
+    \ 2026 Minas Gerais gubernatorial election as the event, with identical win/lose\
+    \ outcomes. The Polymarket criteria specify the same election and candidate, and\
+    \ while it includes a default 'Other' outcome for unresolved/other candidates,\
+    \ the specific question and market leg is for Mateus Sim\xF5es winning. The Kalshi\
+    \ ticker suffix KXMINASGOV-26OCT04-MSIM and outcome labels confirm the same specific\
+    \ proposition. No divergence in resolution rules or event ambiguity is present."
+  confidence: 0.98
+  proposed_ts: '2026-08-16T21:00:05+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x2270aeafba0c37b647180977c05e2dc266fcdf3f5fa9ce25fed4e5c120b331a8'
+  question: Will Donovan Fenton win the 2026 New Hampshire Governor Democratic primary
+    election?
+  venue: kalshi
+  external_id: KXGOVNHNOMD-26-DFEN
+  external_question: Will Donovan Fenton be the Democratic nominee for Governor in
+    New Hampshire?
+  rationale: Both markets resolve on whether Donovan Fenton wins the 2026 New Hampshire
+    Democratic gubernatorial primary, which is equivalent to becoming the Democratic
+    nominee. The Polymarket question explicitly asks about winning the primary, and
+    its criteria specify resolution based on the primary winner. The Kalshi market's
+    specific outcome (via ticker and outcome labels) is also whether Fenton becomes
+    the Democratic nominee. The minor difference in wording (winning primary vs. becoming
+    nominee) describes the same event for a single-candidate primary, as the nominee
+    is the primary winner. The only caveat is the unlikely scenario where the primary
+    is canceled or Fenton wins but is not nominated for procedural reasons, but standard
+    resolution sources treat these as equivalent.
+  confidence: 0.95
+  proposed_ts: '2026-08-16T21:00:08+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x6d6b9d5f81726194e8e5969bc5fd9ad5aefcf9ebe836f44d734e3fe18c15a805'
+  question: Will Kamala Harris win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-KHAR
+  external_question: Who will win the governorship in California?
+  rationale: "Both markets resolve on whether Kamala Harris wins the 2026 California\
+    \ gubernatorial election. The Polymarket question asks directly if Harris will\
+    \ win, and its resolution criteria confirm that it resolves to the candidate who\
+    \ wins the 2026 election, with Harris being the named candidate in the market.\
+    \ The Kalshi market\u2019s ticker (KXGOVCA-26-KHAR) and outcome labels explicitly\
+    \ specify Kamala Harris as the candidate, resolving to Yes if she is elected.\
+    \ Both use the same event (the 2026 California governorship election) and the\
+    \ same condition (Harris winning). The slight difference in resolution sources\
+    \ (AP/Fox/NBC vs official election results) does not change the underlying outcome.\
+    \ Thus, the match is accurate."
+  confidence: 0.95
+  proposed_ts: '2026-08-16T21:00:11+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xbaa911d1bdf7f43fafd9de773a43ec8ea00dd1c405a3c996e6f0f3ab365209e0'
+  question: Will Tony Thurmond win the California Governor Election in 2026?
+  venue: kalshi
+  external_id: KXGOVCA-26-TTHU
+  external_question: Who will win the governorship in California?
+  rationale: Both markets resolve to 'Yes/Tony Thurmond wins' if Tony Thurmond is
+    elected governor of California in the 2026 election. The Polymarket question asks
+    whether he will win, and its resolution criteria confirm this. The Kalshi market's
+    specific outcome (despite its broad title) is 'Tony Thurmond' winning, per the
+    ticker and outcome labels. Resolution timings and sources are consistent enough
+    (election certification). This is a direct identity match.
+  confidence: 0.95
+  proposed_ts: '2026-08-16T21:00:13+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
