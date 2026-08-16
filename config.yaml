@@ -290,7 +290,12 @@ schedule:
   # nightly bundle, inside the >=5h margin the spacing test requires of the
   # heaviest job. It had never been checked against that rule -- report was
   # missing from the test's job list until learn's removal prompted a review.
-  report_cron: "0 14 * * 0"     # weekly Sunday 14:00 UTC -> render the report
+  # Weekday as a NAME, not a number: APScheduler's `from_crontab` reads
+  # day-of-week 0 as MONDAY, the opposite of standard cron, so every
+  # numeric weekly expression here fired a day later than it read
+  # (verified 2026-08-16 against the live stamps: paper_export and report
+  # on Monday, map_propose on Tuesday). Names parse unambiguously.
+  report_cron: "0 14 * * sun"     # weekly Sunday 14:00 UTC -> render the report
   # Daily, per CLAUDE.md section 8's own wording ("Entry rule (evaluated daily
   # on liquid tier, using M4)"). It had been weekly since inception -- a 7x cut
   # in entry opportunities that went unnoticed until 2026-08-09, when the
@@ -374,7 +379,7 @@ cross_venue:
   # runs weekly (propose_cron below) and can afford to check more series per
   # priority category each time.
   propose_series_per_category: 40
-  propose_cron: "0 9 * * 1" # weekly, Monday 09:00 UTC (was 05:00 -- see schedule.forecast_cron's
+  propose_cron: "0 9 * * mon" # weekly, Monday 09:00 UTC (was 05:00 -- see schedule.forecast_cron's
                              # 2026-07-28 comment on the OOM this collided with) -- orchestrator
                              # runs `lab map propose` automatically. It only ever appends to
                              # `proposed`; a human still must run `lab map confirm` before a pair
@@ -539,7 +544,7 @@ ledger:
 paper_export:
   enabled: true
   dir: docs/paper_exports
-  cron: "0 11 * * 0"  # weekly, Sunday 11:00 UTC (was 05:00) -- after the nightly bundle's
+  cron: "0 11 * * sun"  # weekly, Sunday 11:00 UTC (was 05:00) -- after the nightly bundle's
                        # own ledger-commitment push (02:00) and the weekly shadow job
                        # (now 07:00, see schedule.forecast_cron's 2026-07-28 comment),
                        # so git pushes don't overlap

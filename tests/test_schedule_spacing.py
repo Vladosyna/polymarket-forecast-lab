@@ -124,3 +124,47 @@ def test_shadow_is_evaluated_daily_as_the_brief_specifies():
     assert cfg["schedule"]["control"]["shadow_max_age_hours"] <= 72, (
         "the catch-up window still assumes a weekly job"
     )
+
+
+def test_weekly_jobs_fire_on_the_weekday_their_comment_claims():
+    """APScheduler's `from_crontab` reads day-of-week 0 as MONDAY -- the
+    opposite of standard cron -- so every numeric weekly expression fired a day
+    later than it read. Confirmed against live stamps on 2026-08-16:
+    `paper_export` and `report` had been running Mondays and `map_propose`
+    Tuesdays, while the config said Sunday and Monday.
+
+    The hours are pinned by the spacing tests above; this pins the day, which
+    is the part that silently disagreed.
+    """
+    from datetime import datetime, timezone
+
+    from apscheduler.triggers.cron import CronTrigger
+
+    cfg = yaml.safe_load((PROJECT_ROOT / "config.yaml").read_text(encoding="utf-8"))
+    expected = {
+        cfg["schedule"]["report_cron"]: "Sunday",
+        cfg["paper_export"]["cron"]: "Sunday",
+        cfg["cross_venue"]["propose_cron"]: "Monday",
+    }
+    base = datetime(2026, 8, 16, 0, 0, tzinfo=timezone.utc)   # a Sunday
+    for expr, want_day in expected.items():
+        got = CronTrigger.from_crontab(expr, timezone="UTC").get_next_fire_time(None, base)
+        assert got.strftime("%A") == want_day, (
+            f"{expr!r} fires on {got.strftime('%A')}, not {want_day} -- "
+            "numeric day-of-week means something different here than in cron"
+        )
+
+
+def test_daily_jobs_really_are_daily():
+    """The numeric-weekday trap does not touch `*`, but assert it rather than
+    assume: the shadow portfolio's move to daily is what makes PAP H2's
+    net-of-cost proxy accrue at all."""
+    from datetime import datetime, timedelta, timezone
+
+    from apscheduler.triggers.cron import CronTrigger
+
+    cfg = yaml.safe_load((PROJECT_ROOT / "config.yaml").read_text(encoding="utf-8"))
+    base = datetime(2026, 8, 16, 12, 0, tzinfo=timezone.utc)
+    for expr in (cfg["schedule"]["forecast_cron"], cfg["schedule"]["shadow_cron"]):
+        nxt = CronTrigger.from_crontab(expr, timezone="UTC").get_next_fire_time(None, base)
+        assert nxt - base < timedelta(days=1), f"{expr!r} is not firing daily"
