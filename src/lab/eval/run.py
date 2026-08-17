@@ -68,6 +68,8 @@ def resolved_forecast_rows(
                r.payout_yes, r.resolved_ts,
                f.ts AS forecast_ts, f.m3_randomized AS m3_randomized,
                f.m3_random_seed AS m3_random_seed,
+               f.depth_covariate AS depth_covariate, f.volume_24h AS volume_24h,
+               f.trades_24h AS trades_24h, f.hour_utc AS hour_utc,
                m.venue AS venue, m.category AS category, m.event_id AS event_id,
                m.tier AS tier
         FROM forecasts f

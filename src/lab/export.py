@@ -32,6 +32,14 @@ EXPORT_PAPER_FIELDS = [
     "condition_id", "venue", "category", "tier", "model_id", "forecast_ts",
     "p_yes", "p_market_at_ts", "spread_at_ts", "resolved_ts", "payout_yes",
     "event_id", "m3_randomized", "m3_random_seed",
+    # Phase 15 microstructure covariates. The phase exists to make heterogeneity
+    # analysis possible without ex-post reconstruction, so the replication
+    # dataset has to carry them -- omitting them left a reviewer unable to run
+    # the very splits the covariates were collected for. NULL on every row
+    # written before 2026-08-10 (they are forward-only, never backfilled) and
+    # `trades_24h` NULL throughout: no venue reports a 24h trade count on the
+    # objects the collector already fetches. See docs/paper_export_schema.md.
+    "depth_covariate", "volume_24h", "trades_24h", "hour_utc",
 ]
 
 

@@ -37,6 +37,10 @@ else needs redacting.
 | `event_id` | string or null | Cross-venue/negRisk event cluster id, for event-level clustering (null if this market was never linked to one). |
 | `m3_randomized` | int (0 or 1) | Phase 15 boundary-randomization tag: 1 iff this M3 forecast was a coin-flip member of the K-10..K+10 liquidity band. Always 0 for non-M3 models. |
 | `m3_random_seed` | string or null | The seed used, when `m3_randomized = 1`; null otherwise. |
+| `depth_covariate` | float or null | Top-of-book depth in USD (bid + ask) from the snapshot that supplied `p_market_at_ts`. **Null on every row frozen before 2026-08-10** — Phase 15's covariates are populated going forward and never reconstructed, so a null here means "not measured", never "measured as zero". |
+| `volume_24h` | float or null | The venue's own 24-hour volume for the market, captured at universe sync (Gamma `volume24hr`, Kalshi `volume_24h_fp`). Same forward-only rule and same null semantics as `depth_covariate`. |
+| `trades_24h` | int or null | **Null throughout.** Neither venue reports a 24-hour trade count on the objects the collector already fetches, and a per-market Data API call was not added at the collector's sustained request rate. Present in the schema so the column's absence is explicit rather than silent; reported as not collected, not as missing data. |
+| `hour_utc` | int (0–23) or null | Hour of day, UTC, at freeze time. Derivable from `forecast_ts`, stored because CLAUDE.md §5's schema names it. Null before 2026-08-10. |
 
 ## Manifest fields (`<path>.meta.json`)
 
