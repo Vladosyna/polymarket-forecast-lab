@@ -27,6 +27,7 @@ import yaml
 
 from lab.learn.refit import logit, sigmoid
 from lab.models.base import ForecastResult, clamp_p
+from lab.gitutil import push_with_rebase
 from lab.util import PROJECT_ROOT, now_utc_iso
 
 log = logging.getLogger(__name__)
@@ -91,7 +92,7 @@ def commit_and_push_markets_map(config: dict[str, Any], path: Path | None = None
     result: dict[str, Any] = {"committed": True}
     if config.get("cross_venue", {}).get("markets_map_push", True):
         try:
-            pushed = _run_git(["push"], PROJECT_ROOT)
+            pushed = push_with_rebase(PROJECT_ROOT)
             result["pushed"] = pushed.returncode == 0
             if not result["pushed"]:
                 result["push_stderr"] = pushed.stderr

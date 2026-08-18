@@ -33,6 +33,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from lab.gitutil import push_with_rebase
 from lab.util import PROJECT_ROOT, now_utc
 
 log = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ def commit_and_push_paper_export(config: dict[str, Any], conn) -> dict[str, Any]
                               "row_count": written["row_count"]}
     if config.get("paper_export", {}).get("push", True):
         try:
-            pushed = _run_git(["push"], PROJECT_ROOT)
+            pushed = push_with_rebase(PROJECT_ROOT)
             result["pushed"] = pushed.returncode == 0
             if not result["pushed"]:
                 result["push_stderr"] = pushed.stderr

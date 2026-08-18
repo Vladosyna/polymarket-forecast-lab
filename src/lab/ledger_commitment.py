@@ -34,6 +34,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from lab.gitutil import push_with_rebase
 from lab.util import PROJECT_ROOT, now_utc, now_utc_iso
 
 log = logging.getLogger(__name__)
@@ -273,7 +274,7 @@ def commit_and_push(config: dict[str, Any], conn: sqlite3.Connection) -> dict[st
     result: dict[str, Any] = {"committed": True, "dates": dates}
     if ledger_cfg.get("push", True):
         try:
-            pushed = _run_git(["push"], PROJECT_ROOT)
+            pushed = push_with_rebase(PROJECT_ROOT)
             result["pushed"] = pushed.returncode == 0
             if not result["pushed"]:
                 result["push_stderr"] = pushed.stderr
