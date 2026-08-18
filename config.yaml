@@ -60,16 +60,19 @@ collect:
     liquid: 5
     tail: 60
   # In-flight book fetches per Polymarket round; the TokenBucket still caps the
-  # rate (guardrail 8), this only decides how much of the permitted 10 req/s a
-  # latency-bound round can reach. Deliberately left at 1 -- today's sequential
-  # behaviour -- pending the operator decision recorded alongside it: measured
-  # 2026-08-18, the liquid round takes ~300s for 1,179 markets (3.9 req/s) and
-  # therefore occupies its whole 5-minute interval, starving the tail to a
-  # ~7-hour realized cadence against a 60-minute configured one, with 1,508 of
-  # 2,393 tail markets past guardrail 13's 90-minute bound at forecast time and
-  # 831 carrying no snapshot at all. Raising this to 8 is the fix, but it
-  # changes the observation grid mid-window and needs its own PAP addendum.
-  snapshot_concurrency: 1
+  # RATE (guardrail 8), this only decides how much of the permitted 10 req/s a
+  # latency-bound round can actually reach. Sequential awaits reached 3.9 req/s.
+  #
+  # 1 -> 8 on 2026-08-18 (PAP 9.21), as a margin decision rather than a rescue.
+  # The misfire fix earlier the same day (PAP 9.20) had already restored the
+  # tail to its configured 60-minute cadence, but the round itself takes ~12
+  # minutes, which puts the median tail snapshot age at 71.4 min against
+  # guardrail 13's 90-minute bound -- inside it, with 2% over, and with almost
+  # nothing to spare. One slow or skipped round pushes a large share of the
+  # tail past the bound and straight out of the forecast population, which is
+  # exactly the failure this project just spent a day tracing. At 8 in flight
+  # the round is ~5 minutes and the margin comes back.
+  snapshot_concurrency: 8
   # Was briefly 5/3000 on 2026-07-03 to clear a 10.8k resolution backlog
   # (a one-time consequence of the closed=false Gamma-filter bug fix); backlog
   # cleared to steady-state (~500, mostly genuinely-not-yet-resolved markets)

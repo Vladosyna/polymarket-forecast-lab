@@ -759,3 +759,30 @@ here alongside the primary estimate, matching the commitments in 9.18 and 9.19.
 req/s against a permitted 10), so raising it would cut the tail round further, but the misfire fix
 alone restores the configured cadence, and the concurrency choice is left as a separate, deliberate
 decision rather than folded into a defect fix.
+**Addendum 9.21 (2026-08-18).** Polymarket snapshot rounds become concurrent today. This is a margin
+decision, not a rescue, and it is filed separately from 9.20 because it is a choice rather than a
+defect fix.
+
+**Why it is being made.** 9.20's misfire fix restored the Polymarket tail to its configured
+sixty-minute cadence, and the result was measured four hours later: median tail snapshot age fell
+from 410 minutes to 71.4, and the share past guardrail 13's ninety-minute bound fell from 63% (1,508
+of 2,393) to 2% (35). That is inside the bound but with very little to spare, because the round
+itself still takes about twelve minutes at one request in flight — a market snapshotted early in a
+round is already twelve minutes older than one snapshotted late, on top of the sixty-minute spacing.
+A single slow or skipped round therefore pushes a large share of the tail past the bound and out of
+the forecast population, which is precisely the failure mode 9.17 and 9.20 document. Raising
+in-flight requests to eight brings the round to roughly five minutes and restores the margin.
+
+**Politeness is unchanged, and this is not a judgement call.** The per-venue token bucket caps the
+request *rate* exactly as before, so guardrail 8 holds identically; concurrency changes only how
+much of the already-permitted rate a latency-bound round can reach. Measured sequential throughput
+was 3.9 req/s against a configured ceiling of 10, so the ceiling — not the loop — becomes the
+binding constraint after this change, which is the intended state.
+
+**Standing under this plan.** The effect is a further tightening of the Polymarket snapshot grid on
+the same date as 9.19 and 9.20. **All three changes land on 2026-08-18, so the analysis faces one
+boundary rather than three**: any estimate whose population or grid depends on snapshot freshness —
+H3's lead-lag work most directly — should treat 2026-08-18 as a single discontinuity and not pool
+across it. The post-2026-08-18 robustness checks already committed in 9.18, 9.19 and 9.20 cover this
+change as well; no additional check is introduced, because a fourth restriction to the same date
+would report the same rows.
