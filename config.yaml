@@ -59,6 +59,17 @@ collect:
   snapshot_interval_minutes:
     liquid: 5
     tail: 60
+  # In-flight book fetches per Polymarket round; the TokenBucket still caps the
+  # rate (guardrail 8), this only decides how much of the permitted 10 req/s a
+  # latency-bound round can reach. Deliberately left at 1 -- today's sequential
+  # behaviour -- pending the operator decision recorded alongside it: measured
+  # 2026-08-18, the liquid round takes ~300s for 1,179 markets (3.9 req/s) and
+  # therefore occupies its whole 5-minute interval, starving the tail to a
+  # ~7-hour realized cadence against a 60-minute configured one, with 1,508 of
+  # 2,393 tail markets past guardrail 13's 90-minute bound at forecast time and
+  # 831 carrying no snapshot at all. Raising this to 8 is the fix, but it
+  # changes the observation grid mid-window and needs its own PAP addendum.
+  snapshot_concurrency: 1
   # Was briefly 5/3000 on 2026-07-03 to clear a 10.8k resolution backlog
   # (a one-time consequence of the closed=false Gamma-filter bug fix); backlog
   # cleared to steady-state (~500, mostly genuinely-not-yet-resolved markets)
@@ -435,7 +446,28 @@ venues:
     # selects the price-freshness bound (guardrail 13), which should be read
     # against the cadence actually achieved. Polymarket's loops are measured at
     # exactly their configured 5/60 minutes and are unchanged.
-    snapshot_interval_minutes: 30
+    # Per tier from 2026-08-18, and the round is now concurrent. One venue-wide
+    # job on one interval had made the liquid tier inherit the tail's cadence:
+    # measured 2026-08-17, a full round took ~60 minutes for 3,966 markets plus
+    # 461 order books, so APScheduler dropped every second firing of a 30-minute
+    # interval and the real grid was hourly. Guardrail 13 gives a liquid-tier
+    # price 15 minutes before it is too stale to pair a forecast against, so
+    # 443 of the 464 liquid Kalshi markets were being dropped at forecast time
+    # EVERY night -- and those 464 are exactly the markets PAP addenda 9.9/9.10
+    # promoted onto the measured-depth bar, i.e. the best of the venue.
+    #
+    # Sizing: liquid is 464 markets x 2 requests (market + order book) = ~928,
+    # tail is ~3,500 x 1. At the 8 req/s ceiling below that is ~2 minutes and
+    # ~7.3 minutes respectively, both comfortably inside their intervals. The
+    # old round only reached 1.2 req/s because every await was sequential, not
+    # because the limiter was binding.
+    snapshot_interval_minutes:
+      liquid: 5
+      tail: 30
+    # In-flight requests per round. The TokenBucket still caps the RATE, so
+    # guardrail 8 holds regardless -- this only decides how much of the
+    # already-permitted rate a latency-bound round can actually reach.
+    snapshot_concurrency: 8
     resolution_poll_minutes: 30
     rate_limit:
       requests_per_second: 8   # brief section 3: Kalshi tolerates ~10 req/s; stay under it

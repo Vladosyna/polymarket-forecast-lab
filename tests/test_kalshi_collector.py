@@ -448,3 +448,96 @@ def test_kalshi_snapshots_carry_open_interest():
     # and a venue that reports none leaves it NULL rather than 0
     from lab.store.snapshots import SNAPSHOT_SCHEMA
     assert "open_interest" in SNAPSHOT_SCHEMA
+
+
+def test_snapshot_kalshi_rounds_are_per_tier(tmp_path):
+    """One venue-wide job made the liquid tier inherit the tail's ~60-minute
+    cadence, against guardrail 13's 15-minute liquid freshness bound: 443 of
+    464 liquid Kalshi markets were dropped at forecast time every night. The
+    liquid round must cover the liquid tier only, on its own bucket, with
+    depth; the tail round must not pay for order books."""
+    import asyncio
+
+    from lab.api.kalshi import KalshiMarket
+    from lab.collect.kalshi_collector import snapshot_kalshi
+    from lab.store import db
+    from lab.store.snapshots import SnapshotStore
+
+    conn = db.connect(tmp_path / "lab.db")
+    for i, tier in enumerate(["liquid", "tail", "tail", "ignored"]):
+        db.upsert_market(conn, {
+            "condition_id": f"kalshi:T{i}", "venue": "kalshi", "venue_native_id": f"T{i}",
+            "slug": f"t{i}", "question": "Q?", "category": "economics", "description": "d",
+            "end_date_iso": "2027-01-01T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+            "neg_risk": 0, "active": 1, "closed": 0, "liquidity_num": 1.0, "volume_num": 1.0,
+            "tier": tier,
+        })
+    conn.commit()
+
+    books_asked: list[str] = []
+
+    class _Client:
+        async def market(self, ticker):
+            return KalshiMarket.model_validate({
+                "ticker": ticker, "yes_bid_dollars": "0.40", "yes_ask_dollars": "0.42",
+                "yes_bid_size_fp": "100", "yes_ask_size_fp": "200", "volume_fp": "1",
+            })
+
+        async def orderbook(self, ticker):
+            books_asked.append(ticker)
+            return None
+
+    cfg = {"venues": {"kalshi": {"snapshot_interval_minutes": {"liquid": 5, "tail": 30},
+                                 "snapshot_concurrency": 4}},
+           "collect": {"book_depth_levels": 10}}
+    store = SnapshotStore(tmp_path / "snapshots")
+
+    assert asyncio.run(snapshot_kalshi(_Client(), conn, store, cfg, tier="liquid")) == 1
+    assert books_asked == ["T0"]          # depth for the liquid tier only
+
+    books_asked.clear()
+    # tail round: everything not liquid, and no order-book requests at all
+    assert asyncio.run(snapshot_kalshi(_Client(), conn, store, cfg, tier="tail")) == 3
+    assert books_asked == []
+    conn.close()
+
+
+def test_snapshot_round_runs_concurrently_within_its_bound(tmp_path):
+    """The rounds were latency-bound, not rate-bound: a full Kalshi round took
+    ~60 minutes at 1.2 req/s against an 8 req/s ceiling because every await was
+    sequential. Concurrency must actually overlap, and must respect its bound
+    -- politeness stays with the TokenBucket, which caps the rate either way."""
+    import asyncio
+
+    from lab.api.kalshi import KalshiMarket
+    from lab.collect.kalshi_collector import snapshot_kalshi_markets
+    from lab.store.snapshots import SnapshotStore
+
+    class _Client:
+        def __init__(self):
+            self.in_flight = 0
+            self.peak = 0
+
+        async def market(self, ticker):
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+            await asyncio.sleep(0.01)
+            self.in_flight -= 1
+            return KalshiMarket.model_validate({
+                "ticker": ticker, "yes_bid_dollars": "0.40", "yes_ask_dollars": "0.42",
+                "volume_fp": "1",
+            })
+
+    markets = [{"condition_id": f"kalshi:T{i}", "venue_native_id": f"T{i}"} for i in range(20)]
+
+    seq = _Client()
+    store = SnapshotStore(tmp_path / "seq")
+    assert asyncio.run(snapshot_kalshi_markets(seq, store, markets,
+                                               "2026-08-18T00:00:00+00:00", concurrency=1)) == 20
+    assert seq.peak == 1                      # default is exactly the old behaviour
+
+    par = _Client()
+    store2 = SnapshotStore(tmp_path / "par")
+    assert asyncio.run(snapshot_kalshi_markets(par, store2, markets,
+                                               "2026-08-18T00:00:00+00:00", concurrency=4)) == 20
+    assert 1 < par.peak <= 4                  # overlapped, and never past the bound

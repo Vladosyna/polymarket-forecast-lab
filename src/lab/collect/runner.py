@@ -233,9 +233,17 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
         if not is_paused(config):
             await sync_kalshi_universe(kalshi, conn, config, store)
 
-    async def job_kalshi_snapshot() -> None:
+    # Split per tier on 2026-08-18. One venue-wide job meant the liquid tier
+    # inherited the tail's cadence -- a ~60-minute round against guardrail 13's
+    # 15-minute liquid freshness bound, so 443 of 464 liquid Kalshi markets
+    # were dropped at forecast time every night.
+    async def job_kalshi_snap_liquid() -> None:
         if not is_paused(config):
-            await snapshot_kalshi(kalshi, conn, store, config)
+            await snapshot_kalshi(kalshi, conn, store, config, tier="liquid")
+
+    async def job_kalshi_snap_tail() -> None:
+        if not is_paused(config):
+            await snapshot_kalshi(kalshi, conn, store, config, tier="tail")
 
     async def job_kalshi_resolutions() -> None:
         if not is_paused(config):
@@ -259,8 +267,13 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
 
     scheduler.add_job(job_kalshi_sync, "interval",
                       minutes=venues_cfg["kalshi"]["sync_interval_minutes"])
-    scheduler.add_job(job_kalshi_snapshot, "interval",
-                      minutes=venues_cfg["kalshi"]["snapshot_interval_minutes"])
+    kalshi_cadence = venues_cfg["kalshi"]["snapshot_interval_minutes"]
+    # coalesce/max_instances stated rather than left to the default: a round
+    # that overruns its interval must skip the missed firings, not queue them.
+    scheduler.add_job(job_kalshi_snap_liquid, "interval", minutes=kalshi_cadence["liquid"],
+                      max_instances=1, coalesce=True)
+    scheduler.add_job(job_kalshi_snap_tail, "interval", minutes=kalshi_cadence["tail"],
+                      max_instances=1, coalesce=True)
     scheduler.add_job(job_kalshi_resolutions, "interval",
                       minutes=venues_cfg["kalshi"]["resolution_poll_minutes"])
     scheduler.add_job(job_metaculus_snapshot, "interval",
@@ -282,7 +295,8 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
             "snap_tail": job_snap_tail,
             "resolutions": job_resolutions,
             "kalshi_sync": job_kalshi_sync,
-            "kalshi_snapshot": job_kalshi_snapshot,
+            "kalshi_snap_liquid": job_kalshi_snap_liquid,
+            "kalshi_snap_tail": job_kalshi_snap_tail,
             "kalshi_resolutions": job_kalshi_resolutions,
             "metaculus_snapshot": job_metaculus_snapshot,
             "metaculus_resolutions": job_metaculus_resolutions,
@@ -301,7 +315,7 @@ async def _startup_collection_cycle(ctx: CollectContext) -> None:
     # Phase 10: external venues. Each is independently fail-soft (guardrail 9)
     # inside its own collector module -- one venue's outage never blocks
     # another's startup pass.
-    for name in ("kalshi_sync", "kalshi_snapshot", "kalshi_resolutions",
+    for name in ("kalshi_sync", "kalshi_snap_liquid", "kalshi_snap_tail", "kalshi_resolutions",
                  "metaculus_snapshot", "metaculus_resolutions", "manifold_sync",
                  "snap_matched"):
         try:

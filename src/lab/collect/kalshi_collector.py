@@ -29,6 +29,7 @@ Assumptions (guardrail 1 -- stated rather than silently picked):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -269,7 +270,7 @@ def _top_of_book_usd(price: float | None, size: float | None) -> float | None:
 
 async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
                                  markets: list[dict], ts_bucket: str,
-                                 depth_levels: int = 0) -> int:
+                                 depth_levels: int = 0, concurrency: int = 1) -> int:
     """Snapshot an explicit set of Kalshi markets. Shared by snapshot_kalshi
     (every open Kalshi market) and Phase 17 item 3's per-confirmed-pair
     high-frequency job (a small, explicit condition_id list).
@@ -280,18 +281,28 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
     NULL unconditionally, which made every Kalshi market fail the shadow
     portfolio's own depth filter (brief section 8: top-of-book depth >= $500)
     even before its tier excluded it.
+
+    `concurrency` bounds how many fetches are in flight. Measured 2026-08-17,
+    a full Kalshi round took ~60 minutes for 3,966 markets plus 461 order
+    books -- 1.2 req/s against a configured ceiling of 8, because every await
+    was strictly sequential. That is also why the round overran its own
+    30-minute interval and APScheduler silently dropped every second firing.
+    The TokenBucket still caps the rate per request, so guardrail 8 holds
+    whatever this is set to; 1 reproduces the old sequential behaviour.
     """
-    rows: list[dict] = []
-    for row in markets:
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one(row: dict) -> dict | None:
         ticker = row["venue_native_id"]
-        try:
-            m = await kalshi.market(ticker)
-        except Exception:
-            log.warning("kalshi snapshot: market fetch failed",
-                        extra={"ctx": {"condition_id": row["condition_id"]}})
-            continue
+        async with sem:
+            try:
+                m = await kalshi.market(ticker)
+            except Exception:
+                log.warning("kalshi snapshot: market fetch failed",
+                            extra={"ctx": {"condition_id": row["condition_id"]}})
+                return None
         if m is None or m.yes_price is None:
-            continue
+            return None
         spread = None
         if m.yes_bid_dollars is not None and m.yes_ask_dollars is not None:
             spread = m.yes_ask_dollars - m.yes_bid_dollars
@@ -310,13 +321,14 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
             # The full ladder, for the liquid tier only: unlike the scalars
             # above it costs a request each, and unlike them it cannot be
             # reconstructed later (same reasoning as the Polymarket store).
-            book = await kalshi.orderbook(ticker)
+            async with sem:
+                book = await kalshi.orderbook(ticker)
             if book is not None and book.bids:
                 bids_json = json.dumps(book.top_levels("bid", depth_levels))
             if book is not None and book.asks:
                 asks_json = json.dumps(book.top_levels("ask", depth_levels))
 
-        rows.append({
+        return {
             "ts": ts_bucket,
             "condition_id": row["condition_id"],
             "token_id_yes": None,
@@ -331,32 +343,44 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
             "bids_json": bids_json,
             "asks_json": asks_json,
             "venue": "kalshi",
-        })
+        }
+
+    rows = [r for r in await asyncio.gather(*(_one(m) for m in markets)) if r is not None]
     return store.append(rows)
 
 
-async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore, config: dict[str, Any]) -> int:
-    """Single-tier snapshot round for Kalshi markets. Returns rows written (post-dedup)."""
-    markets = tracked_kalshi_markets(conn)
+async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore,
+                         config: dict[str, Any], tier: str = "liquid") -> int:
+    """One snapshot round for a single Kalshi tier. Returns rows written.
+
+    Split per tier on 2026-08-18. Until then one job snapshotted the whole
+    venue on one interval, which made the liquid tier's cadence the tail's:
+    ~60 minutes in practice. Guardrail 13 allows a liquid-tier price 15
+    minutes of age, so 443 of Kalshi's 464 liquid markets failed the
+    freshness gate at forecast time EVERY night and were dropped -- and those
+    464 are precisely the markets addenda 9.9/9.10 promoted onto the measured
+    depth bar. A tier whose freshness bound is 15 minutes has to be collected
+    on a cadence that can meet it.
+    """
+    markets = [m for m in tracked_kalshi_markets(conn)
+               if (m.get("tier") == "liquid") == (tier == "liquid")]
     if not markets:
-        log.info("kalshi snapshot round: no markets", extra={"ctx": {}})
+        log.info("kalshi snapshot round: no markets", extra={"ctx": {"tier": tier}})
         return 0
-    bucket_minutes = config["venues"]["kalshi"]["snapshot_interval_minutes"]
+    bucket_minutes = config["venues"]["kalshi"]["snapshot_interval_minutes"][tier]
     ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
 
     # Order books only for the liquid tier: one extra request each, and the
     # tail is thousands of markets. The liquid tier is what the shadow
     # portfolio scans and what depth-based tiering would refine, so that is
     # where the measurement is worth its request budget (guardrail 8).
-    depth_levels = config["collect"].get("book_depth_levels", 10)
-    liquid = [m for m in markets if m.get("tier") == "liquid"]
-    rest = [m for m in markets if m.get("tier") != "liquid"]
-
-    written = await snapshot_kalshi_markets(kalshi, store, liquid, ts_bucket,
-                                            depth_levels=depth_levels)
-    written += await snapshot_kalshi_markets(kalshi, store, rest, ts_bucket)
+    depth_levels = config["collect"].get("book_depth_levels", 10) if tier == "liquid" else 0
+    written = await snapshot_kalshi_markets(
+        kalshi, store, markets, ts_bucket, depth_levels=depth_levels,
+        concurrency=config["venues"]["kalshi"].get("snapshot_concurrency", 1))
     log.info("kalshi snapshot round done",
-             extra={"ctx": {"markets": len(markets), "with_depth": len(liquid),
+             extra={"ctx": {"tier": tier, "markets": len(markets),
+                            "with_depth": len(markets) if depth_levels else 0,
                             "written": written}})
     return written
 

@@ -680,3 +680,45 @@ the primary estimate over the full window.
 08-14 and 08-16 produced no simulated entries either. Those three days are excluded from any
 per-day shadow-portfolio statistic for the same reason as 9.17's window: the absence is a pipeline
 artifact, not a decision not to trade.
+**Addendum 9.19 (2026-08-18).** Kalshi's liquid tier is collected on its own five-minute cadence
+from today. This restores markets to the forecast population that were being dropped silently, so
+it is a population change recorded before it takes effect.
+
+**What was wrong.** One snapshot job covered the whole Kalshi venue on one interval, so the liquid
+tier inherited the tail's cadence. Measured 2026-08-17, a full round took about sixty minutes for
+3,966 markets plus 461 order books — 1.2 requests/second against a configured ceiling of 8 — so
+APScheduler dropped every second firing of the nominal thirty-minute interval and the realized grid
+was hourly. Guardrail 13 allows a liquid-tier price fifteen minutes of age before a forecast may
+not be paired against it. The two numbers are irreconcilable: measured on 2026-08-18, the median
+snapshot age across Kalshi's 464 liquid markets was 50.2 minutes and **443 of the 464 failed the
+freshness gate**, every night, silently. Those 464 are exactly the markets addenda 9.9 and 9.10
+promoted onto the measured-depth bar — the subset this plan argued was the venue's most
+informative.
+
+**Why the round was slow, and what changed.** It was latency-bound, not rate-bound: every request
+awaited the previous one, so the round reached 15% of the rate the limiter already permitted.
+Snapshot rounds now issue bounded-concurrent requests (8 in flight for Kalshi), and the venue is
+split into a five-minute liquid round and a thirty-minute tail round. **Politeness is unchanged and
+is not a matter of judgement here:** the per-venue token bucket caps the request *rate* exactly as
+before, so guardrail 8 holds identically at any concurrency; what changed is only how much of the
+already-permitted rate a round can reach. Expected round costs at the 8 req/s ceiling: ~928
+requests (~2 min) for the liquid round, ~3,500 (~7.3 min) for the tail — each inside its interval,
+with headroom.
+
+**Standing under this plan.** Two effects, both declared. First, Kalshi's liquid-tier snapshot grid
+becomes 5-minute from 2026-08-18, against a ~60-minute grid before it; any analysis using
+Kalshi snapshot spacing — H3's lead-lag work in particular — must treat 2026-08-18 as a grid
+discontinuity and not pool across it. Second, and larger, roughly 443 Kalshi liquid markets a day
+re-enter the forecastable population from today, having been absent since the tier was created.
+Their absence was not random: they are the venue's deepest-book markets, so the pre-2026-08-18
+Kalshi forecast population is biased *away* from its own liquid tier. Kalshi skill estimates
+spanning the boundary must report this, and a robustness check restricted to post-2026-08-18
+Kalshi forecasts is committed here alongside the primary estimate.
+
+**Not applied to Polymarket.** The same latency-bound pattern exists there (the liquid round takes
+~300s for 1,179 markets, 3.9 req/s against a ceiling of 10, which starves the tail to a ~7-hour
+realized cadence with 1,508 of 2,393 tail markets past guardrail 13's 90-minute bound and 831
+carrying no snapshot at all). The mechanism is now in place but its concurrency is left at 1 —
+today's exact behaviour — pending a deliberate decision, which will get its own addendum. Recording
+the measurement here so that the decision, whichever way it goes, is on the record before it is
+made rather than after.

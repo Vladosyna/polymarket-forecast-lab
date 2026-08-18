@@ -9,6 +9,7 @@ it, future microstructure work might.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -46,22 +47,34 @@ def tracked_markets_by_ids(conn, condition_ids: list[str]) -> list[dict]:
 
 
 async def snapshot_markets(clob: ClobClient, store: SnapshotStore, markets: list[dict],
-                          ts_bucket: str, depth_levels: int) -> int:
+                          ts_bucket: str, depth_levels: int, concurrency: int = 1) -> int:
     """Snapshot an explicit set of markets. Shared by snapshot_tier (a whole
     tier) and Phase 17 item 3's per-confirmed-pair high-frequency job (a
-    small, explicit condition_id list) -- one book-fetch loop, not two."""
-    rows: list[dict] = []
-    for m in markets:
-        try:
-            book = await clob.book(m["token_id_yes"])
-        except Exception:
-            # Fail soft: one bad market never kills the round (guardrail 9).
-            log.warning("snapshot: book fetch failed",
-                        extra={"ctx": {"condition_id": m["condition_id"]}})
-            continue
+    small, explicit condition_id list) -- one book-fetch loop, not two.
+
+    `concurrency` is how many book fetches may be in flight at once. The round
+    is latency-bound, not rate-bound: measured 2026-08-17, the liquid tier ran
+    1,179 markets in ~300s (3.9 req/s) against a configured ceiling of 10, so
+    strictly sequential awaits were leaving ~60% of the polite budget unused
+    while the tail starved behind them. Politeness does not depend on this
+    number -- the TokenBucket still caps the rate for every request, so
+    guardrail 8 holds at any concurrency; what this controls is only how much
+    of the allowed rate the round can actually reach. Defaults to 1, which is
+    exactly the sequential behaviour every caller had before."""
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one(m: dict) -> dict | None:
+        async with sem:
+            try:
+                book = await clob.book(m["token_id_yes"])
+            except Exception:
+                # Fail soft: one bad market never kills the round (guardrail 9).
+                log.warning("snapshot: book fetch failed",
+                            extra={"ctx": {"condition_id": m["condition_id"]}})
+                return None
         if book.mid is None:
-            continue
-        rows.append({
+            return None
+        return {
             "ts": ts_bucket,
             "condition_id": m["condition_id"],
             "token_id_yes": m["token_id_yes"],
@@ -74,7 +87,9 @@ async def snapshot_markets(clob: ClobClient, store: SnapshotStore, markets: list
             "last_trade_price": None,  # populated later if a model needs it
             "bids_json": json.dumps(book.top_levels("bid", depth_levels)),
             "asks_json": json.dumps(book.top_levels("ask", depth_levels)),
-        })
+        }
+
+    rows = [r for r in await asyncio.gather(*(_one(m) for m in markets)) if r is not None]
     return store.append(rows)
 
 
@@ -90,7 +105,8 @@ async def snapshot_tier(
     ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
     depth_levels = config["collect"].get("book_depth_levels", 10)
 
-    written = await snapshot_markets(clob, store, markets, ts_bucket, depth_levels)
+    written = await snapshot_markets(clob, store, markets, ts_bucket, depth_levels,
+                                     concurrency=config["collect"].get("snapshot_concurrency", 1))
     log.info("snapshot round done",
              extra={"ctx": {"tier": tier, "markets": len(markets), "written": written}})
     return written
