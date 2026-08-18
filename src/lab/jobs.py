@@ -19,23 +19,36 @@ log = logging.getLogger(__name__)
 
 def run_forecast_job(config: dict[str, Any]) -> dict[str, Any]:
     """Full forecast pass: base models + M6 coherence + M7 cross-venue + M4 ensemble."""
-    from lab.forecast import build_default_models, run_forecasts
+    from lab.forecast import build_default_models, eligible_market_states, run_forecasts
     from lab.learn.refit import load_active_artifact
     from lab.models.m4_ensemble import M4Ensemble
     from lab.models.m6_consistency import scan_universe, write_m6_forecasts
     from lab.models.m7_crossvenue import scan_confirmed_pairs, write_m7_forecasts
+    from lab.util import now_utc
 
     conn = db.connect(config["storage"]["db_path"])
     store = SnapshotStore(config["storage"]["snapshots_dir"])
     try:
-        counts = run_forecasts(conn, store, build_default_models(conn, config, store), config)
+        # One eligibility view and one freeze timestamp for the whole bundle.
+        # The ensemble pass runs 13-18 minutes after the base pass (M3's LLM
+        # calls and the M6/M7 scans sit between them); deriving its own
+        # eligibility there re-applied guardrail 13's 15-minute freshness
+        # window to prices the base pass had already frozen, which emptied M4
+        # entirely on any day the collector landed no snapshot round in the
+        # gap. See run_forecasts' docstring for the measured damage.
+        states = eligible_market_states(conn, store, config)
+        ts = now_utc().isoformat(timespec="seconds")
+        counts = run_forecasts(conn, store, build_default_models(conn, config, store), config,
+                               states=states, ts=ts)
         findings = asyncio.run(scan_universe(conn, store, config))
         counts["m6_written"] = write_m6_forecasts(conn, store, findings, config)
         m7_results = asyncio.run(scan_confirmed_pairs(conn, store, config))
         counts["m7_written"] = write_m7_forecasts(conn, store, m7_results, config)
         m4 = M4Ensemble(conn, load_active_artifact(config, "m4_weights"),
-                        load_active_artifact(config, "m4_extremization"))
-        counts["m4_written"] = run_forecasts(conn, store, [m4], config)["written"]
+                        load_active_artifact(config, "m4_extremization"),
+                        pool_date=ts[:10])
+        counts["m4_written"] = run_forecasts(conn, store, [m4], config,
+                                             states=states, ts=ts)["written"]
     finally:
         conn.close()
     log.info("forecast job complete", extra={"ctx": counts})

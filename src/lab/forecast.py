@@ -261,13 +261,36 @@ def price_moves_24h(store: SnapshotStore, config: dict[str, Any]) -> dict[str, f
 
 
 def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
-                  config: dict[str, Any]) -> dict[str, int]:
+                  config: dict[str, Any], states: list[MarketState] | None = None,
+                  ts: str | None = None) -> dict[str, int]:
+    """Run `models` over the eligible universe, appending one row per model
+    per market that is due.
+
+    `states` and `ts` let a caller run SEVERAL passes against one frozen view
+    of the universe. The M4 pass needs exactly that: it pools the rows the
+    base pass just wrote, so it has to be offered the same markets and paired
+    against the same price those rows were paired against. Re-deriving
+    eligibility for it -- 13 to 18 minutes later, after M3's LLM calls and the
+    M6/M7 scans -- reopened guardrail 13's freshness window (15 min on the
+    liquid tier) against every market the collector had not re-snapshotted in
+    the gap, so the ensemble silently emptied on days when no snapshot round
+    landed inside it: 7 M4 rows against 524 m0 rows on 2026-08-14, 12 against
+    499 on 2026-08-16, against a ratio of exactly 1.00 on every other day.
+    Sharing `ts` also fixes a quieter defect of the same shape -- M4's
+    p_market_at_ts was read up to 18 minutes after the prices its own members
+    had been pooled from, so its paired comparison was not against the same
+    price its inputs saw.
+
+    Both parameters default to the single-pass behaviour every other caller
+    already has."""
     from lab.news.extract import BudgetExceeded
 
-    states = eligible_market_states(conn, store, config)
+    if states is None:
+        states = eligible_market_states(conn, store, config)
     moves = price_moves_24h(store, config)
     counts = {"eligible_markets": len(states), "written": 0, "abstained": 0, "not_due": 0}
-    ts = now_utc().isoformat(timespec="seconds")
+    if ts is None:
+        ts = now_utc().isoformat(timespec="seconds")
     exhausted: set[str] = set()  # models past their daily budget
     for state in states:
         for model in models:
@@ -316,7 +339,11 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
             })
             counts["written"] += 1
     conn.commit()
-    log.info("forecast run complete", extra={"ctx": counts})
+    # `models` in the log line, not just the counts: the job makes two passes
+    # and the 2026-08-14 ensemble outage was invisible for six days partly
+    # because both passes logged an identical-looking "forecast run complete".
+    log.info("forecast run complete",
+             extra={"ctx": {**counts, "models": [m.model_id for m in models]}})
     return counts
 
 

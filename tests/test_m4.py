@@ -8,6 +8,7 @@ from lab.learn.refit import logit, sigmoid
 from lab.models.base import MarketState
 from lab.models.m4_ensemble import M4Ensemble, fit_m4_weights
 from lab.store import db
+from lab.store.snapshots import SnapshotStore
 from lab.util import load_config, now_utc
 
 
@@ -177,3 +178,41 @@ def test_extremization_fully_correlated_pair_collapses_to_identity(conn):
     extremized = M4Ensemble(conn, None, ext_artifact).forecast(_state(), {})
     assert extremized.meta["extremization_a_eff"] == pytest.approx(1.0)
     assert extremized.p_yes == pytest.approx(plain.p_yes)
+def test_second_pass_reuses_the_frozen_state_set(conn, tmp_path, monkeypatch):
+    """Regression, 2026-08-14 and 2026-08-16: the ensemble ran as a second
+    `run_forecasts` pass that derived its OWN eligibility, 13-18 minutes after
+    the base pass. Guardrail 13's 15-minute freshness window had reopened by
+    then against every market the collector had not re-snapshotted in the gap,
+    so M4 wrote 7 rows against m0's 524 (and 12 against 499), while the ratio
+    is exactly 1.00 on every other day. A caller that supplies states must be
+    given exactly those states, and the shared `ts` must be the row's freeze
+    moment -- M4 is pooling prices frozen then, not now."""
+    import lab.forecast as fc
+    from lab.models.m0_market import M0Market
+
+    def _must_not_run(*_a, **_k):
+        raise AssertionError("eligibility re-derived despite caller-supplied states")
+
+    monkeypatch.setattr(fc, "eligible_market_states", _must_not_run)
+    frozen_ts = "2026-08-14T02:00:02+00:00"
+    counts = fc.run_forecasts(conn, SnapshotStore(tmp_path / "snapshots"), [M0Market()],
+                              load_config(), states=[_state("0xfrozen")], ts=frozen_ts)
+
+    assert counts["eligible_markets"] == 1
+    assert counts["written"] == 1
+    row = conn.execute("SELECT ts, model_id FROM forecasts").fetchone()
+    assert row["ts"] == frozen_ts
+    assert row["model_id"] == "m0_market"
+
+
+def test_pool_date_anchors_the_window_across_midnight(conn):
+    """`date('now')` made the pool window follow wall-clock rather than the run:
+    a bundle whose base pass lands before midnight and whose ensemble pass lands
+    after it would pool nothing and abstain everywhere. pool_date pins the
+    window to the run that wrote the rows."""
+    _add_forecast(conn, "0x1", "m0_market", 0.5, ts="2026-08-14T23:58:00+00:00")
+    _add_forecast(conn, "0x1", "m1_debiased", 0.7, ts="2026-08-14T23:58:00+00:00")
+    conn.commit()
+
+    assert M4Ensemble(conn, None, pool_date="2026-08-14").forecast(_state(), {}) is not None
+    assert M4Ensemble(conn, None, pool_date="2026-08-15").forecast(_state(), {}) is None

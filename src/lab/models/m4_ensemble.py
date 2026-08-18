@@ -86,8 +86,17 @@ class M4Ensemble:
     model_id = "m4_ensemble"
 
     def __init__(self, conn, weights_artifact: dict[str, Any] | None,
-                extremization_artifact: dict[str, Any] | None = None) -> None:
+                extremization_artifact: dict[str, Any] | None = None,
+                pool_date: str | None = None) -> None:
         self.conn = conn
+        # The UTC day (YYYY-MM-DD) whose forecasts this instance pools. None
+        # keeps the original behaviour -- the wall-clock day at pool time --
+        # which is correct for any caller running inside one day. The forecast
+        # job passes its own run timestamp so that a bundle starting before
+        # midnight and reaching the ensemble after it still pools the rows it
+        # actually wrote, instead of pooling nothing and abstaining on every
+        # market.
+        self.pool_date = pool_date
         self.artifact = weights_artifact or {"categories": {}}
         # Phase 13: per-category extremization exponent, correlation-discounted
         # at pool time using the ACTUAL member count present (not the frozen
@@ -100,12 +109,12 @@ class M4Ensemble:
             """
             SELECT f.model_id, f.p_yes FROM forecasts f
             JOIN (SELECT model_id, MAX(ts) AS ts FROM forecasts
-                  WHERE condition_id = ? AND date(ts) = date('now')
+                  WHERE condition_id = ? AND date(ts) = coalesce(?, date('now'))
                   GROUP BY model_id) latest
             ON latest.model_id = f.model_id AND latest.ts = f.ts
             WHERE f.condition_id = ? AND f.model_id IN ({})
             """.format(",".join("?" for _ in POOLABLE)),
-            (condition_id, condition_id, *POOLABLE),
+            (condition_id, self.pool_date, condition_id, *POOLABLE),
         ).fetchall()
         return {r["model_id"]: r["p_yes"] for r in rows}
 
