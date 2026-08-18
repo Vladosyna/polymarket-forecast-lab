@@ -600,3 +600,83 @@ $0.15/day against a $5.00 cap. Starting today, it has roughly 142 days to the fr
 resolved-forecast count will be small — on M3's own observed resolution yield, plausibly tens of
 event clusters rather than hundreds. It will be reported at whatever honesty tier that earns, and a
 null result on this comparison is a reportable result, not a failed experiment.
+**Addendum 9.17 (2026-08-18).** Kalshi's forecast coverage collapsed for six consecutive days,
+2026-08-11 through 2026-08-16 inclusive, and is disclosed here rather than repaired.
+
+**The measurement.** Distinct Kalshi markets receiving at least one forecast per day: 2,676 on
+08-10, then **15, 20, 20, 20, 21, 23** on 08-11 through 08-16, then 2,021 on 08-17 and 1,936 on
+08-18. Under one percent of the venue's normal coverage, for six days. It took the rest of the
+pipeline with it: the models that forecast the whole eligible universe under guardrail 12
+(`m0_market`, `m1_debiased`, `m2_baserate`) fell from ~3,300 rows a day to ~500, and
+**`m5_nowcast` wrote exactly zero forecasts on all six days** — 5,167 of its 5,554 lifetime rows
+are Kalshi, so the venue *is* that model's population, and `CLAUDE.md` §6 calls its class the
+highest-conviction edge in the design.
+
+**The cause, established by elimination rather than assumed.** Four candidate mechanisms were
+measured and cleared. Universe membership: `universe_log` records 0 to 15 Kalshi exclusions a day
+across the window, so nothing was being excluded at sync time. Snapshot availability: 3,242 to
+3,538 distinct Kalshi markets were snapshotted on each of those days. Snapshot freshness: the last
+Kalshi round before the 02:00 UTC forecast pass was stamped 01:58 on **every** day in the window,
+an age of two minutes. Price validity: zero null `mid` values, with 2,164 to 2,458 markets inside
+`forecast_price_bounds` daily.
+
+What did change is the end-date guard added to `eligible_market_states` on 2026-08-10 — addendum
+9.11's own remedy for forecasts written on already-ended Kalshi markets. Kalshi's universe sync was
+still starving at that point (9.11: 82% of markets un-resynced for over three days), so
+`end_date_iso` was stale across most of the venue and recorded dates that had already passed. **A
+correct guard fired on incorrect data.** The survivors prove it: of the 20 Kalshi markets forecast
+on 2026-08-14, 9 were `liquid` and 11 `tail`, and every one carries an end date between 2026-09 and
+2029-11 — exactly the markets whose stale end dates had not yet elapsed. The same tier split on
+2026-08-18 is 12 `liquid` and 1,911 `tail`. Coverage returned when the sync-rotation fix reached
+this host on 2026-08-17; no forecastable Kalshi market carries a past end date today (0 of 3,920).
+
+**Why it stayed invisible for six days.** The guard counts and logs its own exclusions
+(`forecast: skipped markets already past their end date`). Nothing reads that counter, and the
+host's journal retention is roughly sixteen hours under the collector's log volume, so by the time
+anyone looked the evidence of the first five days was gone. This is a monitoring gap, not a
+measurement one, and it is recorded here because the same shape will recur.
+
+**Standing under this plan.** Not repairable. The ledger is append-only and forecasts cannot be
+written retroactively without destroying freeze semantics — the point of the ledger. The window
+**2026-08-11 to 2026-08-16 inclusive is therefore an exclusion window for any Kalshi-population
+statistic**, excluded rather than down-weighted. The forecasts written inside it are not themselves
+suspect — each was frozen against a fresh price like any other — but the ~20 markets a day that
+survived are a *long-dated* subset selected by the very defect under discussion, so they must never
+be read as a random sample of the venue. Kalshi's accrual toward H1 and H2 loses six days; the
+realized counts will be reported as they stand, at whatever honesty tier they earn, with this
+window shown rather than smoothed over.
+
+**Addendum 9.18 (2026-08-18).** The M4 ensemble silently produced almost nothing on three days, and
+its pairing timestamp changes from today. Both are disclosed here; neither is repaired.
+
+**The measurement.** The ratio of `m4_ensemble` rows to `m0_market` rows is exactly 1.00 on every
+day since 2026-07-29 except three: 2026-08-11 (173 against 733, 0.24), 2026-08-14 (7 against 524,
+0.01) and 2026-08-16 (12 against 499, 0.02). On those days the ensemble has, for practical
+purposes, no forecasts at all.
+
+**The cause.** `run_forecast_job` makes two passes — the base models, then the ensemble — with M3's
+LLM calls and the M6/M7 scans between them, 13 to 18 minutes. The second pass re-derived its own
+eligibility, which re-applied guardrail 13's 15-minute liquid freshness window to prices the first
+pass had already frozen. On days when the collector landed no snapshot round inside that gap, the
+ensemble was offered almost no markets. This is a defect of the pipeline, not of the model: M4
+pools rows the base pass has already written, so it must be offered the same markets and paired
+against the same price those rows were paired against.
+
+**A second finding of the same shape, affecting every day rather than three.** Because each pass
+stamped its own timestamp, M4's `p_market_at_ts` was read up to 18 minutes after the prices its own
+members had been pooled from. Every M4 row is internally consistent as written, but its paired
+baseline was not the baseline its inputs saw — a quiet instance of exactly the pairing corruption
+`CLAUDE.md` §7 calls the worst failure class in the system. The magnitude is bounded by 18 minutes
+of price drift and is not estimated here; it is disclosed, not corrected in the ledger.
+
+**What changes from 2026-08-18.** Both passes now share one eligibility view and one freeze
+timestamp. M4 rows written from today therefore carry the base pass's timestamp and its price;
+rows written before today carry their own write time and a price up to 18 minutes younger than
+their inputs. **This is a declared discontinuity in the M4 series at 2026-08-18.** A robustness
+check re-running M4's paired skill on post-2026-08-18 forecasts alone is committed here, alongside
+the primary estimate over the full window.
+
+**Consequences beyond M4.** §8's shadow portfolio evaluates its entry rule on M4, so 2026-08-11,
+08-14 and 08-16 produced no simulated entries either. Those three days are excluded from any
+per-day shadow-portfolio statistic for the same reason as 9.17's window: the absence is a pipeline
+artifact, not a decision not to trade.
