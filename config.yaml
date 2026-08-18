@@ -503,18 +503,30 @@ publish:
   # default OFF -- an operator who wants only the curated nightly mirror
   # (reports/exports/models) gets exactly the pre-existing behavior with no
   # config change. Split into two independent knobs because they have very
-  # different LFS-bandwidth costs: snapshots are small/incremental (only
-  # new/changed parquet partitions copy) so they can push every night for
-  # free; data/lab.db is a single ever-growing binary blob with no LFS delta
-  # compression -- every push transfers its full current size, so pushing it
-  # nightly would burn a GitHub LFS free-tier month's bandwidth (1GB) in
-  # days once it passes a few hundred MB. db_interval_days spaces those
-  # pushes out to fit a free-tier LFS plan; raise results_dir's LFS plan (or
-  # this interval) if the db grows enough to need it more often.
+  # different LFS costs: snapshots are small/incremental (only new/changed
+  # parquet partitions copy) and a dated partition is final once its day
+  # rolls over, so LFS stores each one about once -- they push every night
+  # for free. data/lab.db is a single ever-growing binary blob with no LFS
+  # delta compression: every push uploads its full current size AND leaves
+  # the previous copy stored forever.
+  #
+  # Measured 2026-08-18, and the reason db_interval_days moved 3 -> 7: the db
+  # had reached 1.08GB, so ONE push now exceeds the entire free-tier monthly
+  # LFS bandwidth (1GB), and the 12 versions pushed since 2026-07-05 had
+  # accumulated to 10.8GB of LFS storage against a 1GB free-tier allowance.
+  # The original claim here -- that this interval makes the db fit a
+  # free-tier plan -- stopped being true once the db passed a gigabyte, and
+  # no value of it is true again: weekly cuts the growth rate by more than
+  # half (~10 pushes/month -> ~4.3), it does not stop the growth. The real
+  # fix is moving the db backup off LFS onto a deduplicating store
+  # (restic-class, where an append-mostly SQLite file costs tens of MB a
+  # night instead of a gigabyte); until then this knob buys time and the
+  # results repo needs a paid LFS data pack. Snapshots are unaffected and
+  # should stay here -- LFS suits them.
   raw_data:
     snapshots_enabled: true
     db_enabled: true
-    db_interval_days: 3
+    db_interval_days: 7
     # Backs up .env (every API key: DeepSeek/Anthropic, FRED, Metaculus,
     # NewsAPI, HEARTBEAT_URL, PMXT_API_KEY) into the private results repo
     # every night as .env.backup, so losing this laptop doesn't mean
