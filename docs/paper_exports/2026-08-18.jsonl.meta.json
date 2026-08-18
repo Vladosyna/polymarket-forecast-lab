@@ -1,0 +1,26 @@
+{
+  "code_version": "4142735c401b",
+  "schema_version": "12",
+  "generated_at": "2026-08-18T11:05:52+00:00",
+  "row_count": 171901,
+  "fields": [
+    "condition_id",
+    "venue",
+    "category",
+    "tier",
+    "model_id",
+    "forecast_ts",
+    "p_yes",
+    "p_market_at_ts",
+    "spread_at_ts",
+    "resolved_ts",
+    "payout_yes",
+    "event_id",
+    "m3_randomized",
+    "m3_random_seed",
+    "depth_covariate",
+    "volume_24h",
+    "trades_24h",
+    "hour_utc"
+  ]
+}
