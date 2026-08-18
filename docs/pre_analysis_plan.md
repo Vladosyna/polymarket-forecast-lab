@@ -722,3 +722,40 @@ carrying no snapshot at all). The mechanism is now in place but its concurrency 
 today's exact behaviour — pending a deliberate decision, which will get its own addendum. Recording
 the measurement here so that the decision, whichever way it goes, is on the record before it is
 made rather than after.
+**Addendum 9.20 (2026-08-18).** The collector was discarding most of its own scheduled firings, and
+the Polymarket tail's realized cadence was therefore about seven hours against a configured sixty
+minutes. Fixed today; recorded because it changes the observation grid and the forecastable
+population, not because the configuration changed.
+
+**The measurement.** Over a 10h45m window on 2026-08-18 the collector completed **146 liquid
+snapshot rounds and exactly one tail round**, against roughly eleven scheduled tail firings, with an
+APScheduler misfire warning for each of the rest — and for every other collector job as well.
+Consequences at forecast time, measured the same day: the median snapshot age across Polymarket's
+2,393 forecastable tail markets was **410 minutes** against guardrail 13's 90-minute bound, 1,508 of
+them failed that bound, and 844 carried no snapshot at all in the preceding two days. Those 844 are
+not marginal: they include markets with $32M, $12M and $4M of recorded volume, and 485 of them had
+been re-synced that same morning, so they were live and tracked and simply never reached.
+
+**The cause.** APScheduler's default `misfire_grace_time` is one second: a firing whose scheduled
+moment passes while the event loop is busy is discarded rather than delayed. A snapshot round issues
+back-to-back requests for minutes at a time, so the loop is busy essentially always. The same defect
+had already been found and fixed for the hourly `health_check` job in a 2026-07-14 audit, whose
+comment states it exactly — "without an explicit override every firing was silently discarded as a
+misfire" — but the fix was never generalized to the collector's own jobs. Every collector interval
+job now carries a grace of one full period with `coalesce`, so a firing may run late but never
+outlives its successor or replays a backlog.
+
+**Standing under this plan.** Two declared effects, both from 2026-08-18. First, Polymarket's
+tail-tier snapshot grid moves from a ~7-hour realized spacing to its configured 60 minutes; any
+analysis of snapshot spacing, and H3's lead-lag work in particular, must treat this as a grid
+discontinuity and not pool across it. Second, on the order of 1,500 Polymarket tail markets a day
+re-enter the forecastable population, having been excluded by the freshness gate rather than by any
+rule in this plan. Their absence was not random — it fell on whichever markets the starved tail
+round happened not to reach — so the pre-2026-08-18 Polymarket tail population is a convenience
+sample of itself. A robustness check restricted to post-2026-08-18 Polymarket forecasts is committed
+here alongside the primary estimate, matching the commitments in 9.18 and 9.19.
+
+**What was NOT changed.** `collect.snapshot_concurrency` remains 1. The round is latency-bound (3.9
+req/s against a permitted 10), so raising it would cut the tail round further, but the misfire fix
+alone restores the configured cadence, and the concurrency choice is left as a separate, deliberate
+decision rather than folded into a defect fix.

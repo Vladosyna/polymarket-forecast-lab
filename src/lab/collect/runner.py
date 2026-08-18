@@ -165,6 +165,34 @@ class CollectContext:
         self.conn.close()
 
 
+def _add_interval_job(scheduler, fn, minutes: float, **kw) -> None:
+    """Register a collector interval job that cannot silently lose a firing.
+
+    APScheduler's default `misfire_grace_time` is ONE SECOND: a firing whose
+    scheduled moment passes while the event loop is busy is discarded, not
+    delayed. The collector's loop is busy essentially all the time (a snapshot
+    round runs back-to-back requests for minutes), so this was throwing away
+    nearly every low-frequency firing. Measured over 10h45m on 2026-08-18:
+    `job_snap_tail` completed ONE round against ~11 scheduled, with a misfire
+    warning for each of the rest -- which is why the Polymarket tail's realized
+    cadence was ~7 hours against a configured 60 minutes, why 1,508 of 2,393
+    tail markets sat past guardrail 13's freshness bound at forecast time, and
+    why 844 of them had no snapshot at all. Every other collector job was
+    losing firings the same way.
+
+    This is the same defect v2.11 fixed for the analytics cron jobs; the
+    collector's own interval jobs were left on the default.
+
+    Grace is one full period: a firing may run late, but never later than its
+    own successor, and `coalesce` collapses a backlog into a single run rather
+    than replaying it.
+    """
+    kw.setdefault("max_instances", 1)
+    kw.setdefault("coalesce", True)
+    kw.setdefault("misfire_grace_time", max(60, int(minutes * 60)))
+    scheduler.add_job(fn, "interval", minutes=minutes, **kw)
+
+
 def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -> CollectContext:
     """Build shared resources and register the collection interval jobs."""
     bucket = TokenBucket(
@@ -195,12 +223,10 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
             )
 
     cadence = config["collect"]["snapshot_interval_minutes"]
-    scheduler.add_job(job_sync, "interval",
-                      minutes=config["universe"]["sync_interval_minutes"])
-    scheduler.add_job(job_snap_liquid, "interval", minutes=cadence["liquid"])
-    scheduler.add_job(job_snap_tail, "interval", minutes=cadence["tail"])
-    scheduler.add_job(job_resolutions, "interval",
-                      minutes=config["collect"]["resolution_poll_minutes"])
+    _add_interval_job(scheduler, job_sync, config["universe"]["sync_interval_minutes"])
+    _add_interval_job(scheduler, job_snap_liquid, cadence["liquid"])
+    _add_interval_job(scheduler, job_snap_tail, cadence["tail"])
+    _add_interval_job(scheduler, job_resolutions, config["collect"]["resolution_poll_minutes"])
 
     # Phase 18: unconditional, unlike the 4 jobs above -- deliberately does NOT
     # check is_paused(). The heartbeat's whole point is proving the process/
@@ -210,9 +236,9 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
     async def job_heartbeat_ping() -> None:
         await send_heartbeat("collector")
 
-    scheduler.add_job(job_heartbeat_ping, "interval",
-                      minutes=config.get("ops", {}).get("heartbeat_interval_minutes", 5),
-                      id="heartbeat_ping", max_instances=1, coalesce=True)
+    _add_interval_job(scheduler, job_heartbeat_ping,
+                      config.get("ops", {}).get("heartbeat_interval_minutes", 5),
+                      id="heartbeat_ping")
 
     # --- Phase 10: external-venue collectors, each on its own TokenBucket ---
     venues_cfg = config.get("venues", {})
@@ -265,26 +291,20 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
         if not is_paused(config):
             await snapshot_matched_pairs(clob, kalshi, conn, store, config)
 
-    scheduler.add_job(job_kalshi_sync, "interval",
-                      minutes=venues_cfg["kalshi"]["sync_interval_minutes"])
+    _add_interval_job(scheduler, job_kalshi_sync, venues_cfg["kalshi"]["sync_interval_minutes"])
     kalshi_cadence = venues_cfg["kalshi"]["snapshot_interval_minutes"]
-    # coalesce/max_instances stated rather than left to the default: a round
-    # that overruns its interval must skip the missed firings, not queue them.
-    scheduler.add_job(job_kalshi_snap_liquid, "interval", minutes=kalshi_cadence["liquid"],
-                      max_instances=1, coalesce=True)
-    scheduler.add_job(job_kalshi_snap_tail, "interval", minutes=kalshi_cadence["tail"],
-                      max_instances=1, coalesce=True)
-    scheduler.add_job(job_kalshi_resolutions, "interval",
-                      minutes=venues_cfg["kalshi"]["resolution_poll_minutes"])
-    scheduler.add_job(job_metaculus_snapshot, "interval",
-                      minutes=venues_cfg["metaculus"]["snapshot_interval_minutes"])
-    scheduler.add_job(job_metaculus_resolutions, "interval",
-                      minutes=venues_cfg["metaculus"]["resolution_poll_minutes"])
-    scheduler.add_job(job_manifold_sync, "interval",
-                      minutes=venues_cfg["manifold"]["sync_interval_minutes"])
-    scheduler.add_job(job_snap_matched, "interval",
-                      minutes=config["cross_venue"]["hf_snapshot_interval_minutes"],
-                      max_instances=1, coalesce=True)
+    _add_interval_job(scheduler, job_kalshi_snap_liquid, kalshi_cadence["liquid"])
+    _add_interval_job(scheduler, job_kalshi_snap_tail, kalshi_cadence["tail"])
+    _add_interval_job(scheduler, job_kalshi_resolutions,
+                      venues_cfg["kalshi"]["resolution_poll_minutes"])
+    _add_interval_job(scheduler, job_metaculus_snapshot,
+                      venues_cfg["metaculus"]["snapshot_interval_minutes"])
+    _add_interval_job(scheduler, job_metaculus_resolutions,
+                      venues_cfg["metaculus"]["resolution_poll_minutes"])
+    _add_interval_job(scheduler, job_manifold_sync,
+                      venues_cfg["manifold"]["sync_interval_minutes"])
+    _add_interval_job(scheduler, job_snap_matched,
+                      config["cross_venue"]["hf_snapshot_interval_minutes"])
 
     return CollectContext(
         gamma=gamma, clob=clob, conn=conn, store=store,

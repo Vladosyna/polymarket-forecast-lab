@@ -265,3 +265,53 @@ def test_every_analytics_cron_job_has_an_explicit_misfire_grace():
             assert job.coalesce is True, f"{job.id} would run repeatedly to catch up"
 
     asyncio.run(_check())
+
+
+def test_every_collector_interval_job_survives_a_busy_loop(tmp_path):
+    """Regression, measured 2026-08-18: APScheduler's default misfire_grace_time
+    is ONE SECOND, so a firing whose moment passes while the event loop is busy
+    is discarded rather than delayed. A snapshot round runs back-to-back
+    requests for minutes, so the loop is busy essentially always, and over
+    10h45m `job_snap_tail` completed exactly ONE round against ~11 scheduled --
+    which is why the Polymarket tail's realized cadence was ~7 hours against a
+    configured 60 minutes, with 844 tail markets carrying no snapshot at all.
+    Every collector job was losing firings this way. The 2026-07-14 audit had
+    found and fixed exactly this for `health_check` alone; it was never
+    generalized, so assert the property for all of them rather than one."""
+    import asyncio as _asyncio
+
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    config = load_config()
+    config = {
+        **config,
+        "storage": {
+            **config["storage"],
+            "db_path": str(tmp_path / "lab.db"),
+            "snapshots_dir": str(tmp_path / "snapshots"),
+        },
+    }
+
+    async def _check() -> None:
+        scheduler = AsyncIOScheduler(timezone="UTC")
+        ctx = register_collect_jobs(scheduler, config)
+
+        jobs = scheduler.get_jobs()
+        assert jobs, "no collector jobs registered"
+        for job in jobs:
+            interval = job.trigger.interval.total_seconds()
+            # getattr, not attribute access: APScheduler does not even set the
+            # attribute when the caller leaves it default, so a plain access
+            # would fail with AttributeError instead of saying what is wrong.
+            grace = getattr(job, "misfire_grace_time", None)
+            assert grace is not None, f"{job.name} kept APScheduler's 1s default"
+            assert grace >= 60, f"{job.name} grace too tight"
+            # never longer than its own period: a late firing must not outlive
+            # its successor and double up.
+            assert grace <= max(60, interval), f"{job.name} grace exceeds its period"
+            assert job.coalesce is True, f"{job.name} would replay a backlog"
+            assert job.max_instances == 1, f"{job.name} allows overlapping rounds"
+
+        await ctx.aclose()
+
+    _asyncio.run(_check())
