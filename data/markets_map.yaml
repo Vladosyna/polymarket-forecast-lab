@@ -1877,26 +1877,29 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-18T08:05:25+00:00'
-proposed:
 - condition_id: '0x807371dcb1fd0b3e3b406d8b2afa2f72285a896ae5198749a04b7d93c7b57529'
   question: Will Adam Crum win the 2026 Alaska governor election?
   venue: kalshi
   external_id: KXGOVAK-26-ACRU
   external_question: Who will win the governorship in Alaska?
-  rationale: 'The Polymarket question asks whether Adam Crum will win the 2026 Alaska
-    governor election, and its resolution criteria resolve to the winner of that election.
-    The Kalshi market''s specific outcome (as indicated by ticker KXGOVAK-26-ACRU
-    and outcome label ''Adam Crum'') resolves to Yes if Adam Crum is elected governor
-    in 2026. Both markets target the same real-world event: whether Adam Crum wins
-    the 2026 Alaska gubernatorial election. The resolution dates and sources are compatible,
-    and there are no conflicting criteria. The third-party tool''s high confidence
-    is consistent with this analysis.'
-  confidence: 0.95
-  proposed_ts: '2026-08-18T21:00:02+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-19T02:10:06+00:00'
+- condition_id: '0xb98ab55ac15d1154e6455b1a886841103128c8a60a610a662df28b383e6233cb'
+  question: Will Michael Minogue win the 2026 Massachusetts Governor Republican primary
+    election?
+  venue: kalshi
+  external_id: KXGOVMANOMR-26-MMIN
+  external_question: Will Michael Minogue be the Republican nominee for Governor in
+    Massachusetts?
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-19T02:10:43+00:00'
+proposed:
 - condition_id: '0x90c810df015547545998cc0952258c102fac052861896acf6d58e17938cce0c7'
   question: Will Nancy Dahlstrom win the 2026 Alaska governor election?
   venue: kalshi
@@ -1950,25 +1953,6 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
-- condition_id: '0xb98ab55ac15d1154e6455b1a886841103128c8a60a610a662df28b383e6233cb'
-  question: Will Michael Minogue win the 2026 Massachusetts Governor Republican primary
-    election?
-  venue: kalshi
-  external_id: KXGOVMANOMR-26-MMIN
-  external_question: Will Michael Minogue be the Republican nominee for Governor in
-    Massachusetts?
-  rationale: Both markets resolve on whether Michael Minogue wins the Republican nomination
-    for Governor of Massachusetts in 2026. The Polymarket question asks if he wins
-    the primary, and its resolution criteria specify the winner of the Republican
-    primary, including run-offs. The Kalshi outcome explicitly resolves Yes if Minogue
-    wins the Republican nomination. The only minor difference is the polysource (Massachusetts
-    Republican Party vs. Kalshi's generic nomination source), but the event is identical.
-  confidence: 0.95
-  proposed_ts: '2026-08-18T21:00:12+00:00'
-  source: pmxt
-  source_meta:
-    relation_type: identity
-    pmxt_confidence: 0.95
 - condition_id: '0x36796df689a799e37af4db95c281bebd0f0fb370c25c0874a39a2184d92f7231'
   question: Will Mike Kennealy win the 2026 Massachusetts Governor Republican primary
     election?
@@ -2002,6 +1986,26 @@ proposed:
     sources does not alter the matched event or criteria.
   confidence: 0.97
   proposed_ts: '2026-08-18T21:00:17+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x8cf6dcc31f5f65f4fb329fe4d24fcac0ae56e824253937fa4861c450a0c0f1e6'
+  question: Will Gabriel Azevedo win the 2026 Minas Gerais gubernatorial election?
+  venue: kalshi
+  external_id: KXMINASGOV-26OCT04-GAZE
+  external_question: Will Gabriel Azevedo win the 2026 Minas Gerais gubernatorial
+    election?
+  rationale: 'Both markets ask the identical question: whether Gabriel Azevedo wins
+    the 2026 Minas Gerais gubernatorial election. The Polymarket resolution criteria
+    specify the election date and resolution by official/credible reporting, while
+    the Kalshi ticker (KXMINASGOV-26OCT04-GAZE) indicates the same October 4, 2026
+    election and clearly defines the Yes outcome as Azevedo winning. No conflicting
+    nuances are present: the Polymarket''s ''Other'' fallback for unknown results
+    aligns with Kalshi''s binary outcome where not winning means ''No''. The event,
+    candidate, jurisdiction, and election cycle match precisely.'
+  confidence: 0.95
+  proposed_ts: '2026-08-19T15:33:38+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
