@@ -2010,6 +2010,26 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xb0ee8b50241790bf2f414f14004b546062ee3462da38355e270142339d202b25'
+  question: Will Juan Soto win the 2026 National League Hank Aaron Award?
+  venue: kalshi
+  external_id: KXMLBNLHAARON-26-JSOT
+  external_question: Will Juan Soto win NL Hank Aaron Award?
+  rationale: 'Both markets ask the same binary question: whether Juan Soto will win
+    the 2026 National League Hank Aaron Award. The Polymarket question explicitly
+    names Juan Soto and the award, and its resolution criteria specify resolving to
+    the player who wins that award. The Kalshi market''s ticker and outcomes (''Not
+    Juan Soto'' | ''Juan Soto'') confirm it resolves to Yes if Juan Soto wins the
+    NL Hank Aaron Award, with the same event and season (2026). There are no material
+    differences in the resolution criteria that would cause divergent outcomes. The
+    only minor nuance is Polymarket''s tie-breaking handling, but that does not change
+    the fundamental identity of the event.'
+  confidence: 1.0
+  proposed_ts: '2026-08-20T21:00:02+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
