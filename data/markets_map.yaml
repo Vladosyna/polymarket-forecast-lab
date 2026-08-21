@@ -2030,6 +2030,28 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+- condition_id: '0x127422dfe382bb2c4a4fbca3ca9ec1278fc1948e8874928508a54c94b00f14ac'
+  question: Will Shohei Ohtani win the 2026 National League Hank Aaron Award?
+  venue: kalshi
+  external_id: KXMLBNLHAARON-26-SOHT
+  external_question: Will Shohei Ohtani win NL Hank Aaron Award?
+  rationale: Both markets specifically ask whether Shohei Ohtani will win the 2026
+    National League Hank Aaron Award. The Polymarket question names Ohtani and the
+    award/league/season, and its resolution criteria resolve to the player who wins
+    that award (with tie/fallback rules). The Kalshi market's specific outcome, as
+    defined by its ticker (KXMLBNLHAARON-26-SOHT) and outcome labels, is 'Shohei Ohtani'
+    winning the 2026 NL Hank Aaron Award. Although the Kalshi title is broader ('Will
+    Shohei Ohtani win NL Hank Aaron Award?'), the ticker and outcome labels confirm
+    it resolves only on Ohtani winning that specific award. The scope (2026 season,
+    NL, Hank Aaron Award, Ohtani) is identical. Minor differences in tie-handling
+    or fallback (e.g., alphabetical tiebreak vs. no tiebreak) are unlikely to affect
+    the core question and do not create a material mismatch.
+  confidence: 0.98
+  proposed_ts: '2026-08-21T15:33:39+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
