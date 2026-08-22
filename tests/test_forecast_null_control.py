@@ -365,3 +365,70 @@ def test_unmeasured_depth_is_null_not_zero():
     assert _depth_usd({"bid_depth_usd": 700.0, "ask_depth_usd": 300.0}) == pytest.approx(1000.0)
     assert _depth_usd({"bid_depth_usd": 700.0, "ask_depth_usd": None}) == pytest.approx(700.0)
     assert _depth_usd({"bid_depth_usd": None, "ask_depth_usd": None}) is None
+
+
+def _sports_market(conn, cid: str, category: str = "sports"):
+    from lab.store import db
+    db.upsert_market(conn, {
+        "condition_id": cid, "venue": "polymarket", "venue_native_id": cid,
+        "slug": None, "question": "q", "category": category, "description": "d",
+        "end_date_iso": "2027-01-01T00:00:00Z", "token_id_yes": "1", "token_id_no": "2",
+        "neg_risk": 0, "active": 1, "closed": 0, "liquidity_num": 1.0, "volume_num": 1.0,
+        "tier": "liquid",
+    })
+
+
+def test_null_control_restriction_holds_on_every_write_path(tmp_path):
+    """Regression, 2026-08-22. §3's null control is a UNIVERSE policy: a small
+    seeded sample of sports markets, and every other sports market is
+    deliberately not a forecast target. It was enforced only inside
+    `eligible_market_states`, so the two models that write outside it were
+    unrestricted -- m6_consistency had written on 62 sports markets and
+    m7_crossvenue on 31, against a sample of 30, and 59 and 29 of those
+    respectively were markets the filtered path had never produced. A control
+    whose membership is not controlled is not a control."""
+    from lab.forecast import drop_null_control_outsiders, null_control_ids
+    from lab.store import db
+    from lab.util import load_config
+
+    conn = db.connect(tmp_path / "lab.db")
+    config = load_config()
+    config = {**config, "universe": {**config["universe"],
+                                     "null_control": {"category": "sports",
+                                                      "sample_size": 3, "random_seed": 42}}}
+    for i in range(20):
+        _sports_market(conn, f"0xs{i:02d}")
+    for i in range(3):
+        _sports_market(conn, f"0xp{i}", category="politics")
+    conn.commit()
+
+    sampled = null_control_ids(conn, config)
+    assert len(sampled) == 3
+
+    everything = [f"0xs{i:02d}" for i in range(20)] + ["0xp0", "0xp1", "0xp2"]
+    allowed = drop_null_control_outsiders(conn, config, everything)
+
+    # non-sports is never touched by this policy
+    assert {"0xp0", "0xp1", "0xp2"} <= allowed
+    # of the sports markets, only the sampled ones survive
+    assert {c for c in allowed if c.startswith("0xs")} == sampled
+    assert len(allowed) == 3 + 3
+    conn.close()
+
+
+def test_null_control_filter_is_a_no_op_without_sports(tmp_path):
+    """The batches these two models write are usually all non-sports; the
+    filter must not cost a sample draw or change anything there."""
+    from lab.forecast import drop_null_control_outsiders
+    from lab.store import db
+    from lab.util import load_config
+
+    conn = db.connect(tmp_path / "lab.db")
+    for i in range(4):
+        _sports_market(conn, f"0xp{i}", category="politics")
+    conn.commit()
+
+    ids = [f"0xp{i}" for i in range(4)]
+    assert drop_null_control_outsiders(conn, load_config(), ids) == set(ids)
+    assert drop_null_control_outsiders(conn, load_config(), []) == set()
+    conn.close()

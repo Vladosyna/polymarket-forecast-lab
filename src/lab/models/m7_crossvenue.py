@@ -479,8 +479,20 @@ def write_m7_forecasts(conn, store, results: dict[str, ForecastResult],
     latest = store.latest_per_market([utc_date_str(now - timedelta(days=d)) for d in range(2)])
     snap = {r["condition_id"]: r for r in latest.to_dicts()} if not latest.is_empty() else {}
     ts = now.isoformat(timespec="seconds")
-    written = 0
+
+    # Same universe policy as M6 (§3). It bites harder here: M7's markets come
+    # from human-confirmed pairs, so before 2026-08-22 an editorially selected
+    # set was landing on the null control -- the selection guardrail 12 exists
+    # to forbid. 31 sports markets in the week to that date, 29 of them never
+    # produced by the filtered path.
+    from lab.forecast import drop_null_control_outsiders
+
+    allowed = drop_null_control_outsiders(conn, config, list(results))
+    written = skipped_null_control = 0
     for cid, result in results.items():
+        if cid not in allowed:
+            skipped_null_control += 1
+            continue
         row = snap.get(cid)
         if row is None:
             continue
@@ -495,6 +507,9 @@ def write_m7_forecasts(conn, store, results: dict[str, ForecastResult],
         log.info("m7 forecast", extra={"ctx": {"condition_id": cid, "p_yes": result.p_yes,
                                                 **result.meta}})
         written += 1
+    if skipped_null_control:
+        log.info("m7: skipped sports markets outside the null-control sample",
+                 extra={"ctx": {"count": skipped_null_control}})
     conn.commit()
     return written
 

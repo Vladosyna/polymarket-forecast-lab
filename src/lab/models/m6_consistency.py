@@ -154,9 +154,23 @@ def write_m6_forecasts(conn, store, findings: list[dict[str, Any]],
     snap = {r["condition_id"]: r for r in latest.to_dicts()} if not latest.is_empty() else {}
     ts = now.isoformat(timespec="seconds")
     lo, hi = config["forecast"]["p_clamp"]
-    written = 0
+
+    # §3's null-control restriction is a UNIVERSE policy, so it has to hold on
+    # every write path, not just the one inside eligible_market_states. Until
+    # 2026-08-22 it held only there, and this loop wrote on 62 sports markets
+    # against a configured sample of 30.
+    from lab.forecast import drop_null_control_outsiders
+
+    allowed = drop_null_control_outsiders(
+        conn, config,
+        [c["condition_id"] for f in findings for c in f.get("corrections", [])])
+
+    written = skipped_null_control = 0
     for finding in findings:
         for corr in finding.get("corrections", []):
+            if corr["condition_id"] not in allowed:
+                skipped_null_control += 1
+                continue
             row = snap.get(corr["condition_id"])
             if row is None:
                 continue
@@ -169,5 +183,8 @@ def write_m6_forecasts(conn, store, findings: list[dict[str, Any]],
                 "spread_at_ts": row["spread"],
             })
             written += 1
+    if skipped_null_control:
+        log.info("m6: skipped sports markets outside the null-control sample",
+                 extra={"ctx": {"count": skipped_null_control}})
     conn.commit()
     return written

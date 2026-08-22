@@ -56,6 +56,42 @@ def null_control_ids(conn, config: dict[str, Any]) -> set[str]:
     return set(rng.sample(ids, min(nc["sample_size"], len(ids))))
 
 
+def drop_null_control_outsiders(conn, config: dict[str, Any],
+                               condition_ids) -> set[str]:
+    """Of `condition_ids`, the ones the universe policy allows as forecast targets.
+
+    §3 keeps "a small random sample of sports markets in the ledger, forecast
+    by the cheap models only" -- every OTHER sports market is deliberately not
+    a forecast target, because sports are near-efficient and a control whose
+    membership is not controlled is not a control.
+
+    `eligible_market_states` has applied that since the beginning, but it was
+    the only place that did, and two models write outside it. Measured over
+    the week to 2026-08-22: `m6_consistency` had written on 62 sports markets
+    and `m7_crossvenue` on 31, against a configured sample of 30 -- and 59 and
+    29 of those respectively were markets the filtered path had never
+    produced, so they were not a superset drawn the same way, they were
+    unfiltered. For M7 that also meant human-confirmed pairs (editorial
+    selection, the thing guardrail 12 exists to forbid) landing on the null
+    control.
+
+    Scoped to the ids a caller is about to write, so the cost is bounded by
+    that batch rather than by the sports population."""
+    ids = list(dict.fromkeys(condition_ids))
+    if not ids:
+        return set()
+    nc_category = config["universe"]["null_control"]["category"]
+    placeholders = ",".join("?" * len(ids))
+    sports = {r["condition_id"] for r in conn.execute(
+        f"SELECT condition_id FROM markets WHERE category = ? AND condition_id IN ({placeholders})",
+        (nc_category, *ids),
+    )}
+    if not sports:
+        return set(ids)
+    sampled = null_control_ids(conn, config)
+    return {cid for cid in ids if cid not in sports or cid in sampled}
+
+
 def null_control_ids_by_venue(conn, config: dict[str, Any]) -> dict[str, set[str]]:
     """Per-venue null-control membership for scoring: the sports markets that
     were actually forecast.

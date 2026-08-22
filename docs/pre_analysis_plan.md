@@ -823,3 +823,42 @@ coverage regimes. Second, the 113 recovered pairs have **no external price histo
 repair date**, so M7 forecasts on them begin then — H3's lead-lag work, which needs both legs'
 histories, gains these pairs only forward. A robustness check restricted to post-2026-08-22 M7
 forecasts is committed here alongside the primary estimate, matching 9.18-9.21.
+**Addendum 9.23 (2026-08-22).** The null-control restriction now binds on every write path. This
+removes markets from two models' populations, so it is recorded with the exclusion rule it implies.
+
+**The measurement.** §3 keeps "a small random sample of sports markets in the ledger, forecast by
+the cheap models only" — a seeded sample of 30, because sports are near-efficient and exist here as
+a falsification check. That restriction was implemented in `eligible_market_states` and nowhere
+else, and two models write outside it. Over the week to 2026-08-22, `m6_consistency` had written on
+**62** sports markets and `m7_crossvenue` on **31**, against a sample of 30 — and **59 and 29 of
+those respectively were markets the filtered path had never produced**, so they were not a superset
+drawn the same way; they were unfiltered.
+
+It showed up asymmetrically in scoring, which is how the two failures differ. M6's sports forecasts
+land in the `null_control` window with **n = 420**, against roughly 170 for every model that goes
+through the filter — a control population two and a half times too large and selected by the
+coherence scanner rather than by the seed. M7 does not appear in that window at all despite 241
+sports rows, so its sports forecasts were being scored in the ordinary per-category tables instead.
+
+**Why M7's case is the graver one.** Its markets come from `markets_map.yaml`, i.e. from pairs a
+human confirmed. Editorial selection reaching the null control is precisely what guardrail 12
+exists to forbid, and the null control is the one place where an uncontrolled population destroys
+the instrument rather than merely widening it: a control whose membership is not controlled is not a
+control.
+
+**What changes.** A single predicate, `drop_null_control_outsiders`, now sits beside the sample it
+consults and is applied by all three write paths. Non-sports markets are untouched, so the change is
+a no-op on the overwhelming majority of every batch.
+
+**Standing under this plan.** M6 and M7 lose sports markets outside the sample from 2026-08-22
+onward. The rows already written stay in the ledger — it is append-only, and this plan repairs
+nothing retroactively — but they are **excluded from every reported statistic**: sports-category
+forecasts from `m6_consistency` and `m7_crossvenue` dated before 2026-08-22 are pooled neither with
+the null control nor with the main per-category tables. This is an exclusion, not a robustness
+check, because the population they were drawn from is not one this plan ever specified.
+
+**Read alongside 9.22, same date, opposite direction.** 9.22 recovers confirmed cross-venue pairs
+and grows M7's population; this shrinks it by the sports markets that should never have been in it.
+They are independent — one is coverage that was always confirmed, the other is coverage that was
+never sanctioned — and the net effect on M7's per-day n is the sum of both, so neither should be
+read as explaining the other.
