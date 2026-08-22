@@ -1899,60 +1899,36 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-19T02:10:43+00:00'
-proposed:
 - condition_id: '0x90c810df015547545998cc0952258c102fac052861896acf6d58e17938cce0c7'
   question: Will Nancy Dahlstrom win the 2026 Alaska governor election?
   venue: kalshi
   external_id: KXGOVAK-26-NDAH
   external_question: Who will win the governorship in Alaska?
-  rationale: Both markets resolve on whether Nancy Dahlstrom wins the 2026 Alaska
-    gubernatorial election. Polymarket's question directly asks about her winning,
-    and its criteria confirm it resolves to the candidate who wins that election.
-    Kalshi's specific outcome (ticker KXGOVAK-26-NDAH) resolves to Yes if Dahlstrom
-    is elected governor in 2026, with outcome labels directly mirroring the same condition.
-    The election date and event are identical, and both use official election outcomes
-    as the resolution basis. The matching tool's high confidence aligns with this
-    assessment.
-  confidence: 0.95
-  proposed_ts: '2026-08-18T21:00:05+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-22T11:50:04+00:00'
 - condition_id: '0xe2edbfb83c9b0256b10c93e59f4677d942792ea014274d9c00dc72a38b3c2592'
   question: Will Edna DeVries win the 2026 Alaska governor election?
   venue: kalshi
   external_id: KXGOVAK-26-EDEV
   external_question: Who will win the governorship in Alaska?
-  rationale: Both markets resolve on whether Edna DeVries wins the 2026 Alaska gubernatorial
-    election. Polymarket's specific question names DeVries as the candidate, and while
-    its resolution criteria describe the general race, the question itself confines
-    the outcome to DeVries winning. Kalshi's specific outcome is labeled 'Edna DeVries'
-    with identical election timing. Minor differences in resolution sources (AP/Fox/NBC
-    vs. official certification) do not alter the underlying event.
-  confidence: 0.97
-  proposed_ts: '2026-08-18T21:00:08+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-22T11:50:08+00:00'
 - condition_id: '0xef25acd9423c7c1aeb1a85a2f2e295ce6bcee19abd84a8b99c7e84713434abf3'
   question: Will Matt Claman win the 2026 Alaska governor election?
   venue: kalshi
   external_id: KXGOVAK-26-MCLA
   external_question: Who will win the governorship in Alaska?
-  rationale: Both markets resolve on whether Matt Claman wins the 2026 Alaska gubernatorial
-    election. The Polymarket question explicitly asks if Claman will win, and Kalshi's
-    specific outcome is 'Matthew Claman' winning the governorship in 2026. The resolution
-    sources and dates align, and the slight spelling difference (Matt vs. Matthew)
-    is immaterial. The Kalshi ticker and outcome labels confirm the specific leg is
-    Claman's victory.
-  confidence: 0.95
-  proposed_ts: '2026-08-18T21:00:10+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-22T11:50:11+00:00'
 - condition_id: '0x36796df689a799e37af4db95c281bebd0f0fb370c25c0874a39a2184d92f7231'
   question: Will Mike Kennealy win the 2026 Massachusetts Governor Republican primary
     election?
@@ -1960,94 +1936,67 @@ proposed:
   external_id: KXGOVMANOMR-26-MKEN
   external_question: Will Mike Kennealy be the Republican nominee for Governor in
     Massachusetts?
-  rationale: Both markets ask whether Mike Kennealy will win the Massachusetts Republican
-    gubernatorial primary/nomination in 2026. The Polymarket question explicitly names
-    the Republican primary, and the resolution criteria confirm it resolves to the
-    winner (including runoffs) of that primary. The Kalshi ticker and outcome labels
-    indicate it resolves to Yes if Kennealy wins the Republican nomination for the
-    2026 governorship. These are the same event and outcome. Minor wording differences
-    (primary vs. nomination) are equivalent in context.
-  confidence: 0.95
-  proposed_ts: '2026-08-18T21:00:15+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-22T11:50:14+00:00'
 - condition_id: '0x74a5ea8aed0261817e6be4371a73a9647bf143857c62bc66211c2d9b97d091a5'
   question: Will Mary Peltola win the 2026 Alaska governor election?
   venue: kalshi
   external_id: KXGOVAK-26-MPEL
   external_question: Who will win the governorship in Alaska?
-  rationale: Both markets resolve on whether Mary Peltola wins the 2026 Alaska governor
-    election. The Polymarket question explicitly asks if Peltola will win, with resolution
-    based on the official election outcome. The Kalshi market's ticker and outcome
-    labels (Mary Peltola | Not Mary Peltola) indicate it resolves to Yes if Peltola
-    is elected governor in 2026. The slight difference in phrasing and resolution
-    sources does not alter the matched event or criteria.
-  confidence: 0.97
-  proposed_ts: '2026-08-18T21:00:17+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-22T11:50:17+00:00'
 - condition_id: '0x8cf6dcc31f5f65f4fb329fe4d24fcac0ae56e824253937fa4861c450a0c0f1e6'
   question: Will Gabriel Azevedo win the 2026 Minas Gerais gubernatorial election?
   venue: kalshi
   external_id: KXMINASGOV-26OCT04-GAZE
   external_question: Will Gabriel Azevedo win the 2026 Minas Gerais gubernatorial
     election?
-  rationale: 'Both markets ask the identical question: whether Gabriel Azevedo wins
-    the 2026 Minas Gerais gubernatorial election. The Polymarket resolution criteria
-    specify the election date and resolution by official/credible reporting, while
-    the Kalshi ticker (KXMINASGOV-26OCT04-GAZE) indicates the same October 4, 2026
-    election and clearly defines the Yes outcome as Azevedo winning. No conflicting
-    nuances are present: the Polymarket''s ''Other'' fallback for unknown results
-    aligns with Kalshi''s binary outcome where not winning means ''No''. The event,
-    candidate, jurisdiction, and election cycle match precisely.'
-  confidence: 0.95
-  proposed_ts: '2026-08-19T15:33:38+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-22T11:50:20+00:00'
 - condition_id: '0xb0ee8b50241790bf2f414f14004b546062ee3462da38355e270142339d202b25'
   question: Will Juan Soto win the 2026 National League Hank Aaron Award?
   venue: kalshi
   external_id: KXMLBNLHAARON-26-JSOT
   external_question: Will Juan Soto win NL Hank Aaron Award?
-  rationale: 'Both markets ask the same binary question: whether Juan Soto will win
-    the 2026 National League Hank Aaron Award. The Polymarket question explicitly
-    names Juan Soto and the award, and its resolution criteria specify resolving to
-    the player who wins that award. The Kalshi market''s ticker and outcomes (''Not
-    Juan Soto'' | ''Juan Soto'') confirm it resolves to Yes if Juan Soto wins the
-    NL Hank Aaron Award, with the same event and season (2026). There are no material
-    differences in the resolution criteria that would cause divergent outcomes. The
-    only minor nuance is Polymarket''s tie-breaking handling, but that does not change
-    the fundamental identity of the event.'
-  confidence: 1.0
-  proposed_ts: '2026-08-20T21:00:02+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+  confirmed_ts: '2026-08-22T11:50:22+00:00'
 - condition_id: '0x127422dfe382bb2c4a4fbca3ca9ec1278fc1948e8874928508a54c94b00f14ac'
   question: Will Shohei Ohtani win the 2026 National League Hank Aaron Award?
   venue: kalshi
   external_id: KXMLBNLHAARON-26-SOHT
   external_question: Will Shohei Ohtani win NL Hank Aaron Award?
-  rationale: Both markets specifically ask whether Shohei Ohtani will win the 2026
-    National League Hank Aaron Award. The Polymarket question names Ohtani and the
-    award/league/season, and its resolution criteria resolve to the player who wins
-    that award (with tie/fallback rules). The Kalshi market's specific outcome, as
-    defined by its ticker (KXMLBNLHAARON-26-SOHT) and outcome labels, is 'Shohei Ohtani'
-    winning the 2026 NL Hank Aaron Award. Although the Kalshi title is broader ('Will
-    Shohei Ohtani win NL Hank Aaron Award?'), the ticker and outcome labels confirm
-    it resolves only on Ohtani winning that specific award. The scope (2026 season,
-    NL, Hank Aaron Award, Ohtani) is identical. Minor differences in tie-handling
-    or fallback (e.g., alphabetical tiebreak vs. no tiebreak) are unlikely to affect
-    the core question and do not create a material mismatch.
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-22T11:50:26+00:00'
+proposed:
+- condition_id: '0x53742ebde35cbee0ee3ab4241ff24677d4ca8c7ae75089ec455dc0d92d0e3f71'
+  question: Will Fernando Tatis Jr. win the 2026 National League MVP Award?
+  venue: kalshi
+  external_id: KXMLBNLMVP-26-FTAT
+  external_question: Will Fernando Tatis Jr. win NL MVP?
+  rationale: 'Both markets resolve on whether Fernando Tatis Jr. wins the 2026 National
+    League MVP Award. The Polymarket question explicitly names Tatis and its resolution
+    criteria confirm it resolves to the NL MVP winner, with Tatis as the specific
+    outcome. The Kalshi market''s ticker and outcome labels confirm the same condition:
+    a Yes if Tatis wins the 2026 NL MVP. Despite slight wording differences regarding
+    ties or season cancellation, the core event and binary outcome are identical.
+    The high confidence reflects strong alignment in event, season, award, and candidate.'
   confidence: 0.98
-  proposed_ts: '2026-08-21T15:33:39+00:00'
+  proposed_ts: '2026-08-22T15:04:45+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
