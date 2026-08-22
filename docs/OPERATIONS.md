@@ -257,7 +257,7 @@ next time they are in that repo (verify it's truly unused, then delete it by han
 
 1. Clone the public code repo into a clean directory:
    ```powershell
-   git clone https://github.com/Vladosyna/polymarket-forecast-lab.git
+   git clone https://github.com/Vladosyna/prediction-market-forecast-lab.git
    ```
    This confirms the published repo alone (MIT-licensed, per CLAUDE.md §13) is
    sufficient to rebuild the lab's code.

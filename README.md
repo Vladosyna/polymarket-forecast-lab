@@ -1,18 +1,29 @@
-# Polymarket Forecast Lab
+# Prediction Market Forecast Lab
 
 A read-only research system that answers one question with statistical rigor:
 
-> Can we produce probability estimates for Polymarket event outcomes that are
-> better calibrated than the market price itself, measured after resolution?
+> Can we produce probability estimates for event outcomes that are better
+> calibrated than the prediction market's own price, measured after resolution?
 
-The lab continuously collects public market data, generates timestamped
-probability forecasts from several models, freezes them in an append-only
-ledger, waits for markets to resolve, and scores every model against the
-market baseline (Brier score, log loss, calibration curves). A simulated
-"shadow portfolio" translates any measured edge into hypothetical P&L.
+The lab continuously collects public market data from **Polymarket and
+Kalshi** (plus Metaculus community predictions and Manifold, as signal and
+base-rate inputs only), generates timestamped probability forecasts from
+eleven models, freezes them in an append-only ledger, waits for markets to
+resolve, and scores every model against **each venue's own price** — Brier
+score, log loss, calibration curves. A simulated "shadow portfolio"
+translates any measured edge into hypothetical P&L.
+
 **No real money is ever involved and this repository contains no execution
 code** — order placement, wallets, keys, and CLOB authentication are out of
 scope by design (see "Downstream use & license" below).
+
+The measurement is pre-registered. [`docs/pre_analysis_plan.md`](docs/pre_analysis_plan.md)
+fixes the hypotheses, the primary outcome and the exclusion rules, and is
+append-only: every subsequent finding, defect and population change is filed
+as a dated addendum rather than edited in. Each day's appended ledger rows are
+hashed and the hash committed to this repository the following night
+([`docs/ledger_commitments.jsonl`](docs/ledger_commitments.jsonl)), so a
+reader can verify the forecast record was not rewritten after the fact.
 
 ## Why this exists
 
@@ -30,9 +41,10 @@ continuously against public data.
 ## How it works
 
 ```
- Gamma API  ──┐
- CLOB API   ──┼──▶ lab sync / collect ──▶ SQLite (markets, resolutions)
- Data API   ──┘                       └─▶ Parquet (order-book snapshots)
+ Polymarket ──┐   (Gamma / CLOB / Data APIs)
+ Kalshi     ──┼──▶ lab sync / collect ──▶ SQLite (markets, resolutions)
+ Metaculus  ──┤                       └─▶ Parquet (order-book snapshots)
+ Manifold   ──┘
                                               │
                                               ▼
                           lab forecast  (M0…M7 → M4 ensemble)
@@ -210,11 +222,34 @@ that fails the build if execution-code strings ever land in `src/`):
 
 Every phase in the engineering brief ([`CLAUDE.md`](CLAUDE.md)) is now implemented and tested.
 
-The collector runs continuously against live Polymarket data. Calibration
-statistics need resolved markets to accumulate before any skill claim clears
-the honesty thresholds in the brief (n ≥ 200 = "preliminary", n ≥ 500 =
-"standard claim") — weather and the sports null-control resolve in days,
-long-horizon politics in months.
+### Where it stands (2026-08-22)
+
+The collector has run continuously against live Polymarket and Kalshi data
+since early July 2026:
+
+| | |
+|---|---|
+| forecast rows in the ledger | 729,512 |
+| resolutions recorded | 100,764 |
+| forecasts written per day | ~20,000 across ~4,100 markets |
+| models writing daily | 11 |
+| confirmatory window closes | 2026-12-31 (analysis freeze) |
+
+**No skill claim has been made, and none is due yet.** Calibration statistics
+need resolved markets to accumulate before anything clears the honesty
+thresholds in the brief (n ≥ 200 = "preliminary", n ≥ 500 = "standard claim",
+counted in resolved *event clusters*, not rows) — weather and the sports
+null-control resolve in days, long-horizon politics in months. Promotion and
+public claims are gated on the anytime-valid confidence sequence, which is
+deliberately far more conservative than the fixed-n bootstrap interval printed
+beside it.
+
+The pre-analysis plan carries **23 dated addenda**. Most of them record
+defects found in operation — coverage gaps, a scheduler dropping its own
+firings, a model silently writing nothing on three days — together with the
+exclusion window or robustness check each one implies. That record is the
+point: a live instrument accumulates defects, and a study that only publishes
+the clean half of its own history is not measuring what it claims to.
 
 ## Quickstart
 

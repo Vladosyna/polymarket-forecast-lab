@@ -124,7 +124,7 @@ actually happened, in order:
    `pmxt_verify`, and `publish_results` targeting `forecast-lab-results`) was
    silently failing its `git commit` step and logging a misleadingly generic
    "complete" regardless. Fixed with `git config user.name`/`user.email` (both
-   repos: `polymarket-forecast-lab` and `forecast-lab-results`), matching the
+   repos: `prediction-market-forecast-lab` and `forecast-lab-results`), matching the
    laptop's own identity. **If a git-committing job ever again logs "complete"
    with no matching new commit showing up, check this first** — it's a
    config-scoped setting (not global), so a fresh checkout or a new sibling
@@ -333,7 +333,7 @@ hourly-pull behavior back on whichever host that mechanism belongs on next.
 
 The cutover above gave this host a way to push to the **private** results repo
 (`id_ed25519_results`) but nothing to push to the **public**
-`polymarket-forecast-lab` repo itself — its `origin` remote was plain HTTPS with
+`prediction-market-forecast-lab` repo itself — its `origin` remote was plain HTTPS with
 no credential helper configured. That's a real gap: once this host became
 primary, `pmxt_verify`'s `commit_and_push_markets_map`, the weekly
 `paper_export`, and the nightly ledger-commitment job all commit to *this*
@@ -366,7 +366,7 @@ and this checkout's `origin` remote points at the alias, not the bare host:
 
 ```bash
 cd /root/polymarket-forecast-lab
-git remote set-url origin git@github.com-public:Vladosyna/polymarket-forecast-lab.git
+git remote set-url origin git@github.com-public:Vladosyna/prediction-market-forecast-lab.git
 ```
 
 Verify push access still works after any key rotation:
@@ -464,3 +464,4 @@ covers what is specific to this VPS host.
 | 2026-08-18 | **Kalshi snapshot rounds split per tier and made concurrent; M4's two-pass eligibility bug fixed.** The venue-wide Kalshi round took ~60 min for 3,966 markets + 461 order books, so it overran its own 30-min interval (APScheduler dropped every second firing) and the liquid tier ran at the tail's cadence — against guardrail 13's 15-min liquid bound, which left 443 of 464 liquid Kalshi markets failing the freshness gate at forecast time every night. Rounds were latency-bound, not rate-bound (1.2 req/s against a ceiling of 8, every await sequential), so `snapshot_markets`/`snapshot_kalshi_markets` gained bounded concurrency and `job_kalshi_snapshot` became `job_kalshi_snap_liquid` (5 min) + `job_kalshi_snap_tail` (30 min). The token bucket still caps the rate — guardrail 8 is untouched. **Host-load note:** Kalshi now sustains ~8 req/s in bursts of ~2 min every 5 min instead of a flat 1.2 req/s; watch `lab-run`'s cgroup if its steady RSS moves. Polymarket has the same mechanism at `collect.snapshot_concurrency: 1` — unchanged behaviour — pending a decision on its own starved tail (~7-hour realized cadence, 831 tail markets with no snapshot at all). Also fixed: `run_forecast_job`'s ensemble pass re-derived eligibility 13-18 min after the base pass, silently emptying M4 on 08-11/14/16. PAP addenda 9.17-9.19 record all of it. |
 | 2026-08-18 | **The collector was discarding most of its own scheduled firings.** APScheduler's default `misfire_grace_time` is 1s; a snapshot round runs back-to-back requests for minutes, so the loop is busy essentially always and firings were dropped rather than delayed. Measured over 10h45m: **146 liquid rounds against exactly ONE tail round** (~11 scheduled), with misfire warnings for every collector job. Effect at forecast time: Polymarket tail median snapshot age 410 min against a 90-min bound, 1,508 of 2,393 tail markets failing it, 844 with no snapshot at all. Every collector interval job now routes through `_add_interval_job` (grace = one full period, `coalesce`, `max_instances=1`). Note this is the SAME defect the 2026-07-14 audit fixed for `health_check` alone — if you add a scheduled job here, do not call `scheduler.add_job` directly. |
 | 2026-08-18 | **Pushes to the public repo now recover from the collision they hit routinely.** Two hosts write to `polymarket-forecast-lab` by design (this VPS commits ledger commitments, pmxt proposals and paper exports; the laptop pushes docs), so a non-fast-forward rejection is the normal case. It happened twice on this date alone — a ledger commitment at 02:44 and a paper-export snapshot at 11:05 — and both jobs logged `pushed: false` and returned normally, leaving a cryptographic pre-registration committed but unpublished. New `lab/gitutil.py`'s `push_with_rebase` retries once behind `git pull --rebase --autostash` (autostash is required: `data/markets_map.yaml` is routinely modified-but-uncommitted here by design). Wired into `ledger_commitment.py`, `paper_export.py` and `m7_crossvenue.py`. **Deliberately NOT wired into `publish.py`** — the private results mirror is LFS-backed, a rebase there fires the smudge filter and pulls objects against an already-blown 1GB quota, and only this host pushes to it. If you ever hit a manual rejection here, the same recipe works by hand: stash, `git pull --rebase`, restore, push. |
+| 2026-08-22 | **Public repo renamed** `polymarket-forecast-lab` -> `prediction-market-forecast-lab`. The old name understated the study and had become inaccurate: Kalshi now contributes more forecast markets per day than Polymarket (2,210 vs 1,515 on 08-19), and skill is scored against each venue's OWN price, never a single venue's. GitHub redirects the old URL, but both hosts' `origin` were repointed explicitly rather than left on the redirect. **Changelog rows above this one keep the old name on purpose** — they record what was true when written. The checkout path `/root/polymarket-forecast-lab` is UNCHANGED and must stay so: every systemd unit's `WorkingDirectory` depends on it, and renaming the directory would break the collector, the learn timer and the pmxt timers at once. |
