@@ -601,6 +601,12 @@ paper_export:
 storage:
   db_path: data/lab.db
   snapshots_dir: data/snapshots
+  # The M1/M1.x training set. A configured path, not a hardcoded one, for the
+  # same reason as every entry here: a test that cannot redirect it copies the
+  # real 50MB file instead -- which on 2026-08-22 filled this host's tmpfs
+  # /tmp (RAM-backed, 987MB) across one test run and made SQLite report
+  # "database or disk is full".
+  bootstrap_dir: data/bootstrap
   models_dir: data/models
   logs_dir: data/logs
   reports_dir: reports

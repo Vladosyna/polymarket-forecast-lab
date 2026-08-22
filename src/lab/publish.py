@@ -188,7 +188,8 @@ def publish_results(
     sync_reports(results_dir, PROJECT_ROOT / storage["reports_dir"])
     sync_model_artifacts(results_dir, PROJECT_ROOT / storage["models_dir"])
     sync_export(results_dir, conn)
-    n_bootstrap = sync_bootstrap(results_dir, PROJECT_ROOT / "data" / "bootstrap")
+    n_bootstrap = sync_bootstrap(
+        results_dir, PROJECT_ROOT / storage.get("bootstrap_dir", "data/bootstrap"))
     n_snapshots = 0
     if include_snapshots:
         n_snapshots = sync_snapshots(results_dir, PROJECT_ROOT / storage["snapshots_dir"])

@@ -37,6 +37,9 @@ def config(tmp_path):
     cfg["storage"] = {
         "db_path": str(tmp_path / "lab.db"),
         "snapshots_dir": str(tmp_path / "snapshots"),
+        # Redirected like the rest: without it every publish test copies the
+        # real 50MB training set (see storage.bootstrap_dir in config.yaml).
+        "bootstrap_dir": str(tmp_path / "bootstrap"),
         "models_dir": str(tmp_path / "models"),
         "logs_dir": str(tmp_path / "logs"),
         "reports_dir": str(tmp_path / "reports"),
