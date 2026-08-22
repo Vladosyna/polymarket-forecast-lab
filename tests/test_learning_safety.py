@@ -314,3 +314,56 @@ def test_registered_challenger_not_scored_before_registration(config):
     rows = resolved_forecast_rows(conn, "m3_evidence@deepseek", None)
     assert len(rows) == 1
     conn.close()
+
+
+def test_m2_baserates_survives_an_uncategorized_market():
+    """Regression, 2026-08-22: a resolved market with category NULL became a
+    None dict key, and `sorted(by_cat.items())` then raised
+    `'<' not supported between instances of NoneType and str`, taking the
+    whole monthly `lab learn` down. Four resolved Kalshi markets first seen on
+    08-14 and 08-17 were enough -- which is why the 2026-08-05 run passed and
+    every run after would have failed, silently, inside a timer unit nothing
+    watches. Such a market cannot contribute to a PER-category base rate, so
+    it is dropped; the count is kept because it is the only signal that the
+    taxonomy has an unmapped series."""
+    from lab.learn.refit import fit_m2_baserates
+
+    rows = ([{"category": "politics", "outcome": 1.0}] * 30
+            + [{"category": "politics", "outcome": 0.0}] * 30
+            + [{"category": None, "outcome": 1.0}] * 4)
+
+    art = fit_m2_baserates(rows, min_n=50)
+
+    assert art["skipped_uncategorized"] == 4
+    assert set(art["categories"]) == {"politics"}
+    assert art["categories"]["politics"]["n"] == 60
+    assert art["categories"]["politics"]["base_rate"] == pytest.approx(0.5)
+
+
+def test_m4_weight_fit_never_emits_a_null_category(tmp_path):
+    """The same NULL-category shape one gate away: an uncategorized group has
+    never reached min_resolved, but a None key reaching json.dumps would land
+    in the artifact as the string "null" -- a category no market can match."""
+    from lab.models.m4_ensemble import fit_m4_weights
+    from lab.store import db
+    from lab.util import load_config, now_utc_iso
+
+    conn = db.connect(tmp_path / "lab.db")
+    for i in range(120):
+        cid = f"0x{i:04x}"
+        db.upsert_market(conn, {
+            "condition_id": cid, "venue": "polymarket", "venue_native_id": cid,
+            "slug": None, "question": "q", "category": None if i % 2 else "politics",
+            "description": "d", "end_date_iso": "2026-01-01T00:00:00Z",
+            "token_id_yes": None, "token_id_no": None, "neg_risk": 0,
+            "active": 0, "closed": 1, "liquidity_num": 1.0, "volume_num": 1.0, "tier": "tail",
+        })
+        db.append_forecast(conn, {"ts": now_utc_iso(), "condition_id": cid,
+                                  "model_id": "m0_market", "p_yes": 0.6, "p_market_at_ts": 0.6})
+        db.record_resolution(conn, cid, now_utc_iso(), 1.0, 0, "test")
+    conn.commit()
+
+    art = fit_m4_weights(conn, load_config())
+    assert None not in art["categories"]
+    assert "null" not in art["categories"]
+    conn.close()

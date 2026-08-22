@@ -352,8 +352,27 @@ def fit_m2_baserates(rows: Any, min_n: int = 50) -> dict[str, Any]:
     if _is_empty(rows):
         return artifact
     cols = _obs_columns(rows, ("category", "outcome"))
+    uncategorized = 0
     for cat, outcome in zip(cols["category"].tolist(), cols["outcome"].tolist()):
+        # A market with no category cannot contribute to a PER-category base
+        # rate, so it is dropped -- but counted into the artifact rather than
+        # dropped silently, because the count is the only signal that the
+        # taxonomy has a gap (an unmapped Kalshi series yields NULL here).
+        #
+        # Before 2026-08-22 a None simply became a dict key, and the sort
+        # below then raised `'<' not supported between NoneType and str`,
+        # taking the whole monthly `lab learn` down. Four resolved Kalshi
+        # markets first seen on 08-14 and 08-17 were enough to do it -- which
+        # is why the 08-05 run passed and every run after those dates would
+        # have failed, silently, inside a timer unit nothing watches.
+        if cat is None:
+            uncategorized += 1
+            continue
         by_cat.setdefault(cat, []).append(float(outcome))
+    if uncategorized:
+        artifact["skipped_uncategorized"] = uncategorized
+        log.warning("m2 base rates: dropped markets with no category",
+                    extra={"ctx": {"count": uncategorized}})
     for cat, outcomes in sorted(by_cat.items()):
         if len(outcomes) < min_n:
             continue

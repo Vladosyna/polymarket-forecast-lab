@@ -64,6 +64,13 @@ def fit_m4_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
     ).fetchall()
     by_cat: dict[str, dict[str, dict]] = {}
     for r in rows:
+        # Same NULL-category guard as fit_m2_baserates. Latent rather than
+        # live here -- an uncategorized group has never reached
+        # `min_resolved`, so it was always dropped a line later -- but a None
+        # key would otherwise reach json.dumps and land in the artifact as
+        # the string "null", a category no market can ever match.
+        if r["category"] is None:
+            continue
         by_cat.setdefault(r["category"], {})[r["model_id"]] = {"brier": r["brier"], "n": r["n"]}
     for cat, models in by_cat.items():
         total_n = sum(v["n"] for v in models.values())
