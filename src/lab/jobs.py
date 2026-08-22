@@ -261,6 +261,7 @@ def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
     raw_cfg = config.get("publish", {}).get("raw_data", {})
     include_snapshots = bool(raw_cfg.get("snapshots_enabled", False))
     include_env = bool(raw_cfg.get("env_enabled", False))
+    include_ledger = bool(raw_cfg.get("ledger_increment_enabled", False))
     conn = db.connect(config["storage"]["db_path"])
     try:
         include_db = bool(raw_cfg.get("db_enabled", False)) and _db_push_due(
@@ -268,7 +269,7 @@ def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
         )
         result = publish_results(
             config, conn, include_snapshots=include_snapshots, include_db=include_db,
-            include_env=include_env,
+            include_env=include_env, include_ledger=include_ledger,
         )
         if include_db and result.get("committed"):
             db.set_meta(conn, "last_raw_db_push_ts", now_utc_iso())

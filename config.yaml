@@ -571,6 +571,17 @@ publish:
     # after rotation. Confirmed the results repo is a genuinely private
     # GitHub repo before turning this on.
     env_enabled: true
+    # Nightly gzipped JSONL of each closed UTC day's appended ledger rows
+    # (forecasts, resolutions, evidence_runs), added 2026-08-22. The db above
+    # goes weekly, which left the ONE irreplaceable artifact in this project
+    # with a seven-day recovery point while the snapshots describing it had a
+    # one-day one -- measured five days after a push: 90,767 forecast rows,
+    # 9,595 resolutions and 588 evidence runs existed only on the collecting
+    # host. A day gzips to a few MB and goes to ordinary git, so this closes
+    # the gap without touching the LFS allowance or moving a gigabyte.
+    # Stateless: which days are already mirrored is read from the files, never
+    # from a watermark that a restore or rollback could desynchronise.
+    ledger_increment_enabled: true
 
 # Phase 15 (v2.3): nightly cryptographic pre-registration -- sha256 over each
 # closed UTC day's appended forecasts rows, committed to commitments_path in

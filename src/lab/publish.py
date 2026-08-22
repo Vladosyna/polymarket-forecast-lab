@@ -10,13 +10,15 @@ block or re-trigger the forecast/eval/report bundle it follows.
 
 from __future__ import annotations
 
+import gzip
+import json
 import shutil
 import sqlite3
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from lab.util import PROJECT_ROOT, now_utc_iso
+from lab.util import PROJECT_ROOT, now_utc, now_utc_iso
 
 import logging
 
@@ -102,6 +104,76 @@ def sync_db(results_dir: Path, db_path: Path) -> None:
         src_conn.close()
 
 
+# Append-only research tables and the column each one is dated by. Deliberately
+# NOT every table: `eval_runs` and `wealth_ledger` are derived and recomputable
+# from these plus `markets` (CLAUDE.md sec. 5 says so of wealth_ledger in as many
+# words), and `markets` is upsert-shaped venue metadata that the weekly db push
+# carries and both venues can re-serve. What is here is what cannot be
+# reconstructed from anything: a frozen probability, the outcome it was scored
+# against, and the evidence a forecast was built from.
+LEDGER_TABLES = {"forecasts": "ts", "resolutions": "resolved_ts", "evidence_runs": "ts"}
+
+
+def sync_ledger_increment(results_dir: Path, conn: sqlite3.Connection,
+                          max_days: int = 7) -> dict[str, int]:
+    """Mirror the append-only ledger one gzipped JSONL per closed UTC day.
+
+    Why this exists: `data/lab.db` is pushed weekly (publish.raw_data.
+    db_interval_days), so the ONE irreplaceable artifact in this project had a
+    seven-day recovery point while the snapshots describing it had a one-day
+    one. Measured 2026-08-22, five days after the last db push: 90,767 forecast
+    rows, 9,595 resolutions and 588 evidence runs existed only on the
+    collecting host. A day of appended rows gzips to a few MB, so this closes
+    the gap without touching LFS or moving a gigabyte.
+
+    **Stateless by construction.** Which days are already mirrored is read from
+    the files themselves, never from a watermark in `meta` -- a watermark can
+    drift out of step with the artifact it describes (and a restore, or a db
+    rollback, would silently do exactly that). The same reasoning as
+    ledger_commitment's per-closed-day records.
+
+    Only fully-past UTC days are written, so a file is never a partial day, and
+    an existing file is never rewritten -- both properties the append-only
+    ledger already has and this mirror should not weaken.
+
+    Newest-first, bounded: the point is to shrink the recovery point NOW, so
+    recent days go first and the historical backlog fills in behind over
+    subsequent nights.
+    """
+    today = now_utc().date().isoformat()
+    written: dict[str, int] = {}
+    for table, ts_col in LEDGER_TABLES.items():
+        dst_dir = results_dir / "ledger" / table
+        have = {p.name[: len(today)] for p in dst_dir.glob("*.jsonl.gz")} if dst_dir.exists() else set()
+        days = [r[0] for r in conn.execute(
+            f"SELECT DISTINCT substr({ts_col}, 1, 10) d FROM {table} "
+            f"WHERE {ts_col} IS NOT NULL AND substr({ts_col}, 1, 10) < ? ORDER BY d DESC",
+            (today,),
+        )]
+        pending = [d for d in days if d not in have][:max_days]
+        if not pending:
+            continue
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for day in pending:
+            rows = conn.execute(
+                f"SELECT * FROM {table} WHERE substr({ts_col}, 1, 10) = ? ORDER BY rowid", (day,)
+            )
+            # Written to a temp name and renamed, so an interrupted run cannot
+            # leave a half-file that the `have` scan above would then treat as
+            # a finished day and never revisit.
+            tmp = dst_dir / f"{day}.jsonl.gz.tmp"
+            n = 0
+            with gzip.open(tmp, "wt", encoding="utf-8") as fh:
+                for row in rows:
+                    fh.write(json.dumps(dict(row), separators=(",", ":"), sort_keys=True) + "\n")
+                    n += 1
+            tmp.replace(dst_dir / f"{day}.jsonl.gz")
+            written[table] = written.get(table, 0) + 1
+            log.info("ledger increment mirrored",
+                     extra={"ctx": {"table": table, "date": day, "rows": n}})
+    return written
+
+
 def sync_bootstrap(results_dir: Path, bootstrap_dir: Path) -> int:
     """Mirror the M1/M1.x training set.
 
@@ -162,6 +234,7 @@ def publish_results(
     include_snapshots: bool = False,
     include_db: bool = False,
     include_env: bool = False,
+    include_ledger: bool = False,
 ) -> dict[str, Any]:
     """Snapshots and the db are independent knobs, not one combined
     "raw data" flag: snapshots are cheap and incremental (only new/changed
@@ -190,6 +263,9 @@ def publish_results(
     sync_export(results_dir, conn)
     n_bootstrap = sync_bootstrap(
         results_dir, PROJECT_ROOT / storage.get("bootstrap_dir", "data/bootstrap"))
+    n_ledger: dict[str, int] = {}
+    if include_ledger:
+        n_ledger = sync_ledger_increment(results_dir, conn)
     n_snapshots = 0
     if include_snapshots:
         n_snapshots = sync_snapshots(results_dir, PROJECT_ROOT / storage["snapshots_dir"])
@@ -209,7 +285,7 @@ def publish_results(
         return {"committed": False, "reason": "commit_failed", "stderr": commit.stderr}
 
     result = {"committed": True, "ts": ts, "snapshot_files_copied": n_snapshots,
-             "bootstrap_files_copied": n_bootstrap,
+             "bootstrap_files_copied": n_bootstrap, "ledger_days_mirrored": n_ledger,
              "db_included": include_db, "env_included": include_env}
     if push:
         pushed = _run_git(["push"], results_dir)

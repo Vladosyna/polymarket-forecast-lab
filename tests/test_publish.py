@@ -389,3 +389,105 @@ def test_sync_bootstrap_is_a_no_op_without_a_training_set(tmp_path):
     results = tmp_path / "results"
     results.mkdir()
     assert sync_bootstrap(results, tmp_path / "absent") == 0
+
+
+def _ledger_fixture(conn, days=("2026-08-20", "2026-08-21")):
+    from lab.store import db
+    for i, day in enumerate(days):
+        for j in range(3):
+            db.append_forecast(conn, {
+                "ts": f"{day}T02:00:0{j}+00:00", "condition_id": f"0x{i}{j}",
+                "model_id": "m0_market", "p_yes": 0.5, "p_market_at_ts": 0.5,
+            })
+    conn.commit()
+
+
+def test_ledger_increment_writes_one_file_per_closed_day(tmp_path, config, monkeypatch):
+    """The db goes weekly, so the one irreplaceable artifact in this project had
+    a seven-day recovery point while the snapshots describing it had a one-day
+    one: 90,767 forecast rows existed only on the collecting host when this was
+    measured. A day of appended rows gzips to a few MB."""
+    import gzip
+    import json
+
+    from lab.publish import sync_ledger_increment
+    from lab.store import db
+
+    conn = db.connect(config["storage"]["db_path"])
+    _ledger_fixture(conn)
+    results = tmp_path / "ledger_out"
+    results.mkdir()
+
+    written = sync_ledger_increment(results, conn)
+    assert written["forecasts"] == 2
+
+    f = results / "ledger" / "forecasts" / "2026-08-21.jsonl.gz"
+    rows = [json.loads(l) for l in gzip.open(f, "rt", encoding="utf-8")]
+    assert len(rows) == 3
+    # full rows, not a projection -- a restore has to be faithful
+    assert {"id", "ts", "condition_id", "model_id", "p_yes", "p_market_at_ts"} <= set(rows[0])
+    conn.close()
+
+
+def test_ledger_increment_is_idempotent_and_never_rewrites_a_day(tmp_path, config):
+    """Stateless: 'already mirrored' is read from the files, so a second run is
+    a no-op and a finished day is never rewritten -- the same property the
+    append-only ledger itself has."""
+    from lab.publish import sync_ledger_increment
+    from lab.store import db
+
+    conn = db.connect(config["storage"]["db_path"])
+    _ledger_fixture(conn)
+    results = tmp_path / "ledger_out"
+    results.mkdir()
+
+    assert sync_ledger_increment(results, conn)["forecasts"] == 2
+    f = results / "ledger" / "forecasts" / "2026-08-21.jsonl.gz"
+    stamp = f.stat().st_mtime_ns
+
+    assert sync_ledger_increment(results, conn) == {}
+    assert f.stat().st_mtime_ns == stamp
+    conn.close()
+
+
+def test_ledger_increment_skips_today_and_goes_newest_first(tmp_path, config, monkeypatch):
+    """Today is still being appended to, so a file for it would be a partial
+    day. And the backlog is bounded newest-first, because the point is to
+    shrink the recovery point now, not to drain history first."""
+    from lab.publish import sync_ledger_increment
+    from lab.store import db
+    from lab.util import now_utc
+
+    conn = db.connect(config["storage"]["db_path"])
+    today = now_utc().date().isoformat()
+    _ledger_fixture(conn, days=("2026-08-18", "2026-08-19", "2026-08-20", today))
+    results = tmp_path / "ledger_out"
+    results.mkdir()
+
+    written = sync_ledger_increment(results, conn, max_days=2)
+    assert written["forecasts"] == 2
+
+    got = sorted(p.name for p in (results / "ledger" / "forecasts").glob("*.jsonl.gz"))
+    assert got == ["2026-08-19.jsonl.gz", "2026-08-20.jsonl.gz"]   # newest closed days
+    assert not (results / "ledger" / "forecasts" / f"{today}.jsonl.gz").exists()
+    conn.close()
+
+
+def test_ledger_increment_writes_nothing_to_the_database(tmp_path, config):
+    """It must stay a pure reader. The forecasts table is guarded by a SQLite
+    authorizer that hard-denies UPDATE/DELETE (guardrail: immutable ledger),
+    and a backup path is the last place that should be negotiating with it."""
+    from lab.publish import sync_ledger_increment
+    from lab.store import db
+
+    conn = db.connect(config["storage"]["db_path"])
+    _ledger_fixture(conn)
+    before = conn.execute("SELECT COUNT(*), COALESCE(SUM(id), 0) FROM forecasts").fetchone()
+    results = tmp_path / "ledger_out"
+    results.mkdir()
+
+    sync_ledger_increment(results, conn)
+
+    assert conn.execute("SELECT COUNT(*), COALESCE(SUM(id), 0) FROM forecasts").fetchone() == before
+    assert conn.execute("SELECT COUNT(*) FROM meta WHERE key LIKE 'last_ledger%'").fetchone()[0] == 0
+    conn.close()
