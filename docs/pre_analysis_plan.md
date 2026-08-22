@@ -786,3 +786,40 @@ H3's lead-lag work most directly — should treat 2026-08-18 as a single discont
 across it. The post-2026-08-18 robustness checks already committed in 9.18, 9.19 and 9.20 cover this
 change as well; no additional check is introduced, because a fourth restriction to the same date
 would report the same rows.
+**Addendum 9.22 (2026-08-22).** M7's confirmed cross-venue pairs were mostly unusable, and the
+repair grows that model's population. Recorded before the repair runs.
+
+**The measurement.** `data/markets_map.yaml` holds 192 human-confirmed Polymarket-Kalshi pairs.
+M7 has been producing forecasts on **101 markets a day** — and the gap is not selection, it is a
+write defect. 113 of the 192 confirmed Kalshi legs (59%) exist in `markets` only as stubs: category
+NULL, `active = 0`, `tier = 'ignored'`. `tracked_kalshi_markets` selects on `active = 1`, so those
+legs were never snapshotted, and a pair whose external leg has no price cannot contribute an
+external quote to the pool.
+
+**The cause.** The confirmation path's `backfill_kalshi_metadata` wrote four columns with a bare
+`UPDATE` — question, description, end_date_iso, last_synced_ts — while the collector's own path
+writes the full row through `kalshi_market_row` plus a tier assignment. The two write paths drifted,
+and the backfill's early return (`skip if question is set`) then made the half-written state
+permanent: once its own partial write had filled `question`, every later call left the row alone.
+The same NULL category is what crashed the monthly `lab learn` on this date (see the fix committed
+alongside).
+
+**What changes.** The backfill now writes the same full row through the same builder, gating on
+`category` rather than `question` so a genuinely collector-synced leg is still left untouched while
+a stub gets completed. A bounded repair pass over already-confirmed pairs runs inside the existing
+twice-daily pmxt-verify job, ahead of its LLM step, so it costs no tokens and drains the backlog
+over successive runs rather than in one burst.
+
+**Standing under this plan.** M7's population grows from roughly 101 markets a day toward the
+confirmed set of 192, phased over the days the bounded repair takes. **This is recovery of coverage
+that was always confirmed, never a change to the matching rule** — no pair is added, removed or
+re-judged here; `markets_map.yaml` is untouched, and the propose-then-confirm contract (guardrail
+16, §6 M7) is unchanged. The pairs entering the pool are exactly those a human had already
+confirmed, in the order the repair reaches them, which is not a research-relevant ordering.
+
+Two consequences to carry into the analysis. First, M7's coverage is **not comparable across
+2026-08-22**: its per-day n roughly doubles, so any M7 statistic pooling across that date mixes two
+coverage regimes. Second, the 113 recovered pairs have **no external price history before their
+repair date**, so M7 forecasts on them begin then — H3's lead-lag work, which needs both legs'
+histories, gains these pairs only forward. A robustness check restricted to post-2026-08-22 M7
+forecasts is committed here alongside the primary estimate, matching 9.18-9.21.

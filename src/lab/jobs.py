@@ -192,19 +192,28 @@ def run_pmxt_verify_job(config: dict[str, Any]) -> dict[str, Any]:
     markets_map.yaml -- needed once the scan/verify cycle can run on a host
     other than the one that reads the file at forecast time (never blocks or
     re-triggers this job on failure, see commit_and_push_markets_map)."""
-    from lab.models.m7_crossvenue import commit_and_push_markets_map, verify_pmxt_candidates
+    from lab.models.m7_crossvenue import (
+        commit_and_push_markets_map,
+        repair_confirmed_kalshi_legs,
+        verify_pmxt_candidates,
+    )
     from lab.news.extract import create_llm_client
 
     conn = db.connect(config["storage"]["db_path"])
     try:
+        # Before anything LLM-dependent: complete the Kalshi leg of any
+        # already-confirmed pair still recorded as a stub. Deliberately ahead
+        # of the no-LLM early return -- this repair costs no tokens, and a
+        # host without an LLM key still needs its confirmed pairs usable.
+        repair = repair_confirmed_kalshi_legs(conn, config)
         llm = create_llm_client(conn, config)
         if llm is None:
             log.info("pmxt verify job: no LLM configured, skipping")
-            return {"skipped": "no_llm"}
+            return {"skipped": "no_llm", "repair": repair}
         proposals = verify_pmxt_candidates(conn, config, llm)
     finally:
         conn.close()
-    result = {"new_proposals": len(proposals)}
+    result = {"new_proposals": len(proposals), "repair": repair}
     if proposals:
         result["git"] = commit_and_push_markets_map(config)
     log.info("pmxt verify job complete", extra={"ctx": result})

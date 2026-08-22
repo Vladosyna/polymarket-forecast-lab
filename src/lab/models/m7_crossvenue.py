@@ -166,7 +166,8 @@ def reject_match(data: dict[str, Any], condition_id: str, venue: str, external_i
     return True
 
 
-def backfill_kalshi_metadata(conn, ticker: str) -> bool:
+def backfill_kalshi_metadata(conn, ticker: str,
+                             config: dict[str, Any] | None = None) -> bool:
     """Fetch a confirmed Kalshi market's real question and resolution rules.
 
     `db.link_event` deliberately upserts a bare placeholder row for a side its
@@ -196,8 +197,18 @@ def backfill_kalshi_metadata(conn, ticker: str) -> bool:
     from lab.util import now_utc_iso
 
     cid = dbmod.venue_condition_id("kalshi", ticker)
-    row = conn.execute("SELECT question FROM markets WHERE condition_id = ?", (cid,)).fetchone()
-    if row is not None and row["question"]:
+    # Gate on `category`, not `question`. Until 2026-08-22 this wrote four
+    # columns with a bare UPDATE -- question, description, end_date_iso,
+    # last_synced_ts -- and left category NULL, active 0 and tier 'ignored'
+    # on the placeholder row. `tracked_kalshi_markets` selects on
+    # `active = 1`, so the Kalshi leg of such a pair was never snapshotted
+    # and M7 could never use it: 113 of 192 confirmed Kalshi pairs (59%) were
+    # in that state. The old guard also made it permanent -- once the partial
+    # write had set `question`, every later call returned early. Gating on
+    # `category` instead means a genuinely collector-synced row is still left
+    # alone, while a stub gets completed.
+    row = conn.execute("SELECT category FROM markets WHERE condition_id = ?", (cid,)).fetchone()
+    if row is not None and row["category"]:
         return False  # already synced by the collector -- leave it alone
 
     async def _fetch():
@@ -218,15 +229,85 @@ def backfill_kalshi_metadata(conn, ticker: str) -> bool:
                     extra={"ctx": {"ticker": ticker}})
         return False
 
-    conn.execute(
-        "UPDATE markets SET question = ?, description = ?, end_date_iso = ?, "
-        "last_synced_ts = ? WHERE condition_id = ?",
-        (market.title,
-         getattr(market, "rules_primary", None) or getattr(market, "subtitle", None),
-         getattr(market, "close_time", None), now_utc_iso(), cid),
-    )
+    # Write the SAME full row the collector writes, through the same builder,
+    # rather than a hand-listed subset of columns. That is what keeps the two
+    # write paths from drifting apart again -- the drift is what produced the
+    # stubs in the first place.
+    from lab.collect.kalshi_collector import assign_kalshi_tier, kalshi_market_row
+    from lab.util import load_config
+
+    cfg = config if config is not None else load_config()
+    tier, _reason = assign_kalshi_tier(market, cfg)
+    dbmod.upsert_market(conn, {**kalshi_market_row(market, _category_for_ticker(conn, ticker)),
+                               "tier": tier})
     conn.commit()
+    log.info("m7: completed a confirmed pair's kalshi leg",
+             extra={"ctx": {"ticker": ticker, "tier": tier}})
     return True
+
+
+def _category_for_ticker(conn, ticker: str) -> str:
+    """Category for a single Kalshi ticker, without spending a request.
+
+    The universe sync learns a market's category from the Kalshi CATEGORY it
+    was discovered under (`series_by_category`), which a per-ticker fetch does
+    not tell us -- KalshiMarket carries no category field. Siblings do: every
+    ticker starts with its series, so a market from the same series that the
+    collector has already categorized answers it exactly. Falling back to the
+    taxonomy's own "unknown" rather than NULL is deliberate: NULL is what
+    crashed `fit_m2_baserates` on 2026-08-22, and "unknown" is a category the
+    rest of the pipeline already understands."""
+    from lab.collect.categories import _FALLBACK
+
+    series = ticker.split("-")[0]
+    row = conn.execute(
+        "SELECT category FROM markets WHERE venue = 'kalshi' AND category IS NOT NULL "
+        "AND venue_native_id LIKE ? LIMIT 1", (series + "-%",),
+    ).fetchone()
+    return (row["category"] if row else None) or _FALLBACK
+
+
+def repair_confirmed_kalshi_legs(conn, config: dict[str, Any], limit: int = 25,
+                                path: Path | None = None) -> dict[str, Any]:
+    """Complete the Kalshi leg of already-confirmed pairs that were left as stubs.
+
+    `backfill_kalshi_metadata` used to write four columns and leave category
+    NULL / active 0, and its own early-return then made that permanent. The
+    result on 2026-08-22: 113 of 192 confirmed Kalshi pairs had a leg the
+    collector never snapshotted (`tracked_kalshi_markets` selects on
+    `active = 1`), so M7 could not use them -- it was covering 101 markets a
+    day against 192 confirmed pairs. Fixing the write path stops new stubs;
+    this repairs the ones already recorded.
+
+    Bounded per call and safe to repeat: a leg the collector has genuinely
+    synced is skipped by the same `category` gate, so once a pair is whole it
+    costs nothing. `limit` keeps a single run polite -- one request per
+    repaired leg, and the backlog drains over successive runs rather than in
+    one burst."""
+    data = load_markets_map(path)
+    tickers = [e["external_id"] for e in (data.get("confirmed") or [])
+               if e.get("venue") == "kalshi" and e.get("external_id")]
+    if not tickers:
+        return {"checked": 0, "repaired": 0}
+
+    placeholders = ",".join("?" * len(tickers))
+    incomplete = [r["venue_native_id"] for r in conn.execute(
+        f"SELECT venue_native_id FROM markets WHERE venue = 'kalshi' "
+        f"AND category IS NULL AND venue_native_id IN ({placeholders})", tuple(tickers))]
+
+    repaired = 0
+    for ticker in incomplete[:limit]:
+        try:
+            if backfill_kalshi_metadata(conn, ticker, config):
+                repaired += 1
+        except Exception:
+            # Guardrail 9: one unreachable market never stops the pass.
+            log.warning("m7: confirmed-leg repair failed",
+                        extra={"ctx": {"ticker": ticker}})
+    result = {"checked": len(tickers), "incomplete": len(incomplete), "repaired": repaired}
+    if incomplete:
+        log.info("m7: repaired confirmed pairs' kalshi legs", extra={"ctx": result})
+    return result
 
 
 def link_confirmed_event(conn, condition_id: str, venue: str, external_id: str) -> str:

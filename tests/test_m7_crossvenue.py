@@ -892,7 +892,7 @@ def test_run_pmxt_verify_job_skips_cleanly_with_no_llm_and_makes_no_commit(confi
     monkeypatch.setattr("lab.news.extract.create_llm_client", lambda *a, **k: None)
 
     result = jobs.run_pmxt_verify_job({**config, "cross_venue": {"markets_map_push": False}})
-    assert result == {"skipped": "no_llm"}
+    assert result["skipped"] == "no_llm"
     # No LLM -> verify_pmxt_candidates never ran -> nothing to commit either.
     status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True)
     assert status.stdout.strip() == ""
@@ -997,17 +997,25 @@ def test_backfill_populates_an_empty_placeholder(backfill_conn, monkeypatch):
     from lab.models import m7_crossvenue as m7
     from lab.store import db as dbmod
 
-    class _Market:
-        title = "Will Xavier Becerra win the California governorship?"
-        rules_primary = "If Xavier Becerra is elected..."
-        close_time = "2027-11-03T15:00:00Z"
+    from lab.api.kalshi import KalshiMarket
+
+    # A real KalshiMarket, not a duck-typed stand-in: since 2026-08-22 the
+    # backfill writes the same full row the collector writes (category,
+    # active/closed, tier, volumes), so it needs the same fields.
+    _Market = KalshiMarket.model_validate({
+        "ticker": "KXGOVCA-26-XBEC",
+        "title": "Will Xavier Becerra win the California governorship?",
+        "rules_primary": "If Xavier Becerra is elected...",
+        "close_time": "2027-11-03T15:00:00Z", "status": "active",
+        "volume_fp": "9000", "open_interest_fp": "500",
+    })
 
     class _Client:
         def __init__(self, *a, **k):
             pass
 
         async def market(self, ticker):
-            return _Market()
+            return _Market
 
         async def aclose(self):
             pass
@@ -1023,6 +1031,10 @@ def test_backfill_populates_an_empty_placeholder(backfill_conn, monkeypatch):
     row = backfill_conn.execute(
         "SELECT question, description FROM markets WHERE condition_id = ?", (cid,)).fetchone()
     assert row["question"] == _Market.title
+    # and it is now a leg the collector will actually snapshot
+    active = backfill_conn.execute(
+        "SELECT active, category FROM markets WHERE condition_id = ?", (cid,)).fetchone()
+    assert active["active"] == 1 and active["category"]
     assert "Xavier Becerra is elected" in row["description"]
 
 
@@ -1071,3 +1083,126 @@ def test_backfill_failure_does_not_break_confirmation(backfill_conn, monkeypatch
     backfill_conn.commit()
 
     assert m7.backfill_kalshi_metadata(backfill_conn, "KXTEST-1") is False
+
+
+def _fake_client(market=None):
+    """A Kalshi client stub. With no argument it answers each request with a
+    market carrying THAT ticker -- the repair keys the row off the fetched
+    market, so a stub that always returns one ticker would collapse several
+    repairs into a single row."""
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def market(self, ticker):
+            return market if market is not None else _kalshi_market(ticker)
+
+        async def aclose(self):
+            pass
+
+    return _Client
+
+
+def _kalshi_market(ticker: str, status: str = "active"):
+    from lab.api.kalshi import KalshiMarket
+    return KalshiMarket.model_validate({
+        "ticker": ticker, "title": "Will X happen?", "status": status,
+        "rules_primary": "Resolves YES if X.", "close_time": "2027-01-01T00:00:00Z",
+        "volume_fp": "9000", "open_interest_fp": "500",
+    })
+
+
+def test_backfill_completes_the_leg_instead_of_leaving_a_stub(tmp_path, monkeypatch):
+    """Regression, 2026-08-22: the confirmation path wrote four columns with a
+    bare UPDATE and left category NULL, active 0, tier 'ignored'.
+    `tracked_kalshi_markets` selects on `active = 1`, so the Kalshi leg of a
+    confirmed pair was never snapshotted and M7 could not use it -- 113 of 192
+    confirmed pairs (59%) were in that state, while M7 covered 101 markets a
+    day. The leg must come out of this the same shape the collector writes."""
+    import lab.models.m7_crossvenue as m7
+    from lab.store import db
+    from lab.util import load_config
+
+    conn = db.connect(tmp_path / "lab.db")
+    # a sibling the collector already categorized -- the series carries it
+    db.upsert_market(conn, {
+        "condition_id": "kalshi:KXGOVCA-26-AAA", "venue": "kalshi",
+        "venue_native_id": "KXGOVCA-26-AAA", "slug": None, "question": "sibling",
+        "category": "politics", "description": "d", "end_date_iso": "2027-01-01T00:00:00Z",
+        "token_id_yes": None, "token_id_no": None, "neg_risk": 0, "active": 1, "closed": 0,
+        "liquidity_num": 0.0, "volume_num": 1.0, "tier": "tail",
+    })
+    conn.commit()
+
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", _fake_client(_kalshi_market("KXGOVCA-26-BBB")))
+    assert m7.backfill_kalshi_metadata(conn, "KXGOVCA-26-BBB", load_config()) is True
+
+    row = conn.execute("SELECT category, active, closed, tier, question FROM markets "
+                       "WHERE condition_id = ?", ("kalshi:KXGOVCA-26-BBB",)).fetchone()
+    assert row["category"] == "politics"      # inherited from the series sibling
+    assert row["active"] == 1                 # the whole point: it gets snapshotted now
+    assert row["closed"] == 0
+    assert row["tier"] in ("liquid", "tail")  # never left as the placeholder 'ignored'
+    assert row["question"] == "Will X happen?"
+    conn.close()
+
+
+def test_backfill_leaves_a_collector_synced_leg_alone(tmp_path, monkeypatch):
+    """The gate moved from `question` to `category`, so it must still refuse to
+    touch a row the collector owns -- otherwise the repair would overwrite real
+    universe state with a single-ticker fetch."""
+    import lab.models.m7_crossvenue as m7
+    from lab.store import db
+    from lab.util import load_config
+
+    conn = db.connect(tmp_path / "lab.db")
+    db.upsert_market(conn, {
+        "condition_id": "kalshi:KXGOVCA-26-CCC", "venue": "kalshi",
+        "venue_native_id": "KXGOVCA-26-CCC", "slug": None, "question": "real",
+        "category": "politics", "description": "d", "end_date_iso": "2027-01-01T00:00:00Z",
+        "token_id_yes": None, "token_id_no": None, "neg_risk": 0, "active": 1, "closed": 0,
+        "liquidity_num": 0.0, "volume_num": 1.0, "tier": "liquid",
+    })
+    conn.commit()
+
+    class _MustNotFetch:
+        def __init__(self, *a, **k):
+            raise AssertionError("a collector-synced leg must not be re-fetched")
+
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", _MustNotFetch)
+    assert m7.backfill_kalshi_metadata(conn, "KXGOVCA-26-CCC", load_config()) is False
+    conn.close()
+
+
+def test_repair_pass_finds_and_bounds_incomplete_legs(tmp_path, monkeypatch):
+    """The repair walks confirmed pairs, touches only incomplete legs, and is
+    bounded per run so a backlog drains politely instead of in one burst."""
+    import lab.models.m7_crossvenue as m7
+    from lab.store import db
+    from lab.util import load_config
+
+    conn = db.connect(tmp_path / "lab.db")
+    for i in range(5):
+        db.upsert_market(conn, {
+            "condition_id": f"kalshi:KXT-26-{i}", "venue": "kalshi",
+            "venue_native_id": f"KXT-26-{i}", "slug": None, "question": "stub",
+            "category": None, "description": None, "end_date_iso": None,
+            "token_id_yes": None, "token_id_no": None, "neg_risk": 0, "active": 0, "closed": 0,
+            "liquidity_num": None, "volume_num": None, "tier": "ignored",
+        })
+    conn.commit()
+
+    map_path = tmp_path / "markets_map.yaml"
+    m7.save_markets_map({"confirmed": [
+        {"condition_id": f"0x{i}", "venue": "kalshi", "external_id": f"KXT-26-{i}"}
+        for i in range(5)], "proposed": []}, map_path)
+
+    monkeypatch.setattr("lab.api.kalshi.KalshiClient", _fake_client())
+    res = m7.repair_confirmed_kalshi_legs(conn, load_config(), limit=2, path=map_path)
+
+    assert res["checked"] == 5
+    assert res["incomplete"] == 5
+    assert res["repaired"] == 2          # bounded, not all five at once
+    assert conn.execute("SELECT COUNT(*) FROM markets WHERE venue='kalshi' AND active=1"
+                        ).fetchone()[0] == 2
+    conn.close()
