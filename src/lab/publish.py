@@ -102,6 +102,37 @@ def sync_db(results_dir: Path, db_path: Path) -> None:
         src_conn.close()
 
 
+def sync_bootstrap(results_dir: Path, bootstrap_dir: Path) -> int:
+    """Mirror the M1/M1.x training set.
+
+    Synced unconditionally with the curated artifacts rather than behind a
+    raw_data knob: it is one ~50MB file that changes only when the training
+    set is rebuilt, and without it the fitted recalibration curves cannot be
+    reproduced. It is derived from the HuggingFace bootstrap dataset by a
+    filtering step, so it is reconstructible in principle -- but only while
+    that dataset and this repo's filter agree, and at the cost of a 21-27GB
+    download, which is not a backup.
+
+    Found missing on 2026-08-22: the mirror held a 594KB predecessor committed
+    by hand on 2026-07-08, while every refit since 2026-08-02 -- today's
+    included, at n_train 1,967,376 -- has fitted on a 50MB file that had no
+    off-host copy at all. `publish.py` had never mentioned `bootstrap`."""
+    if not bootstrap_dir.exists():
+        return 0
+    dst_root = results_dir / "bootstrap"
+    copied = 0
+    for src_file in bootstrap_dir.rglob("*.parquet"):
+        dst_file = dst_root / src_file.relative_to(bootstrap_dir)
+        if dst_file.exists():
+            src_stat, dst_stat = src_file.stat(), dst_file.stat()
+            if src_stat.st_size == dst_stat.st_size and src_stat.st_mtime <= dst_stat.st_mtime:
+                continue
+        dst_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_file, dst_file)
+        copied += 1
+    return copied
+
+
 def sync_snapshots(results_dir: Path, snapshots_dir: Path) -> int:
     """Mirror new/changed parquet partitions. Older date partitions are
     immutable once written, so this is normally a cheap incremental copy;
@@ -157,6 +188,7 @@ def publish_results(
     sync_reports(results_dir, PROJECT_ROOT / storage["reports_dir"])
     sync_model_artifacts(results_dir, PROJECT_ROOT / storage["models_dir"])
     sync_export(results_dir, conn)
+    n_bootstrap = sync_bootstrap(results_dir, PROJECT_ROOT / "data" / "bootstrap")
     n_snapshots = 0
     if include_snapshots:
         n_snapshots = sync_snapshots(results_dir, PROJECT_ROOT / storage["snapshots_dir"])
@@ -176,6 +208,7 @@ def publish_results(
         return {"committed": False, "reason": "commit_failed", "stderr": commit.stderr}
 
     result = {"committed": True, "ts": ts, "snapshot_files_copied": n_snapshots,
+             "bootstrap_files_copied": n_bootstrap,
              "db_included": include_db, "env_included": include_env}
     if push:
         pushed = _run_git(["push"], results_dir)

@@ -349,3 +349,40 @@ def test_publish_does_not_prune_when_the_push_fails(config, monkeypatch):
 
     assert result.get("pushed") is False
     assert calls == [], "pruned after a failed push -- the local copy may be all there is"
+
+
+def test_sync_bootstrap_mirrors_the_training_set(tmp_path):
+    """Found missing 2026-08-22: publish.py had never mentioned `bootstrap`, so
+    the mirror held a 594KB predecessor committed by hand in July while every
+    refit since 2026-08-02 fitted on a 50MB file with no off-host copy. Without
+    it the recalibration curves cannot be reproduced -- it is derivable from the
+    HuggingFace dataset, but a 21-27GB download is not a backup."""
+    from lab.publish import sync_bootstrap
+
+    src = tmp_path / "bootstrap"
+    src.mkdir()
+    (src / "observations.parquet").write_bytes(b"PAR1" + b"x" * 500)
+    results = tmp_path / "results"
+    results.mkdir()
+
+    assert sync_bootstrap(results, src) == 1
+    mirrored = results / "bootstrap" / "observations.parquet"
+    assert mirrored.read_bytes() == (src / "observations.parquet").read_bytes()
+
+    # unchanged on a second pass -- it is one static file, not a nightly cost
+    assert sync_bootstrap(results, src) == 0
+
+    # ...and a rebuild does propagate
+    (src / "observations.parquet").write_bytes(b"PAR1" + b"y" * 900)
+    assert sync_bootstrap(results, src) == 1
+    assert mirrored.read_bytes() == (src / "observations.parquet").read_bytes()
+
+
+def test_sync_bootstrap_is_a_no_op_without_a_training_set(tmp_path):
+    """A host that has never fetched the bootstrap archive (see OPERATIONS.md,
+    'The M1 training set is a host dependency') must publish normally."""
+    from lab.publish import sync_bootstrap
+
+    results = tmp_path / "results"
+    results.mkdir()
+    assert sync_bootstrap(results, tmp_path / "absent") == 0
