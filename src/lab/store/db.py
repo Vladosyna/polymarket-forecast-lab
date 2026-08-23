@@ -626,7 +626,26 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     # Let the collector and orchestrator analytics connections wait on each
     # other instead of failing with "database is locked" under WAL.
-    conn.execute("PRAGMA busy_timeout=10000")
+    #
+    # 10s -> 30s on 2026-08-23, after seven such failures in one night, all
+    # inside the 02:04-03:04 window: job_resolutions three times, plus
+    # job_manifold_sync, job_sync and job_kalshi_sync. Nothing was lost -- the
+    # next firing half an hour later succeeded and resolutions kept landing at
+    # 106-146/hour -- but a whole collector cycle is skipped each time.
+    #
+    # **This narrows the window; it does not close it, and the reason is worth
+    # knowing before anyone reads a future recurrence as this fix failing.**
+    # The nightly writers hold ONE transaction for their whole run:
+    # `append_forecast` does not commit, `run_forecasts` commits once after
+    # every loop (forecast.py), and `run_eval`/the wealth ledger do the same.
+    # So the forecast pass held a write transaction from 02:00 to 02:20 and
+    # eval from 02:21 to 02:50 -- against which no busy_timeout worth setting
+    # can help. Three of the seven failures landed 4-6 minutes into that
+    # 20-minute transaction. What 30s buys is the SHORT collisions, which is
+    # most of them outside the bundle. Committing those jobs in batches is the
+    # actual fix and is a deliberate change to the ledger's write path, not
+    # something to fold into a timeout bump.
+    conn.execute("PRAGMA busy_timeout=30000")
     if not _schema_is_current(conn):
         _apply_schema_and_migrations(conn)
     conn.set_authorizer(_authorizer)
