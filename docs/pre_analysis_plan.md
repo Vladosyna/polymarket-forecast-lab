@@ -862,3 +862,36 @@ and grows M7's population; this shrinks it by the sports markets that should nev
 They are independent — one is coverage that was always confirmed, the other is coverage that was
 never sanctioned — and the net effect on M7's per-day n is the sum of both, so neither should be
 read as explaining the other.
+**Addendum 9.24 (2026-08-25).** H3 is reclassified from a primary hypothesis (§2) to an exploratory
+outcome (§4). The decision is made on realized statistical power alone, filed before the
+confirmatory window closes rather than reported as a failed test after it.
+
+**The measurement.** H3 asks whether `m7_crossvenue`'s external pool leads Polymarket's own price.
+Scored the way §3 requires — resolved, paired, clustered on `event_id` — M7 holds **1,594 rows that
+compress to 13 event clusters**. The clustering is not a defect here; it is the plan working as
+specified, because the same underlying event listed on two venues is one observation of the world.
+
+**Why more time does not fix it.** This is a ceiling, not slow accrual. M7 forecasts roughly 101
+markets a day drawn from 192 human-confirmed pairs (up from ~79 usable after 9.22's repair), and
+those pairs concentrate onto few distinct events. The §7 floor for even a preliminary claim is 200
+clusters. Eighteen weeks at the observed rate does not close a gap of that size, and neither would
+doubling the confirmed-pair set — the binding constraint is distinct events, not pairs.
+
+**What this decision is, and is not, based on.** It rests on `n` and nothing else. **No H3 skill
+estimate was consulted in reaching it.** That statement needs one qualification to be accurate
+rather than merely reassuring: M7 skill rows have been computed nightly into `eval_runs` since
+2026-08-01 and are rendered in the weekly report, so the estimates exist and were available. The
+claim here is the narrower and checkable one — the reclassification is a function of the cluster
+count, which was knowable in August and is stated above, and not of any outcome. A reader who
+doubts that can verify the arithmetic without reference to any skill number.
+
+**What changes and what does not.** §2 and §4 are not edited; this plan is append-only and this
+addendum governs. H3 continues to be computed, reported, and shown in the same tables as everything
+else, at whatever honesty tier its realized `n` earns — which on present trajectory is INSUFFICIENT.
+It simply no longer gates a confirmatory claim, and no H3 result will be presented as one. The
+cross-venue collection behind it (Phase 10, the markets_map propose-then-confirm flow, guardrail 16)
+is unaffected and continues.
+
+**Why file it now.** The power was knowable on 2026-08-23, when it was measured. Reporting a failed
+confirmatory test at the freeze, on a hypothesis whose insufficiency was established four months
+earlier and left standing, would be a worse account of what happened than this one.
