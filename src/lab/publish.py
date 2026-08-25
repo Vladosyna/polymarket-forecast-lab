@@ -11,6 +11,7 @@ block or re-trigger the forecast/eval/report bundle it follows.
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -168,10 +169,70 @@ def sync_ledger_increment(results_dir: Path, conn: sqlite3.Connection,
                     fh.write(json.dumps(dict(row), separators=(",", ":"), sort_keys=True) + "\n")
                     n += 1
             tmp.replace(dst_dir / f"{day}.jsonl.gz")
+            # A manifest line per dumped day, same shape as the public ledger
+            # commitments: without a recorded row count and digest, a file that
+            # went stale is indistinguishable from a current one, and an
+            # unverifiable backup is a hope rather than a backup. Appended, not
+            # rewritten -- the files it describes are never rewritten either.
+            digest = hashlib.sha256()
+            with open(dst_dir / f"{day}.jsonl.gz", "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(chunk)
+            with open(results_dir / "ledger" / "manifest.jsonl", "a", encoding="utf-8") as mf:
+                mf.write(json.dumps({"table": table, "date": day, "rows": n,
+                                     "sha256": digest.hexdigest(),
+                                     "written_ts": now_utc_iso()},
+                                    separators=(",", ":"), sort_keys=True) + "\n")
             written[table] = written.get(table, 0) + 1
             log.info("ledger increment mirrored",
                      extra={"ctx": {"table": table, "date": day, "rows": n}})
     return written
+
+
+def verify_ledger_increment(results_dir: Path, conn: sqlite3.Connection) -> dict[str, Any]:
+    """Check every mirrored day against the database and against its own digest.
+
+    Two failure modes, deliberately distinguished. `digest_mismatch` means the
+    file on disk is not the file that was written -- corruption or tampering.
+    `row_count_mismatch` means the file is intact but the database now holds a
+    different number of rows for that day, which would mean a CLOSED day gained
+    or lost rows: the invariant both this dump and `ledger_commitment.py` rest
+    on. Batched commits (2026-08-25) make a crash leave a committed prefix
+    rather than nothing, so that invariant is worth checking rather than
+    assuming -- a same-day retry completes the day, but only a check can say
+    so.
+    """
+    manifest = results_dir / "ledger" / "manifest.jsonl"
+    if not manifest.exists():
+        return {"checked": 0, "digest_mismatch": [], "row_count_mismatch": []}
+
+    records: dict[tuple[str, str], dict[str, Any]] = {}
+    with open(manifest, encoding="utf-8") as fh:
+        for line in fh:
+            r = json.loads(line)
+            records[(r["table"], r["date"])] = r      # last write for a day wins
+
+    digest_bad, rows_bad = [], []
+    for (table, day), r in sorted(records.items()):
+        path = results_dir / "ledger" / table / f"{day}.jsonl.gz"
+        if not path.exists():
+            digest_bad.append({"table": table, "date": day, "reason": "missing"})
+            continue
+        digest = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != r["sha256"]:
+            digest_bad.append({"table": table, "date": day, "reason": "digest"})
+        ts_col = LEDGER_TABLES[table]
+        live = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE substr({ts_col}, 1, 10) = ?", (day,)
+        ).fetchone()[0]
+        if live != r["rows"]:
+            rows_bad.append({"table": table, "date": day,
+                             "mirrored": r["rows"], "live": live})
+    return {"checked": len(records), "digest_mismatch": digest_bad,
+            "row_count_mismatch": rows_bad}
 
 
 def sync_bootstrap(results_dir: Path, bootstrap_dir: Path) -> int:

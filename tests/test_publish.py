@@ -491,3 +491,56 @@ def test_ledger_increment_writes_nothing_to_the_database(tmp_path, config):
     assert conn.execute("SELECT COUNT(*), COALESCE(SUM(id), 0) FROM forecasts").fetchone() == before
     assert conn.execute("SELECT COUNT(*) FROM meta WHERE key LIKE 'last_ledger%'").fetchone()[0] == 0
     conn.close()
+
+
+def test_ledger_increment_is_verifiable_against_the_database(tmp_path, config):
+    """An unverifiable backup is a hope, not a backup. The manifest records a
+    row count and digest per day so a stale or corrupted file is
+    distinguishable from a current one -- the same property the public ledger
+    commitments already have."""
+    from lab.publish import sync_ledger_increment, verify_ledger_increment
+    from lab.store import db
+
+    conn = db.connect(config["storage"]["db_path"])
+    _ledger_fixture(conn)
+    results = tmp_path / "led"
+    results.mkdir()
+
+    sync_ledger_increment(results, conn)
+    ok = verify_ledger_increment(results, conn)
+    assert ok["checked"] > 0
+    assert ok["digest_mismatch"] == [] and ok["row_count_mismatch"] == []
+
+
+def test_verifier_separates_corruption_from_a_changed_closed_day(tmp_path, config):
+    """Two failure modes worth telling apart: a file that is not the file that
+    was written (corruption), versus a CLOSED day whose row count moved -- the
+    invariant this dump and ledger_commitment.py both rest on, and the one
+    batched commits made worth checking rather than assuming."""
+    import gzip
+
+    from lab.publish import sync_ledger_increment, verify_ledger_increment
+    from lab.store import db
+    from lab.util import now_utc_iso
+
+    conn = db.connect(config["storage"]["db_path"])
+    _ledger_fixture(conn)
+    results = tmp_path / "led"
+    results.mkdir()
+    sync_ledger_increment(results, conn)
+
+    # corrupt one mirrored file in place
+    victim = results / "ledger" / "forecasts" / "2026-08-20.jsonl.gz"
+    with gzip.open(victim, "wt", encoding="utf-8") as fh:
+        fh.write('{"tampered":true}\n')
+    res = verify_ledger_increment(results, conn)
+    assert [d["date"] for d in res["digest_mismatch"]] == ["2026-08-20"]
+
+    # and make a closed day gain a row in the database
+    db.append_forecast(conn, {"ts": "2026-08-21T09:00:00+00:00", "condition_id": "late",
+                              "model_id": "m0_market", "p_yes": 0.5, "p_market_at_ts": 0.5})
+    conn.commit()
+    res = verify_ledger_increment(results, conn)
+    assert [d["date"] for d in res["row_count_mismatch"]] == ["2026-08-21"]
+    assert res["row_count_mismatch"][0]["live"] == res["row_count_mismatch"][0]["mirrored"] + 1
+    conn.close()
