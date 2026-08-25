@@ -315,3 +315,82 @@ def test_every_collector_interval_job_survives_a_busy_loop(tmp_path):
         await ctx.aclose()
 
     _asyncio.run(_check())
+
+
+def _seed_coverage(conn, model, venue, days, n):
+    """`days` consecutive dates ending 2026-08-20, `n` forecasts each."""
+    import datetime
+
+    from lab.store import db
+    base = datetime.date(2026, 8, 20)
+    for i in range(days):
+        d = (base - datetime.timedelta(days=i)).isoformat()
+        for j in range(n):
+            db.append_forecast(conn, {
+                "ts": f"{d}T02:00:00+00:00", "condition_id": f"{venue}:{model}:{i}:{j}",
+                "model_id": model, "p_yes": 0.5, "p_market_at_ts": 0.5,
+            })
+
+
+def test_coverage_watchdog_catches_a_silent_collapse(tmp_path):
+    """Regression guard for the 2026-08 audit week: a six-day Kalshi blackout,
+    m4_ensemble writing 7 rows against m0's 524, m5_nowcast at exactly zero for
+    six days -- all silent, all costing the resolved clusters H1's power rests
+    on. Each would surface here on the first night."""
+    from lab.collect.status import coverage_regressions
+    from lab.store import db
+
+    conn = db.connect(tmp_path / "lab.db")
+    _seed_coverage(conn, "m0_market", "polymarket", days=10, n=40)   # steady
+    _seed_coverage(conn, "m5_nowcast", "polymarket", days=10, n=40)  # steady...
+    conn.commit()
+
+    # ...then one day where m5 collapses and m0 does not
+    for j in range(40):
+        db.append_forecast(conn, {"ts": "2026-08-21T02:00:00+00:00",
+                                  "condition_id": f"ok{j}", "model_id": "m0_market",
+                                  "p_yes": 0.5, "p_market_at_ts": 0.5})
+    for j in range(3):
+        db.append_forecast(conn, {"ts": "2026-08-21T02:00:00+00:00",
+                                  "condition_id": f"bad{j}", "model_id": "m5_nowcast",
+                                  "p_yes": 0.5, "p_market_at_ts": 0.5})
+    conn.commit()
+
+    regs = coverage_regressions(conn, day="2026-08-21")
+    assert [r["model_id"] for r in regs] == ["m5_nowcast"]
+    assert regs[0]["n"] == 3 and regs[0]["baseline"] == 40.0
+    conn.close()
+
+
+def test_coverage_watchdog_ignores_small_and_sleeping_models(tmp_path):
+    """Coverage varies by design -- M5 covers only weather/macro, M7 only
+    matched pairs -- so each series is compared against ITSELF, and a series
+    too small for a median to mean anything is not compared at all."""
+    from lab.collect.status import coverage_regressions
+    from lab.store import db
+
+    conn = db.connect(tmp_path / "lab.db")
+    _seed_coverage(conn, "m7_crossvenue", "polymarket", days=10, n=4)  # below min_baseline
+    conn.commit()
+    db.append_forecast(conn, {"ts": "2026-08-21T02:00:00+00:00", "condition_id": "z",
+                              "model_id": "m7_crossvenue", "p_yes": 0.5, "p_market_at_ts": 0.5})
+    conn.commit()
+
+    assert coverage_regressions(conn, day="2026-08-21") == []
+    conn.close()
+
+
+def test_coverage_watchdog_defaults_to_the_latest_complete_day(tmp_path):
+    """Called mid-bundle, "today" is a partially written day and every model
+    looks collapsed. The default is the latest day WITH data, and the nightly
+    caller passes its own run date once both passes are done."""
+    from lab.collect.status import coverage_regressions
+    from lab.store import db
+
+    conn = db.connect(tmp_path / "lab.db")
+    _seed_coverage(conn, "m0_market", "polymarket", days=10, n=40)
+    conn.commit()
+
+    # no rows for 2026-08-21 at all: the default target is 08-20, which is fine
+    assert coverage_regressions(conn) == []
+    conn.close()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from bisect import bisect_left
+import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -174,6 +175,73 @@ def memory_budget(units: tuple[str, ...] = LAB_UNITS) -> dict[str, Any] | None:
     }
 
 
+# Coverage-regression watchdog (added 2026-08-25). Every defect found in the
+# 2026-08 audit week was silent and cost exactly the resolved clusters H1's
+# power depends on: a six-day Kalshi blackout (2,676 markets/day -> 15-23),
+# m4_ensemble writing 7 rows against m0's 524 on one day and 12 against 499 on
+# another, m5_nowcast at exactly zero for six days. All three would have shown
+# here on the first night. None was caught by the heartbeat, which only proves
+# the process is alive -- "degraded but running" is the gap this closes.
+COVERAGE_LOOKBACK_DAYS = 14
+COVERAGE_MIN_BASELINE = 20      # below this a median is noise, not a baseline
+COVERAGE_ALERT_RATIO = 0.5      # a day under half a model's own trailing median
+
+
+def coverage_regressions(conn, day: str | None = None,
+                         lookback: int = COVERAGE_LOOKBACK_DAYS,
+                         min_baseline: int = COVERAGE_MIN_BASELINE,
+                         ratio: float = COVERAGE_ALERT_RATIO) -> list[dict[str, Any]]:
+    """Per (model, venue), a day whose forecast count collapsed against that
+    same series' trailing median.
+
+    Compares each model against ITSELF, not against other models: coverage
+    varies by design (M5 only covers weather/macro, M7 only matched pairs), so
+    a cross-model comparison would fire constantly on the sleeping experts the
+    brief deliberately tolerates.
+
+    `day` defaults to the latest date that has any forecasts, NOT to today.
+    That matters: called mid-bundle, "today" is a partially-written day and
+    every model looks collapsed. The nightly caller passes its own run date
+    once both passes are done; `lab status` gets the latest complete day by
+    default. A watchdog that cries wolf is worse than none.
+    """
+    # The window is anchored on `day`, not on date('now'). Anchoring it on now
+    # would make the function behave differently in production (day == today)
+    # than when replayed over history, and a watchdog that cannot be checked
+    # against the incidents it was built for is not one anybody will trust.
+    anchor = day or "now"
+    rows = conn.execute(
+        """SELECT substr(f.ts, 1, 10) AS d, f.model_id AS model_id,
+                  COALESCE(m.venue, 'polymarket') AS venue, COUNT(*) AS n
+           FROM forecasts f LEFT JOIN markets m ON m.condition_id = f.condition_id
+           WHERE substr(f.ts, 1, 10) > date(?, ?) AND substr(f.ts, 1, 10) <= date(?)
+           GROUP BY 1, 2, 3""",
+        (anchor, f"-{lookback + 1} days", anchor),
+    ).fetchall()
+    if not rows:
+        return []
+
+    series: dict[tuple[str, str], dict[str, int]] = {}
+    for r in rows:
+        series.setdefault((r["model_id"], r["venue"]), {})[r["d"]] = r["n"]
+    target = day or max(r["d"] for r in rows)
+
+    out: list[dict[str, Any]] = []
+    for (model_id, venue), by_day in sorted(series.items()):
+        prior = sorted(n for d, n in by_day.items() if d < target)[-lookback:]
+        if len(prior) < 3:
+            continue
+        baseline = statistics.median(prior)
+        if baseline < min_baseline:
+            continue
+        today = by_day.get(target, 0)
+        if today < ratio * baseline:
+            out.append({"model_id": model_id, "venue": venue, "day": target,
+                        "n": today, "baseline": round(baseline, 1),
+                        "ratio": round(today / baseline, 3) if baseline else 0.0})
+    return out
+
+
 def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     now = now_utc()
     conn = dbmod.connect(config["storage"]["db_path"])
@@ -186,6 +254,7 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
         for r in conn.execute("SELECT tier, COUNT(*) AS n FROM markets GROUP BY tier")
     }
     out["forecast_rows"] = conn.execute("SELECT COUNT(*) AS n FROM forecasts").fetchone()["n"]
+    out["coverage_regressions"] = coverage_regressions(conn)
     out["resolutions"] = conn.execute("SELECT COUNT(*) AS n FROM resolutions").fetchone()["n"]
 
     # Snapshot freshness + gaps per tier. Only ts/condition_id/venue are ever
@@ -320,6 +389,14 @@ def format_status(status: dict[str, Any]) -> str:
         f"  markets by tier: {status['markets_by_tier'] or 'none'}",
         f"  forecast rows: {status['forecast_rows']}   resolutions: {status['resolutions']}",
     ]
+    regs = status.get("coverage_regressions") or []
+    if regs:
+        lines.append(f"  !! COVERAGE REGRESSION on {regs[0]['day']} -- {len(regs)} model/venue series:")
+        for r in regs[:8]:
+            lines.append(
+                f"       {r['model_id']}@{r['venue']}: {r['n']} vs median {r['baseline']}"
+                f" ({r['ratio']:.0%} of baseline)"
+            )
     for tier, s in status["tiers"].items():
         age = s["last_snapshot_age_min"]
         age_str = f"{age}min" if age is not None else "never"

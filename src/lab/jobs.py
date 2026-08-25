@@ -49,6 +49,18 @@ def run_forecast_job(config: dict[str, Any]) -> dict[str, Any]:
                         pool_date=ts[:10])
         counts["m4_written"] = run_forecasts(conn, store, [m4], config,
                                              states=states, ts=ts)["written"]
+
+        # Coverage watchdog, after both passes so the day is complete. Logged
+        # at ERROR on purpose: every defect the 2026-08 audit week turned up
+        # was silent and cost resolved clusters the primary hypothesis depends
+        # on, and the heartbeat cannot see "alive but writing nothing".
+        from lab.collect.status import coverage_regressions
+
+        regressions = coverage_regressions(conn, day=ts[:10])
+        counts["coverage_regressions"] = len(regressions)
+        for r in regressions:
+            log.error("coverage regression: model wrote far below its own trailing median",
+                      extra={"ctx": r})
     finally:
         conn.close()
     log.info("forecast job complete", extra={"ctx": counts})
