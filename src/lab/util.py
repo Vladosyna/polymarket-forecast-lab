@@ -121,3 +121,13 @@ def setup_logging(config: dict[str, Any] | None = None, level: int = logging.INF
     file_handler.setFormatter(JsonLinesFormatter())
     file_handler.addFilter(redact)
     root.addHandler(file_handler)
+
+    # httpx logs one INFO line per request. A snapshot round issues thousands,
+    # so the collector wrote ~507,000 lines a day and journald's 300MB cap kept
+    # only the last ~16 hours. That cost real diagnosis three times during the
+    # 2026-08 audit week -- the evidence for the first five days of the Kalshi
+    # blackout, and for a service restart, had already been evicted by the time
+    # anyone looked. Failures still log: this raises the floor to WARNING, it
+    # does not silence the client.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)

@@ -296,6 +296,12 @@ def price_moves_24h(store: SnapshotStore, config: dict[str, Any]) -> dict[str, f
     return moves
 
 
+# Rows per write transaction in run_forecasts. Small enough that the lock is
+# released many times a minute, large enough that commit overhead stays
+# irrelevant against the per-row work (a model call and a snapshot lookup).
+FORECAST_COMMIT_BATCH = 250
+
+
 def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
                   config: dict[str, Any], states: list[MarketState] | None = None,
                   ts: str | None = None) -> dict[str, int]:
@@ -374,6 +380,18 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
                 "trades_24h": None,
             })
             counts["written"] += 1
+            # Bounded write transactions. Until 2026-08-25 this loop committed
+            # ONCE, after every model over every market, so the forecast pass
+            # held a write lock from 02:00 to 02:20 and eval from 02:21 to
+            # 02:50. Any collector job firing inside those windows failed with
+            # "database is locked" and skipped a whole cycle -- seven such
+            # failures in one night, against which no busy_timeout worth
+            # setting can help. Batching also improves the crash case: a run
+            # interrupted mid-way now leaves the rows it had already written
+            # rather than losing all of them, which suits an append-only
+            # ledger exactly.
+            if counts["written"] % FORECAST_COMMIT_BATCH == 0:
+                conn.commit()
     conn.commit()
     # `models` in the log line, not just the counts: the job makes two passes
     # and the 2026-08-14 ensemble outage was invisible for six days partly

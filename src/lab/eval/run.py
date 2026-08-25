@@ -259,6 +259,12 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
 
     out: list[dict[str, Any]] = []
     for model_id in model_ids:
+        # One transaction per model rather than one for the whole run: eval
+        # held a write lock from 02:21 to 02:50 and collector jobs firing in
+        # that window failed with "database is locked". Committing here bounds
+        # it to a single model's work; eval_runs rows are independent, so a
+        # partial run leaves a coherent prefix.
+        conn.commit()
         for venue, categories in venue_categories.items():
             nc_ids = nc_ids_by_venue.get(venue)
             for category in categories:

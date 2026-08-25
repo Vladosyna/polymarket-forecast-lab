@@ -646,6 +646,15 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     # actual fix and is a deliberate change to the ledger's write path, not
     # something to fold into a timeout bump.
     conn.execute("PRAGMA busy_timeout=30000")
+    # WAL hygiene. SQLite never shrinks the -wal file on its own: it reuses the
+    # space in place, so one burst of heavy writing leaves a file that size
+    # forever. Measured 2026-08-25: 1,195MB of WAL beside a 1,302MB database.
+    # That is not a load problem -- iowait was zero -- but crash recovery has to
+    # replay it and every consistent-copy backup has to account for it. The
+    # limit caps the file after each checkpoint; 64MB is comfortably above a
+    # nightly bundle's working set, so it does not force extra checkpoints
+    # during normal writing.
+    conn.execute("PRAGMA journal_size_limit=67108864")
     if not _schema_is_current(conn):
         _apply_schema_and_migrations(conn)
     conn.set_authorizer(_authorizer)
