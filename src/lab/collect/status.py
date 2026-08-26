@@ -257,10 +257,17 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     out["coverage_regressions"] = coverage_regressions(conn)
     out["resolutions"] = conn.execute("SELECT COUNT(*) AS n FROM resolutions").fetchone()["n"]
 
-    # Snapshot freshness + gaps per tier. Only ts/condition_id/venue are ever
-    # read off df7 here -- project to those so a week of history doesn't drag
-    # the order-book JSON blobs into memory (see SnapshotStore.read_range).
-    df7 = store.read_range(_dates_back(now, 7), columns=["ts", "condition_id", "venue"])
+    # Snapshot freshness + gaps per tier.
+    # NOT a seven-day frame. `tier_snapshot_timestamps` reduces one partition at
+    # a time, and its own docstring already described this failure mode for the
+    # report render -- this call site simply never used it. Materialising the
+    # week here cost ~112MB of parquet expanded into polars strings, which fit
+    # under lab-dashboard's 500MB cap while daily partitions were ~8MB and
+    # stopped fitting when the 2026-08-22 concurrency change let the collector
+    # reach its configured cadence and partitions grew to ~19MB. The dashboard
+    # went into an OOM restart loop -- 736 restarts, killed about eight seconds
+    # into each one.
+    dates7 = _dates_back(now, 7)
     cadence = config["collect"]["snapshot_interval_minutes"]
     out["tiers"] = {}
     for tier in ("liquid", "tail"):
@@ -271,19 +278,18 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
                 (tier,),
             )
         ]
-        tier_df = df7.filter(pl.col("condition_id").is_in(markets)) if markets else pl.DataFrame()
-        if tier_df.is_empty():
-            last_age_min = None
-        else:
-            last_ts = datetime.fromisoformat(tier_df.get_column("ts").max()).replace(
-                tzinfo=timezone.utc
-            )
+        ts_sorted = tier_snapshot_timestamps(store, dates7, markets)
+        last_age_min = None
+        if ts_sorted:
+            last_ts = datetime.fromisoformat(ts_sorted[-1]).replace(tzinfo=timezone.utc)
             last_age_min = round((now - last_ts).total_seconds() / 60, 1)
         out["tiers"][tier] = {
             "tracked_markets": len(markets),
             "last_snapshot_age_min": last_age_min,
-            "gaps_24h": snapshot_gaps(df7, markets, cadence[tier], now - timedelta(hours=24), now),
-            "gaps_7d": snapshot_gaps(df7, markets, cadence[tier], now - timedelta(days=7), now),
+            "gaps_24h": len(gaps_from_timestamps(
+                ts_sorted, cadence_buckets(cadence[tier], now - timedelta(hours=24), now))),
+            "gaps_7d": len(gaps_from_timestamps(
+                ts_sorted, cadence_buckets(cadence[tier], now - timedelta(days=7), now))),
         }
 
     # Resolution-watcher lag. `backlog` is the watcher's OWN working set, not
@@ -338,6 +344,19 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     # Per-venue collector health (Phase 10). Kalshi/Metaculus run a snapshot
     # loop; Manifold deliberately does not (guardrail 16: markets+resolutions
     # only, never a price time series) -- no last_snapshot_age for it.
+    # Newest snapshot per venue, from the last two partitions only.
+    venue_last_snapshot: dict[str, datetime] = {}
+    for date in _dates_back(now, 2):
+        vdf = store.read_range([date], columns=["ts", "venue"])
+        if vdf.is_empty():
+            continue
+        for row in vdf.group_by("venue").agg(pl.col("ts").max()).to_dicts():
+            ts = datetime.fromisoformat(row["ts"]).replace(tzinfo=timezone.utc)
+            v = row["venue"] or "polymarket"
+            if v not in venue_last_snapshot or ts > venue_last_snapshot[v]:
+                venue_last_snapshot[v] = ts
+        del vdf
+
     out["venues"] = {}
     for venue in ("kalshi", "metaculus", "manifold"):
         markets_n = conn.execute(
@@ -364,14 +383,13 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
             "closed_unresolved": closed_unresolved,
         }
         if venue in ("kalshi", "metaculus"):
-            vdf = df7.filter(pl.col("venue") == venue) if "venue" in df7.columns else pl.DataFrame()
-            if vdf.is_empty():
-                entry["last_snapshot_age_min"] = None
-            else:
-                last_ts = datetime.fromisoformat(vdf.get_column("ts").max()).replace(
-                    tzinfo=timezone.utc
-                )
-                entry["last_snapshot_age_min"] = round((now - last_ts).total_seconds() / 60, 1)
+            # Two days, not seven: this is "how stale is the newest snapshot",
+            # a question the last partitions answer completely. A venue silent
+            # for more than two days reads as None, which is the alarm anyway.
+            newest = venue_last_snapshot.get(venue)
+            entry["last_snapshot_age_min"] = (
+                round((now - newest).total_seconds() / 60, 1) if newest else None
+            )
         out["venues"][venue] = entry
 
     # Today's LLM spend vs cap.
