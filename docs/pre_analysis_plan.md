@@ -895,3 +895,55 @@ is unaffected and continues.
 **Why file it now.** The power was knowable on 2026-08-23, when it was measured. Reporting a failed
 confirmatory test at the freeze, on a hypothesis whose insufficiency was established four months
 earlier and left standing, would be a worse account of what happened than this one.
+**Addendum 9.25 (2026-08-26).** Kalshi had no event clustering at all, so every confidence interval
+computed for that venue was computed over an inflated `n`. Corrected today, in the direction of
+LESS power, before the confirmatory window closes.
+
+**What was wrong.** §3 makes the event cluster the unit of analysis, and `CLAUDE.md` §7 states the
+reason plainly: "clustering by venue-market would overstate n. Naive CIs would lie." Polymarket has
+complied since Phase 16 — `universe.py::_link_negrisk_legs` groups a negRisk event's legs into one
+shared `event_id` at sync time, and 72.8% of its resolved scored rows carry one. **Kalshi carried
+one on 2 rows out of 28,634.** It had no equivalent mechanism: `KalshiMarket.event_ticker` is parsed
+from every market response and appears exactly once in the whole codebase, in the field declaration.
+It was never stored and never used.
+
+This matters because Kalshi markets are overwhelmingly mutually-exclusive legs of ONE question:
+`KXUSPPIYOY-26AUG13` is 24 threshold buckets of a single PPI release, all sharing one question
+string; `KXPRESPERSON-28` is 18 candidates in one election. Each leg was counted as an independent
+observation of the world.
+
+**Magnitude, measured on the confirmatory window.**
+
+| | as reported | correctly clustered | |
+|---|---|---|---|
+| Kalshi, all resolved | 1,649 (STANDARD) | **243** (PRELIMINARY) | ×6.8 |
+| **Kalshi, H1's ≥30-day bucket** | 193 | **22** | ×8.8 |
+| Polymarket, all resolved | 1,058 | 1,058 | ×1.0 |
+| Polymarket, ≥30-day | 43 | 43 | ×1.0 |
+
+**Verification, because a correction this large should not rest on a heuristic.** Three independent
+checks. The grouping is semantically one event (identical question text across threshold legs; one
+election across candidate legs). The asymmetry is structural, not incidental — Polymarket's 72,617
+linked markets resolve to 6,445 events, of which all but 7 come from negRisk grouping. And the
+derivation `SERIES-EVENT` from the ticker was checked against the live Kalshi API on **40 randomly
+sampled tickers drawn from markets this lab has actually forecast: 40 matches, 0 mismatches**. That
+last check is what licenses backfilling already-resolved markets, which the universe sync will never
+revisit and whose grouping therefore could not be corrected later.
+
+**Consequences for this plan.** H1's realized power is lower than any previous statement of it.
+Kalshi's ≥30-day bucket is 22 event clusters, and its in-flight pipeline of ~606 markets is ~69
+events, so that venue cannot reach even the preliminary tier by the freeze. **H1 now rests entirely
+on Polymarket** — the venue the hypothesis actually names — where the counts are unchanged because
+they were always correct. Kalshi remains useful at 243 clusters across the full window, which is a
+legitimate preliminary tier; it is simply not what it appeared to be.
+
+**Superseded results.** Every `eval_runs` row for a Kalshi venue written before today used the
+inflated clustering, in `n`, in the cluster bootstrap and in the anytime-valid confidence sequence.
+Those rows are superseded, not deleted — the table is a record of what was computed when. Any Kalshi
+figure quoted from before 2026-08-26 must be recomputed before it appears in the paper, and no
+Kalshi interval from that period should be read as valid.
+
+**Direction, stated because it is the whole defence of this addendum.** This correction removes
+power. It was found by auditing whether the study can answer its own questions, it makes the answer
+worse, and it is filed before the freeze rather than discovered afterwards. A correction that moved
+the other way would deserve far more suspicion than this one.

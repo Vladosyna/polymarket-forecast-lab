@@ -541,3 +541,85 @@ def test_snapshot_round_runs_concurrently_within_its_bound(tmp_path):
     assert asyncio.run(snapshot_kalshi_markets(par, store2, markets,
                                                "2026-08-18T00:00:00+00:00", concurrency=4)) == 20
     assert 1 < par.peak <= 4                  # overlapped, and never past the bound
+
+
+def test_kalshi_event_ticker_derives_the_venues_own_grouping():
+    """Kalshi tickers are SERIES-EVENT-OUTCOME and the first two segments are
+    the venue's own event_ticker -- verified against the live API on 40 sampled
+    tickers, 40 matches. That check is what licenses backfilling already
+    resolved markets, which the sync will never revisit."""
+    from lab.store.db import kalshi_event_ticker
+
+    assert kalshi_event_ticker("KXUSPPIYOY-26AUG13-T4.0") == "KXUSPPIYOY-26AUG13"
+    assert kalshi_event_ticker("KXPRESPERSON-28-DTRU") == "KXPRESPERSON-28"
+    assert kalshi_event_ticker("KXGOVCA-26") == "KXGOVCA-26"       # already an event
+    assert kalshi_event_ticker("NOHYPHEN") is None
+    assert kalshi_event_ticker(None) is None
+
+
+def test_kalshi_legs_of_one_event_collapse_to_one_cluster(tmp_path):
+    """Regression, 2026-08-26: Kalshi markets are mutually-exclusive legs of ONE
+    numeric question -- 24 threshold buckets of one PPI release, 18 candidates
+    in one election -- and NONE carried an event_id (2 of 28,634 resolved scored
+    rows, against 72.8% on Polymarket). Every leg therefore counted as its own
+    cluster, inflating the unit every confidence interval is computed over by
+    6.8x, and 8.8x in H1's own >=30-day bucket. The plan forbids exactly this:
+    "clustering by venue-market would overstate n. Naive CIs would lie." """
+    from lab.store import db
+
+    conn = db.connect(tmp_path / "lab.db")
+    legs = ["KXUSPPIYOY-26AUG13-T4.0", "KXUSPPIYOY-26AUG13-T4.1", "KXUSPPIYOY-26AUG13-T4.2"]
+    other = "KXPRESPERSON-28-DTRU"
+    for t in legs + [other]:
+        db.upsert_market(conn, {
+            "condition_id": f"kalshi:{t}", "venue": "kalshi", "venue_native_id": t,
+            "slug": None, "question": "Q?", "category": "economics", "description": "d",
+            "end_date_iso": "2027-01-01T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+            "neg_risk": 0, "active": 1, "closed": 0, "liquidity_num": 1.0, "volume_num": 1.0,
+            "tier": "tail",
+        })
+    conn.commit()
+
+    res = db.migrate_kalshi_event_clusters(conn)
+    assert res["markets_linked"] == 4 and res["events"] == 2
+
+    ids = {r[0] for r in conn.execute(
+        "SELECT event_id FROM markets WHERE venue_native_id LIKE 'KXUSPPIYOY%'")}
+    assert ids == {"kalshi:KXUSPPIYOY-26AUG13"}          # three legs, one cluster
+    assert conn.execute("SELECT event_id FROM markets WHERE venue_native_id = ?",
+                        (other,)).fetchone()[0] == "kalshi:KXPRESPERSON-28"
+
+    # idempotent: a second pass links nothing new
+    assert db.migrate_kalshi_event_clusters(conn)["markets_linked"] == 0
+    conn.close()
+
+
+def test_kalshi_backfill_never_touches_polymarket_or_existing_links(tmp_path):
+    """The migration must not reach beyond its venue, and must not overwrite a
+    grouping some other mechanism already established."""
+    from lab.store import db
+
+    conn = db.connect(tmp_path / "lab.db")
+    db.upsert_market(conn, {
+        "condition_id": "0xpoly", "venue": "polymarket", "venue_native_id": "0xpoly",
+        "slug": "s", "question": "q", "category": "politics", "description": "d",
+        "end_date_iso": "2027-01-01T00:00:00Z", "token_id_yes": "1", "token_id_no": "2",
+        "neg_risk": 1, "active": 1, "closed": 0, "liquidity_num": 1.0, "volume_num": 1.0,
+        "tier": "tail",
+    })
+    db.upsert_market(conn, {
+        "condition_id": "kalshi:KXA-26-X", "venue": "kalshi", "venue_native_id": "KXA-26-X",
+        "slug": None, "question": "q", "category": "economics", "description": "d",
+        "end_date_iso": "2027-01-01T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+        "neg_risk": 0, "active": 1, "closed": 0, "liquidity_num": 1.0, "volume_num": 1.0,
+        "tier": "tail",
+    })
+    conn.execute("UPDATE markets SET event_id = 'evt_preexisting' WHERE condition_id = ?",
+                 ("kalshi:KXA-26-X",))
+    conn.commit()
+
+    db.migrate_kalshi_event_clusters(conn)
+    assert conn.execute("SELECT event_id FROM markets WHERE condition_id='0xpoly'").fetchone()[0] is None
+    assert conn.execute("SELECT event_id FROM markets WHERE condition_id=?",
+                        ("kalshi:KXA-26-X",)).fetchone()[0] == "evt_preexisting"
+    conn.close()

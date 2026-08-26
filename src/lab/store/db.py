@@ -12,7 +12,7 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "12"
+SCHEMA_VERSION = "13"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -570,6 +570,67 @@ def _schema_is_current(conn: sqlite3.Connection) -> bool:
     return row is not None and row[0] == SCHEMA_VERSION
 
 
+def kalshi_event_ticker(venue_native_id: str | None) -> str | None:
+    """The Kalshi event a market belongs to, from its ticker.
+
+    Kalshi tickers are SERIES-EVENT-OUTCOME, and the first two segments are
+    exactly the venue's own `event_ticker`. Verified against the live API on 40
+    randomly sampled tickers drawn from markets this lab has actually forecast:
+    40 matches, 0 mismatches. That check is what licenses using it to backfill
+    ALREADY-RESOLVED markets, which the universe sync will never re-visit and
+    whose grouping therefore cannot be corrected later.
+    """
+    if not venue_native_id or "-" not in venue_native_id:
+        return None
+    parts = venue_native_id.split("-")
+    return "-".join(parts[:2]) if len(parts) >= 2 else None
+
+
+def migrate_kalshi_event_clusters(conn: sqlite3.Connection) -> dict[str, int]:
+    """Idempotent: give every Kalshi market the event_id its own venue assigns it.
+
+    Kalshi markets are overwhelmingly mutually-exclusive legs of ONE numeric
+    question -- 24 threshold buckets of one PPI release, 18 candidates in one
+    election -- and none of them carried an event_id: 2 of 28,634 resolved
+    scored rows, against 72.8% on Polymarket, where `_link_negrisk_legs` has
+    grouped legs at sync time all along. Kalshi had no equivalent, so every leg
+    counted as its own cluster.
+
+    That inflates the unit every confidence interval in this study is computed
+    over. Measured on the confirmatory window: 1,649 scored Kalshi markets are
+    243 events (x6.8), and H1's >=30-day bucket is 22 events, not 193 (x8.8).
+    The pre-analysis plan forbids exactly this in its own words -- "clustering
+    by venue-market would overstate n. Naive CIs would lie."
+
+    Deliberately deterministic (`kalshi:<event_ticker>`) rather than the uuid
+    `link_event` mints for Polymarket: Gamma hands us a list of legs with no
+    natural identifier, so that path has to invent one and propagate it
+    pairwise. Kalshi hands us the identifier, so inventing a second one would
+    only make the mapping unreproducible.
+    """
+    cur = conn.execute(
+        "SELECT condition_id, venue_native_id, question FROM markets "
+        "WHERE venue = 'kalshi' AND event_id IS NULL AND venue_native_id LIKE '%-%'"
+    )
+    updates, events = [], {}
+    for cid, native, question in cur:
+        ticker = kalshi_event_ticker(native)
+        if not ticker:
+            continue
+        event_id = f"kalshi:{ticker}"
+        events.setdefault(event_id, question)
+        updates.append((event_id, cid))
+    if not updates:
+        return {"markets_linked": 0, "events": 0}
+    conn.executemany(
+        "INSERT OR IGNORE INTO events(event_id, title, created_ts) VALUES (?, ?, ?)",
+        [(e, t, now_utc_iso()) for e, t in events.items()],
+    )
+    conn.executemany("UPDATE markets SET event_id = ? WHERE condition_id = ?", updates)
+    conn.commit()
+    return {"markets_linked": len(updates), "events": len(events)}
+
+
 def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     migrate_multi_venue(conn)
@@ -581,6 +642,7 @@ def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     migrate_resolution_checked_ts(conn)
     migrate_close_resolved_markets(conn)
     migrate_microstructure_covariates(conn)
+    migrate_kalshi_event_clusters(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )

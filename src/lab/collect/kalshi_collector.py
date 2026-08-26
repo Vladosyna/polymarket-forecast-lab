@@ -226,6 +226,21 @@ async def sync_kalshi_universe(
                 # X in the ledger" has to be answerable for it too.
                 log_universe_exclusion(conn, "kalshi", m.ticker, reason)
             db.upsert_market(conn, {**row, "tier": tier})
+            # Group the market into its venue's own event, the same job
+            # _link_negrisk_legs does for Polymarket at sync time. Without it
+            # every mutually-exclusive leg counted as an independent cluster
+            # and every Kalshi confidence interval was computed over an inflated
+            # n (x6.8 measured). Deterministic id -- Kalshi supplies the
+            # identifier, so there is nothing to invent.
+            event_ticker = m.event_ticker or db.kalshi_event_ticker(m.ticker)
+            if event_ticker:
+                event_id = f"kalshi:{event_ticker}"
+                conn.execute(
+                    "INSERT OR IGNORE INTO events(event_id, title, created_ts) VALUES (?, ?, ?)",
+                    (event_id, m.title, now_utc_iso()),
+                )
+                conn.execute("UPDATE markets SET event_id = ? WHERE condition_id = ?",
+                             (event_id, row["condition_id"]))
         conn.commit()
 
     log.info("kalshi universe sync complete", extra={"ctx": counts})
