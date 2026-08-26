@@ -80,6 +80,10 @@ than its own MDE is noise by construction. skill_pw is the precision-weighted st
 estimator (brief section 7); a skill claim requires the anytime-valid CS AND skill_pw's own
 CI to both exclude zero and agree in direction.</p>
 {% if skill_rows %}
+<p class="tier-PRELIMINARY">Kalshi results computed before 2026-08-26 are withheld from this table:
+that venue had no event clustering until then, so their n, bootstrap CI and anytime-valid sequence
+were all computed over an inflated unit (PAP addendum 9.25). A Kalshi row absent here has not yet
+been recomputed under correct clustering.</p>
 <table>
 <tr><th>model</th><th>venue</th><th>category</th><th>window</th><th>n rows</th><th>n markets</th><th>tier</th>
 <th>brier model</th><th>brier market</th><th>skill</th><th>95% CI</th><th>MDE</th>
@@ -256,16 +260,35 @@ def latest_eval_rows(conn) -> list[dict]:
     """
     rows = conn.execute(
         """
-        SELECT e.* FROM eval_runs e
+        WITH eligible AS (
+            SELECT * FROM eval_runs
+            WHERE venue IS NOT 'kalshi' OR ts >= :kalshi_cut
+        )
+        SELECT e.* FROM eligible e
         JOIN (SELECT model_id, window_label, venue, category, MAX(ts) AS ts
-              FROM eval_runs GROUP BY model_id, window_label, venue, category) latest
+              FROM eligible GROUP BY model_id, window_label, venue, category) latest
         ON latest.model_id = e.model_id AND latest.window_label = e.window_label
            AND latest.venue IS e.venue AND latest.category IS e.category
            AND latest.ts = e.ts
         ORDER BY e.model_id, e.venue, e.category, e.window_label
-        """
+        """,
+        {"kalshi_cut": KALSHI_CLUSTERING_FIX_TS},
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# Kalshi eval_runs rows written before this date were computed over an inflated
+# n: that venue had no event clustering, so each mutually-exclusive leg of one
+# question counted as an independent observation (x6.8 measured, x8.8 in H1's
+# own >=30-day bucket -- see PAP addendum 9.25). They are superseded rather than
+# deleted, since eval_runs is a record of what was computed when -- but the
+# report must not present them as current.
+#
+# Selecting MAX(ts) per combination would retire most of them on the next
+# nightly run anyway. The case that needs this filter is the one that would not:
+# a (model, venue, category, window) combination that stops being computed
+# leaves its last pre-correction row as the newest forever.
+KALSHI_CLUSTERING_FIX_TS = "2026-08-26"
 
 
 def universe_exclusion_counts(conn, days: int = 30) -> list[dict]:
