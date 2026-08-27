@@ -141,6 +141,10 @@ def sync_ledger_increment(results_dir: Path, conn: sqlite3.Connection,
     recent days go first and the historical backlog fills in behind over
     subsequent nights.
     """
+    # Self-heal first: days mirrored before the manifest existed describe
+    # nothing and cannot be verified until they do.
+    backfill_ledger_manifest(results_dir, conn)
+
     today = now_utc().date().isoformat()
     written: dict[str, int] = {}
     for table, ts_col in LEDGER_TABLES.items():
@@ -187,6 +191,72 @@ def sync_ledger_increment(results_dir: Path, conn: sqlite3.Connection,
             log.info("ledger increment mirrored",
                      extra={"ctx": {"table": table, "date": day, "rows": n}})
     return written
+
+
+def backfill_ledger_manifest(results_dir: Path, conn: sqlite3.Connection) -> dict[str, Any]:
+    """Give already-mirrored days the manifest line they were written without.
+
+    The manifest arrived three days after the dump itself, so the days written
+    in between describe nothing and `verify_ledger_increment` cannot check
+    them -- a gap in exactly the mechanism that exists to make this backup
+    checkable.
+
+    **It reconciles rather than blesses.** A normal manifest line asserts "I
+    wrote N rows out of the database"; a line written after the fact could only
+    assert "this file contains N rows", which would rubber-stamp a file that
+    had already gone stale. So the count is taken from the file, compared
+    against the database for that day, and a line is written ONLY when the two
+    agree. A disagreement is returned for the caller to surface -- that is a
+    closed day whose row count moved, the invariant this dump and
+    ledger_commitment.py both rest on.
+
+    Idempotent, and folded into sync_ledger_increment so it self-heals rather
+    than needing a command someone has to remember to run.
+    """
+    ledger_dir = results_dir / "ledger"
+    if not ledger_dir.exists():
+        return {"backfilled": 0, "mismatched": []}
+
+    manifest = ledger_dir / "manifest.jsonl"
+    have: set[tuple[str, str]] = set()
+    if manifest.exists():
+        with open(manifest, encoding="utf-8") as fh:
+            for line in fh:
+                r = json.loads(line)
+                have.add((r["table"], r["date"]))
+
+    added, mismatched = 0, []
+    for table, ts_col in LEDGER_TABLES.items():
+        for path in sorted((ledger_dir / table).glob("*.jsonl.gz")):
+            day = path.name[: len("2026-08-26")]
+            if (table, day) in have:
+                continue
+            digest = hashlib.sha256()
+            n = 0
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(chunk)
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                for _ in fh:
+                    n += 1
+            live = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE substr({ts_col}, 1, 10) = ?", (day,)
+            ).fetchone()[0]
+            if live != n:
+                mismatched.append({"table": table, "date": day, "file": n, "live": live})
+                log.error("ledger manifest backfill: mirrored day disagrees with the database",
+                          extra={"ctx": mismatched[-1]})
+                continue
+            with open(manifest, "a", encoding="utf-8") as mf:
+                mf.write(json.dumps({"table": table, "date": day, "rows": n,
+                                     "sha256": digest.hexdigest(),
+                                     "written_ts": now_utc_iso(), "backfilled": True},
+                                    separators=(",", ":"), sort_keys=True) + "\n")
+            added += 1
+    if added or mismatched:
+        log.info("ledger manifest backfilled",
+                 extra={"ctx": {"added": added, "mismatched": len(mismatched)}})
+    return {"backfilled": added, "mismatched": mismatched}
 
 
 def verify_ledger_increment(results_dir: Path, conn: sqlite3.Connection) -> dict[str, Any]:

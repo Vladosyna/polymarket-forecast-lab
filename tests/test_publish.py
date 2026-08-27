@@ -544,3 +544,62 @@ def test_verifier_separates_corruption_from_a_changed_closed_day(tmp_path, confi
     assert [d["date"] for d in res["row_count_mismatch"]] == ["2026-08-21"]
     assert res["row_count_mismatch"][0]["live"] == res["row_count_mismatch"][0]["mirrored"] + 1
     conn.close()
+
+
+def test_manifest_backfill_reconciles_rather_than_blesses(tmp_path, config):
+    """The manifest arrived three days after the dump, so days written in
+    between describe nothing and cannot be verified. Backfilling them must NOT
+    rubber-stamp whatever the file happens to contain: the count is taken from
+    the file, compared against the database, and recorded only when the two
+    agree."""
+    import gzip
+    import json
+
+    from lab.publish import backfill_ledger_manifest, sync_ledger_increment, verify_ledger_increment
+    from lab.store import db
+
+    conn = db.connect(config["storage"]["db_path"])
+    _ledger_fixture(conn)
+    results = tmp_path / "led"
+    results.mkdir()
+    sync_ledger_increment(results, conn)
+
+    # simulate the pre-manifest era: drop the manifest, keep the files
+    (results / "ledger" / "manifest.jsonl").unlink()
+    res = backfill_ledger_manifest(results, conn)
+    assert res["backfilled"] > 0 and res["mismatched"] == []
+    assert verify_ledger_increment(results, conn)["row_count_mismatch"] == []
+
+    lines = [json.loads(x) for x in
+             (results / "ledger" / "manifest.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert all(r.get("backfilled") for r in lines)   # marked as reconstructed, not original
+    conn.close()
+
+
+def test_manifest_backfill_refuses_to_certify_a_stale_file(tmp_path, config):
+    """A file whose row count no longer matches the database is exactly the
+    invariant breach this machinery exists to catch. It must be reported, not
+    quietly certified as correct."""
+    import gzip
+
+    from lab.publish import backfill_ledger_manifest, sync_ledger_increment
+    from lab.store import db
+
+    conn = db.connect(config["storage"]["db_path"])
+    _ledger_fixture(conn)
+    results = tmp_path / "led"
+    results.mkdir()
+    sync_ledger_increment(results, conn)
+    (results / "ledger" / "manifest.jsonl").unlink()
+
+    # make one mirrored day disagree with the database
+    victim = results / "ledger" / "forecasts" / "2026-08-21.jsonl.gz"
+    with gzip.open(victim, "wt", encoding="utf-8") as fh:
+        fh.write('{"only":"one row"}\n')
+
+    res = backfill_ledger_manifest(results, conn)
+    assert [m["date"] for m in res["mismatched"]] == ["2026-08-21"]
+    manifest = (results / "ledger" / "manifest.jsonl").read_text(encoding="utf-8")
+    assert "2026-08-21" not in manifest      # refused, not blessed
+    assert "2026-08-20" in manifest          # the intact day still gets one
+    conn.close()
