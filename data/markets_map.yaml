@@ -1982,21 +1982,37 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-22T11:50:26+00:00'
-proposed:
 - condition_id: '0x53742ebde35cbee0ee3ab4241ff24677d4ca8c7ae75089ec455dc0d92d0e3f71'
   question: Will Fernando Tatis Jr. win the 2026 National League MVP Award?
   venue: kalshi
   external_id: KXMLBNLMVP-26-FTAT
   external_question: Will Fernando Tatis Jr. win NL MVP?
-  rationale: 'Both markets resolve on whether Fernando Tatis Jr. wins the 2026 National
-    League MVP Award. The Polymarket question explicitly names Tatis and its resolution
-    criteria confirm it resolves to the NL MVP winner, with Tatis as the specific
-    outcome. The Kalshi market''s ticker and outcome labels confirm the same condition:
-    a Yes if Tatis wins the 2026 NL MVP. Despite slight wording differences regarding
-    ties or season cancellation, the core event and binary outcome are identical.
-    The high confidence reflects strong alignment in event, season, award, and candidate.'
-  confidence: 0.98
-  proposed_ts: '2026-08-22T15:04:45+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-08-23T07:25:59+00:00'
+proposed:
+- condition_id: '0x0d63d3c455553636e58b3a9f5668cab1886d5ded01f126779bcf822820ced174'
+  question: Will Deaglan McEachern win the 2026 New Hampshire Governor Democratic
+    primary election?
+  venue: kalshi
+  external_id: KXGOVNHNOMD-26-DMCE
+  external_question: Will Deaglan McEachern be the Democratic nominee for Governor
+    in New Hampshire?
+  rationale: Both markets resolve to YES if and only if Deaglan McEachern wins the
+    2026 New Hampshire Democratic gubernatorial primary/nomination for the general
+    election. The Polymarket question explicitly asks about 'win the 2026 New Hampshire
+    Governor Democratic primary election,' and its resolution criteria confirm it
+    resolves to the winner of that primary. Kalshi's specific outcome is 'Deaglan
+    McEachern' in the context of being the Democratic nominee for Governor, which
+    is equivalent to winning the primary. The only minor difference is the phrasing
+    of 'primary election' vs. 'nominee,' but in this context they refer to the same
+    event and outcome. No material discrepancies exist, and the underlying event and
+    resolution criteria align. Given the strong textual overlap and consistent criteria,
+    I am highly confident they match.
+  confidence: 0.97
+  proposed_ts: '2026-08-30T21:00:11+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
