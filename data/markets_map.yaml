@@ -2017,6 +2017,25 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x23481b811978194fa175143ed7cd8d0000878ca59c408fd552e33535f7aa771e'
+  question: Will Donald Trump Jr. win the 2028 US Presidential Election?
+  venue: kalshi
+  external_id: KXPRESPERSON-28-DTRUJR
+  external_question: Who will win the next presidential election?
+  rationale: Both markets resolve on whether Donald J. Trump Jr. will be the next
+    person inaugurated as President for the term beginning in 2029. The Polymarket
+    market asks if he wins the 2028 US Presidential Election, resolving to the winner
+    per AP/Fox/NBC or the inaugurated person. The Kalshi market explicitly resolves
+    Yes if he is the next person inaugurated for the term beginning in 2029. These
+    describe the same event and outcome, with the same essential resolution criterion
+    (who is inaugurated after the 2028 election). Minor differences in resolution
+    sources do not affect the identity of the underlying event.
+  confidence: 0.97
+  proposed_ts: '2026-08-31T15:02:53+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
