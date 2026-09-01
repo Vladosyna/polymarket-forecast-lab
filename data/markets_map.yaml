@@ -2036,6 +2036,28 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xc8a2dee57a4c1431e7ea74c00e820e8c3ea58fcbe5d83ebf51dd1b11a08940c2'
+  question: Will the Democratic Party win the popular vote in the 2026 U.S. House
+    of Representatives midterm elections by 16% or more?
+  venue: kalshi
+  external_id: KXHOUSEPOPVOTEMARGIN-27NOV03-B58
+  external_question: Will the Democratic margin of victory in the 2026 U.S. House
+    of Representatives national popular vote be between 16 and 100%?
+  rationale: 'Both markets resolve on the same condition: the Democratic party''s
+    margin over the Republican party in the national popular vote for the 2026 U.S.
+    House of Representatives midterm elections being at least 16 percentage points.
+    Polymarket''s question asks if the Democrats win by 16% or more, and Kalshi''s
+    specific outcome is ''Democrats, 16% and above'' with a range that begins at 16%
+    inclusive. The resolution criteria align on the source and definition of the margin.
+    The only minor difference is Kalshi''s explicit upper bound (exclusive of 100%),
+    which is practically inclusive of all possible margins. Therefore, they are the
+    same event and condition.'
+  confidence: 0.95
+  proposed_ts: '2026-09-01T15:02:56+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
