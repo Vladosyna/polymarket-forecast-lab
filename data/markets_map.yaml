@@ -2099,6 +2099,25 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+- condition_id: '0x63d8f3a34c90bd5342dda8acf62b6a898dfa52f86475efaf180b66493ef6af80'
+  question: Will Jair Bolsonaro win the 2026 Brazilian presidential election?
+  venue: kalshi
+  external_id: KXBRPRES-26-JB
+  external_question: Will Jair Bolsonaro win the 2026 Brazilian presidential election?
+  rationale: Both the Polymarket question and Kalshi market (KXBRPRES-26-JB) specifically
+    ask whether Jair Bolsonaro will win the 2026 Brazilian presidential election.
+    The resolution criteria for both reference the same event and same winner-based
+    outcome. Polymarket mentions the official Brazilian electoral court as arbiter;
+    Kalshi's criteria match the straightforward winner condition. No material conflict
+    exists in event scope (same election, same candidate). The only minor uncertainty
+    is the lack of explicit second-round detail in the Kalshi criteria, but that does
+    not alter the fundamental identity of the outcome being predicted.
+  confidence: 0.95
+  proposed_ts: '2026-09-04T21:00:09+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
