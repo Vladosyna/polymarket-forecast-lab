@@ -1992,50 +1992,16 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-08-23T07:25:59+00:00'
-proposed:
-- condition_id: '0x0d63d3c455553636e58b3a9f5668cab1886d5ded01f126779bcf822820ced174'
-  question: Will Deaglan McEachern win the 2026 New Hampshire Governor Democratic
-    primary election?
-  venue: kalshi
-  external_id: KXGOVNHNOMD-26-DMCE
-  external_question: Will Deaglan McEachern be the Democratic nominee for Governor
-    in New Hampshire?
-  rationale: Both markets resolve to YES if and only if Deaglan McEachern wins the
-    2026 New Hampshire Democratic gubernatorial primary/nomination for the general
-    election. The Polymarket question explicitly asks about 'win the 2026 New Hampshire
-    Governor Democratic primary election,' and its resolution criteria confirm it
-    resolves to the winner of that primary. Kalshi's specific outcome is 'Deaglan
-    McEachern' in the context of being the Democratic nominee for Governor, which
-    is equivalent to winning the primary. The only minor difference is the phrasing
-    of 'primary election' vs. 'nominee,' but in this context they refer to the same
-    event and outcome. No material discrepancies exist, and the underlying event and
-    resolution criteria align. Given the strong textual overlap and consistent criteria,
-    I am highly confident they match.
-  confidence: 0.97
-  proposed_ts: '2026-08-30T21:00:11+00:00'
-  source: pmxt
-  source_meta:
-    relation_type: identity
-    pmxt_confidence: 0.95
 - condition_id: '0x23481b811978194fa175143ed7cd8d0000878ca59c408fd552e33535f7aa771e'
   question: Will Donald Trump Jr. win the 2028 US Presidential Election?
   venue: kalshi
   external_id: KXPRESPERSON-28-DTRUJR
   external_question: Who will win the next presidential election?
-  rationale: Both markets resolve on whether Donald J. Trump Jr. will be the next
-    person inaugurated as President for the term beginning in 2029. The Polymarket
-    market asks if he wins the 2028 US Presidential Election, resolving to the winner
-    per AP/Fox/NBC or the inaugurated person. The Kalshi market explicitly resolves
-    Yes if he is the next person inaugurated for the term beginning in 2029. These
-    describe the same event and outcome, with the same essential resolution criterion
-    (who is inaugurated after the 2028 election). Minor differences in resolution
-    sources do not affect the identity of the underlying event.
-  confidence: 0.97
-  proposed_ts: '2026-08-31T15:02:53+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-03T07:44:41+00:00'
 - condition_id: '0xc8a2dee57a4c1431e7ea74c00e820e8c3ea58fcbe5d83ebf51dd1b11a08940c2'
   question: Will the Democratic Party win the popular vote in the 2026 U.S. House
     of Representatives midterm elections by 16% or more?
@@ -2043,21 +2009,96 @@ proposed:
   external_id: KXHOUSEPOPVOTEMARGIN-27NOV03-B58
   external_question: Will the Democratic margin of victory in the 2026 U.S. House
     of Representatives national popular vote be between 16 and 100%?
-  rationale: 'Both markets resolve on the same condition: the Democratic party''s
-    margin over the Republican party in the national popular vote for the 2026 U.S.
-    House of Representatives midterm elections being at least 16 percentage points.
-    Polymarket''s question asks if the Democrats win by 16% or more, and Kalshi''s
-    specific outcome is ''Democrats, 16% and above'' with a range that begins at 16%
-    inclusive. The resolution criteria align on the source and definition of the margin.
-    The only minor difference is Kalshi''s explicit upper bound (exclusive of 100%),
-    which is practically inclusive of all possible margins. Therefore, they are the
-    same event and condition.'
-  confidence: 0.95
-  proposed_ts: '2026-09-01T15:02:56+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-03T07:44:47+00:00'
+- condition_id: '0x0d63d3c455553636e58b3a9f5668cab1886d5ded01f126779bcf822820ced174'
+  question: Will Deaglan McEachern win the 2026 New Hampshire Governor Democratic
+    primary election?
+  venue: kalshi
+  external_id: KXGOVNHNOMD-26-DMCE
+  external_question: Will Deaglan McEachern be the Democratic nominee for Governor
+    in New Hampshire?
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-03T07:44:50+00:00'
+proposed:
+- condition_id: '0xe1d5733322fd2215f136412f419d9ff805d097f78c68de3261515ff736895f2b'
+  question: Will Eduardo Bolsonaro win the 2026 Brazilian presidential election?
+  venue: kalshi
+  external_id: KXBRPRES-26-EBOL
+  external_question: Will Eduardo Bolsonaro win the 2026 Brazilian presidential election?
+  rationale: 'Both markets concern identical event and outcome: whether Eduardo Bolsonaro
+    wins the 2026 Brazilian presidential election. Polymarket''s criteria explicitly
+    resolve based on the listed candidate winning the election, and this specific
+    market is leg for Eduardo Bolsonaro. Kalshi''s specific outcome (from ticker and
+    labels) is exactly ''Eduardo Bolsonaro wins''. Both reference the same election
+    cycle and the potential runoff, and resolution criteria are substantively aligned.
+    Minor differences in phrasing (e.g., consensus vs official results) do not alter
+    the resolved outcome.'
+  confidence: 0.98
+  proposed_ts: '2026-09-04T15:02:53+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xa59bb6bb91e5c1e4d533864520fbd3bb75d6d0ebb813b4cd8a8b88479bfa8966'
+  question: "Will Carlos Roberto Massa J\xFAnior win the 2026 Brazilian presidential\
+    \ election?"
+  venue: kalshi
+  external_id: KXBRPRES-26-RJUN
+  external_question: "Will Ratinho J\xFAnior win the 2026 Brazilian presidential election?"
+  rationale: "Both markets refer to the same candidate Carlos Roberto Massa J\xFA\
+    nior, commonly known as Ratinho J\xFAnior, winning the 2026 Brazilian presidential\
+    \ election. The Polymarket question names the full legal name while the Kalshi\
+    \ market uses the common nickname in its title and outcome, with the ticker suffix\
+    \ 'RJUN' confirming the same person. Both resolution criteria rely on the official\
+    \ winner of the 2026 election. A minor note: Polymarket's criteria mention potential\
+    \ second round and long-tail resolution timing, but those do not alter the core\
+    \ outcome being identical. The only small uncertainty comes from possible alias\
+    \ ambiguity, but the ticker and context make the match highly reliable."
+  confidence: 0.95
+  proposed_ts: '2026-09-04T15:02:55+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0xdd3d104667774208eae2239f576122ecdd1c04ba81cc14d26d22a36b33887977'
+  question: Will Fernando Haddad win the 2026 Brazilian presidential election?
+  venue: kalshi
+  external_id: KXBRPRES-26-FH
+  external_question: Will Fernando Haddad win the 2026 Brazilian presidential election?
+  rationale: Both markets ask whether Fernando Haddad will win the 2026 Brazilian
+    presidential election, with identical outcome (Yes/Haddad wins) and consistent
+    resolution timing (including potential second round and official TSE results as
+    authority). The Polymarket leg and Kalshi market are exact equivalents.
+  confidence: 1.0
+  proposed_ts: '2026-09-04T15:02:56+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0xafd3f96b7b6084509e625270538ff0699003fafc042263c1216e7f084cef753a'
+  question: Will Aldo Rebelo win the 2026 Brazilian presidential election?
+  venue: kalshi
+  external_id: KXBRPRES-26-AREB
+  external_question: Will Aldo Rebelo win the 2026 Brazilian presidential election?
+  rationale: Both markets specifically ask whether Aldo Rebelo will win the 2026 Brazilian
+    presidential election, with the same real-world event and resolution based on
+    official election results. The Polymarket question and criteria are aligned with
+    the Kalshi specific outcome (Aldo Rebelo wins). The only minor differences are
+    phrasing and possible second-round inclusion, but both ultimately resolve on Rebelo
+    winning the presidency via official/credible results.
+  confidence: 0.95
+  proposed_ts: '2026-09-04T15:02:58+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
